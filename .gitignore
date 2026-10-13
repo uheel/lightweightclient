@@ -1,0 +1,17 @@
+# 依赖与构建产物
+node_modules/
+dist/
+target/
+*.log
+
+# Tauri 生成的权限 schema
+gen/schemas/
+
+# 本机工具配置（保留预览启动配置）
+.claude/*
+!.claude/launch.json
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/

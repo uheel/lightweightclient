@@ -1,0 +1,13 @@
+# 两个客户端的 Rust 部分共用一个 workspace：共享依赖编译缓存（target/），
+# 第二个客户端不用再从头编译 tauri 等依赖。
+[workspace]
+resolver = "3"
+members = ["apps/ops/src-tauri", "apps/user/src-tauri"]
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
