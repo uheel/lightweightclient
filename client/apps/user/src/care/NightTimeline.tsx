@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import {
   presenceRuns,
+  reportCoverEnd,
   RADAR_PRESENCE,
   STAGE_ORDER,
   STAGES,
@@ -109,8 +110,8 @@ export default function NightTimeline({
   const t0 = Math.min(...starts);
   const t1 = Math.max(...ends, t0 + 60_000);
   const x = (t: number) => ((t - t0) / (t1 - t0)) * W;
-  /** 报告统计窗口的结束时间；之后睡眠报告没有数据，只有设备数据 */
-  const reportEnd = parseTime(r.endAt);
+  /** 报告监测范围的结束时间（约 08:00）；之后睡眠报告没有数据，只有设备数据 */
+  const reportEnd = reportCoverEnd(r);
   const cutPct = reportEnd !== undefined && reportEnd < t1 ? ((reportEnd - t0) / (t1 - t0)) * 100 : undefined;
   // 雷达位置：有心率呼吸的分钟算在床（见 presenceRuns 的说明）
   // 判断在床：设备每分钟记录与报告附带序列取并集，任一份这一分钟有心率或呼吸就算在床；
@@ -337,7 +338,7 @@ export default function NightTimeline({
         {!series.length && <span className="muted">这一晚没有心率呼吸数据</span>}
         {cutPct !== undefined && reportEnd !== undefined && lastVital > reportEnd && (
           <span className="report-cut-note">
-            睡眠报告统计到 {dayjs(reportEnd).format("HH:mm")} 截止，设备最后测到心率呼吸是 {dayjs(lastVital).format("HH:mm")}
+            睡眠报告只统计到 {dayjs(reportEnd).format("HH:mm")}，设备最后测到心率呼吸是 {dayjs(lastVital).format("HH:mm")}
           </span>
         )}
         <span className="muted">

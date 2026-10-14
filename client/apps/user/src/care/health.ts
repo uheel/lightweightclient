@@ -92,7 +92,11 @@ export interface SleepReport {
   bedName?: string;
   /** 报告来源，见 SLEEP_SOURCES */
   reportSource?: number;
-  /** 报告的统计窗口（平台固定窗口，例如到 08:00 截止；醒来 / 起床时间可能只是窗口结束时间） */
+  /**
+   * 睡眠时段（入睡 → 醒来），不是监测范围。
+   * 报告的监测范围是固定的晚上 20:00 到早上 08:00（睡眠分段都在这个范围内）；
+   * 到 08:00 人还在睡时，醒来 / 起床都记为 08:00，此时 endAt 也是 08:00
+   */
   startAt?: string;
   endAt?: string;
   sleepScoreText?: string;
@@ -432,4 +436,19 @@ export function getOrgSleepReports(
   orgReportCache = { key, at: Date.now(), data };
   data.catch(() => (orgReportCache = null));
   return data;
+}
+
+/** 报告监测范围的结束时间：最后一个睡眠分段的结束与起床时间中较晚者（通常约 08:00） */
+export function reportCoverEnd(r: SleepReport): number | undefined {
+  const segEnd = r.sleepDetails?.length ? Math.max(...r.sleepDetails.map((s) => s.endTime)) : undefined;
+  const up = r.getUpTime ? Date.parse(r.getUpTime.replace(" ", "T")) : undefined;
+  const xs = [segEnd, up].filter((x): x is number => x !== undefined && !Number.isNaN(x));
+  return xs.length ? Math.max(...xs) : undefined;
+}
+
+/** 醒来时间是否只是被监测范围截断（到范围结束时仍在睡） */
+export function wakeCutByCover(r: SleepReport) {
+  const end = reportCoverEnd(r);
+  const wake = r.wakeUpTime ? Date.parse(r.wakeUpTime.replace(" ", "T")) : undefined;
+  return end !== undefined && wake !== undefined && wake >= end - 60_000;
 }

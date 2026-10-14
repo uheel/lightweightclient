@@ -20,6 +20,7 @@ import {
   getPostureTimeline,
   getVitalMinutes,
   stageCodesOf,
+  wakeCutByCover,
   stageMinutesOf,
   type MemberInfo,
   type SleepReport,
@@ -278,7 +279,7 @@ function SleepSummary({ r }: { r: SleepReport }) {
             <dt>入睡 / 醒来</dt>
             <dd className="mono">
               {derived.fallAsleep} – {derived.wakeUp}
-              {r.endAt && r.wakeUpTime === r.endAt && <small className="report-cut">报告截止</small>}
+              {wakeCutByCover(r) && <small className="report-cut">报告截止</small>}
             </dd>
           </div>
         </dl>
