@@ -210,7 +210,7 @@ export default function NightTimeline({
                     {s.label} <b className="mono">{info.values[i] ?? "—"}</b> {info.values[i] !== undefined ? s.unit : ""}
                   </div>
                 ))}
-                {/* 离床 ≠ 不在房间：雷达监测整个房间，人起来活动时照样测得到心率呼吸，但活动中的数值不如静卧时准确 */}
+                {/* 离床只表示不在床上：人离床后仍在雷达探测范围内活动时，平台照样记录心率呼吸，但活动中的数值不如静卧时准确 */}
                 {info.leave && info.values.some((v) => v !== undefined) && <div className="night-tip-note">离床活动中测得，仅供参考</div>}
               </div>
             </>
