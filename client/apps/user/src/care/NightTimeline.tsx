@@ -100,13 +100,18 @@ export default function NightTimeline({
 
   // 共同的时间范围：睡眠分段、上床 / 起床时间、心率呼吸数据，取并集
   const starts = [segs[0]?.startTime, parseTime(r.bedTime), ...series.map((s) => s.points[0]?.t)].filter((x): x is number => x !== undefined);
-  const ends = [segs.length ? segs[segs.length - 1].endTime : undefined, parseTime(r.getUpTime), ...series.map((s) => s.points[s.points.length - 1]?.t)].filter(
+  // 结束：报告的分段 / 起床时间，以及设备最后一次测到心率呼吸后 10 分钟（报告窗口截止后人可能还在床上）
+  const lastVital = Math.max(0, ...series.map((s) => s.points[s.points.length - 1]?.t ?? 0));
+  const ends = [segs.length ? segs[segs.length - 1].endTime : undefined, parseTime(r.getUpTime), lastVital ? Math.min(Date.now(), lastVital + 10 * 60_000) : undefined].filter(
     (x): x is number => x !== undefined,
   );
   if (!starts.length || !ends.length) return null;
   const t0 = Math.min(...starts);
   const t1 = Math.max(...ends, t0 + 60_000);
   const x = (t: number) => ((t - t0) / (t1 - t0)) * W;
+  /** 报告统计窗口的结束时间；之后睡眠报告没有数据，只有设备数据 */
+  const reportEnd = parseTime(r.endAt);
+  const cutPct = reportEnd !== undefined && reportEnd < t1 ? ((reportEnd - t0) / (t1 - t0)) * 100 : undefined;
   // 雷达位置：有心率呼吸的分钟算在床（见 presenceRuns 的说明）
   // 判断在床：设备每分钟记录与报告附带序列取并集，任一份这一分钟有心率或呼吸就算在床；
   // 报告趋势每 10 分钟一个点，把这一点覆盖的 10 分钟都算上
@@ -147,6 +152,9 @@ export default function NightTimeline({
     const conflict =
       !!run &&
       ((stageKey === "leave" && run.state === "bed") || ((stageKey === "deep" || stageKey === "light" || stageKey === "rem") && run.state !== "bed"));
+    if (cutPct !== undefined && reportEnd !== undefined && t >= reportEnd) {
+      return { stage: "报告未覆盖", leave: false, radar: run?.state as RadarPresence | undefined, targets, conflict: false, values };
+    }
     return {
       stage: stageKey ? STAGES[stageKey].label : "无数据",
       leave: stageKey === "leave",
@@ -205,6 +213,7 @@ export default function NightTimeline({
 
         <div className="night-plot" ref={box} onMouseMove={onMove} onMouseLeave={() => setHover(undefined)}>
           <div className="night-stage">
+            {cutPct !== undefined && <span className="night-uncovered" style={{ left: `${cutPct}%`, right: 0 }} title="睡眠报告未覆盖这段时间" />}
             {segs.map((s, i) => {
               const k = codes[s.status];
               return k ? (
@@ -279,6 +288,11 @@ export default function NightTimeline({
           {ticks.map((t) => (
             <i key={t} className="night-grid" style={{ left: `${(x(t) / W) * 100}%` }} />
           ))}
+          {cutPct !== undefined && reportEnd !== undefined && (
+            <i className="night-cut" style={{ left: `${cutPct}%` }}>
+              <em>报告截止 {dayjs(reportEnd).format("HH:mm")}</em>
+            </i>
+          )}
 
           {hover !== undefined && info && (
             <>
@@ -321,6 +335,11 @@ export default function NightTimeline({
           );
         })}
         {!series.length && <span className="muted">这一晚没有心率呼吸数据</span>}
+        {cutPct !== undefined && reportEnd !== undefined && lastVital > reportEnd && (
+          <span className="report-cut-note">
+            睡眠报告统计到 {dayjs(reportEnd).format("HH:mm")} 截止，设备最后测到心率呼吸是 {dayjs(lastVital).format("HH:mm")}
+          </span>
+        )}
         <span className="muted">
           鼠标移到图上查看每个时刻的数值{source ? ` · 心率呼吸来自${source}` : ""}
         </span>

@@ -224,3 +224,8 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .rule-text small { color: #8A8FA8; font-size: 12px; }
 .rule-hit { text-align: right; color: #9A5B00; font-size: 13px; }
 .side-head .ant-btn { color: #5B6078; }
+.night-uncovered { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, #F1F2F7 0 6px, #E4E6EF 6px 12px); }
+.night-cut { position: absolute; top: -14px; bottom: 22px; width: 0; border-left: 1.5px dashed #8A8FA8; pointer-events: none; }
+.night-cut em { position: absolute; top: -4px; left: 4px; font-style: normal; font-size: 11px; color: #5B6078; white-space: nowrap; background: #fff; padding: 0 3px; }
+.report-cut { margin-left: 6px; font-size: 11px; font-weight: 400; color: #9A5B00; }
+.report-cut-note { color: #9A5B00; }

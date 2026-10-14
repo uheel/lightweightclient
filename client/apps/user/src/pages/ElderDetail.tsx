@@ -92,7 +92,8 @@ export default function ElderDetail({
     const startC = [segs[0]?.startTime, p(report.bedTime)].filter((x): x is number => !!x && !Number.isNaN(x));
     const endC = [segs[segs.length - 1]?.endTime, p(report.getUpTime)].filter((x): x is number => !!x && !Number.isNaN(x));
     const start = startC.length ? Math.min(...startC) : night.subtract(1, "day").hour(20).valueOf();
-    const end = endC.length ? Math.max(...endC) : night.hour(9).valueOf();
+    // 报告有固定的统计窗口（例如到 08:00 截止），人可能之后才起床；设备数据在报告结束后多取 3 小时
+    const end = Math.min(Date.now(), (endC.length ? Math.max(...endC) : night.hour(9).valueOf()) + 3 * 3_600_000);
     // 设备每分钟上报的心率呼吸：曲线和"在床"判断都以它为准（报告附带的序列是平台加工的，偶有空缺）
     getVitalMinutes(member.memberId, start, end).then(
       (v) => !cancelled && setVitals(v),
@@ -277,6 +278,7 @@ function SleepSummary({ r }: { r: SleepReport }) {
             <dt>入睡 / 醒来</dt>
             <dd className="mono">
               {derived.fallAsleep} – {derived.wakeUp}
+              {r.endAt && r.wakeUpTime === r.endAt && <small className="report-cut">报告截止</small>}
             </dd>
           </div>
         </dl>

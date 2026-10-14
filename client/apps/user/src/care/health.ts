@@ -92,6 +92,9 @@ export interface SleepReport {
   bedName?: string;
   /** 报告来源，见 SLEEP_SOURCES */
   reportSource?: number;
+  /** 报告的统计窗口（平台固定窗口，例如到 08:00 截止；醒来 / 起床时间可能只是窗口结束时间） */
+  startAt?: string;
+  endAt?: string;
   sleepScoreText?: string;
   sleepDescription?: string;
   /** 每分钟心率 / 呼吸（sleep-report 接口自带，毫秒时间戳） */
@@ -318,6 +321,8 @@ export function sourcesOf(member: { devices?: { deviceType?: number }[] }) {
 
 interface RawSleepReport {
   reportDate: string;
+  startAt?: string;
+  endAt?: string;
   reportSource?: number;
   sleepScore?: number;
   sleepScoreText?: string;
@@ -349,6 +354,8 @@ export async function getSleepReport(memberId: string, date: string, source: num
     reportSource: d.reportSource ?? source,
     sleepScore: d.sleepScore || undefined,
     sleepScoreText: d.sleepScoreText,
+    startAt: d.startAt,
+    endAt: d.endAt,
     sleepDescription: d.sleepDescription,
     bedTime: d.bedTime,
     fallAsleepTime: d.fallAsleepTime,
