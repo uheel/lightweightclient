@@ -175,8 +175,8 @@ export default function CareHome() {
 
         <section>
           <div className="side-head">
-            <h2>今日需关注</h2>
-            <span className="muted">来自昨夜监测</span>
+            <h2>今日需关注{attention.total ? ` ${attention.total} 位` : ""}</h2>
+            <span className="muted">{attention.total > attention.items.length ? `显示前 ${attention.items.length} 位` : "来自昨夜监测"}</span>
           </div>
           {attention.items.length === 0 ? (
             <p className="muted">今天没有需要特别关注的长者</p>

@@ -183,7 +183,7 @@ export default function HealthPage() {
             </div>
             <div className="card stat warn">
               <small>今日需关注</small>
-              <b className="mono">{data?.attentionTotal ?? attention.total}</b>
+              <b className="mono">{attention.total}</b>
             </div>
           </div>
 

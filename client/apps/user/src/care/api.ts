@@ -88,8 +88,12 @@ export const ATTENTION_REASON: Record<string, string> = {
   highAhi: "呼吸紊乱指数偏高",
 };
 
-/** 今日需关注名单（根据昨夜监测和告警判定，来自健康驾驶舱） */
-export async function getAttention(limit = 10) {
+/**
+ * 今日需关注名单（平台按每位长者的设备来源、昨夜监测和告警判定）。
+ * total 是真实总数；items 平台最多只返回 20 条，且没有分页参数。
+ * 注意：健康驾驶舱 /api/cockpit/v2/elder/dashboard 的 attentionTotal 只统计 AIO 来源，数字偏小，不要用。
+ */
+export async function getAttention(limit = 20) {
   const res = await api.get<{ total: number; items: AttentionItem[] }>("/api/cockpit/elder/attention", { params: { limit } });
   return res.data ?? { total: 0, items: [] };
 }
