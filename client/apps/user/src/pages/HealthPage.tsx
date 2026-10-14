@@ -4,12 +4,11 @@ import type { TableColumnsType } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { useCare } from "../care/CareContext";
-import { getHealthOverview, getOrgSleepReports, hm, minutesText, scoreLevel, SLEEP_SOURCES, type HealthOverview, type SleepReport } from "../care/health";
+import { getOrgSleepReports, hm, minutesText, scoreLevel, SLEEP_SOURCES, type SleepReport } from "../care/health";
 
 /** 健康：机构所有长者的昨夜睡眠一览（按每位长者的设备来源查询），点一行进入长者详情 */
 export default function HealthPage() {
   const { s, members, attention, openElder } = useCare();
-  const [data, setData] = useState<HealthOverview>();
   const [reports, setReports] = useState<SleepReport[]>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -20,8 +19,7 @@ export default function HealthPage() {
     if (!members.length) return;
     setLoading(true);
     setError(undefined);
-    // 概况（在院人数、需关注人数）仍取驾驶舱；报告列表逐个长者按来源查
-    getHealthOverview(s.orgId, force).then(setData, () => {});
+    // 不使用驾驶舱数据：所有统计由逐个长者按来源查到的报告在客户端计算
     setProgress(0);
     getOrgSleepReports(s.orgId, members, today, force, setProgress)
       .then(setReports, (e) => setError(e instanceof Error ? e.message : String(e)))
@@ -161,7 +159,7 @@ export default function HealthPage() {
           <div className="stat-grid">
             <div className="card stat">
               <small>在院长者</small>
-              <b className="mono">{data?.summary?.inHospitalElderCount ?? members.length}</b>
+              <b className="mono">{members.length}</b>
             </div>
             <div className="card stat">
               <small>昨夜有睡眠报告</small>

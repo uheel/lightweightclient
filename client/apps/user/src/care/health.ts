@@ -124,37 +124,6 @@ export interface SleepReport {
   heartRateTrend?: number[];
 }
 
-export interface HealthOverview {
-  reportDate: string;
-  summary?: { inHospitalElderCount?: number; validMonitoringCount?: number; todayAttentionCount?: number };
-  attentionTotal?: number;
-  reports: SleepReport[];
-}
-
-/**
- * 机构内所有长者"昨夜"的睡眠报告与概况（健康驾驶舱的数据源，带评分、效率、趋势）。
- * 一次取整个机构，缓存 10 分钟，长者详情和健康总览共用。
- */
-let overviewCache: { orgId: string; at: number; data: Promise<HealthOverview> } | null = null;
-
-export function getHealthOverview(orgId: string, force = false) {
-  if (!force && overviewCache && overviewCache.orgId === orgId && Date.now() - overviewCache.at < 10 * 60_000) return overviewCache.data;
-  const data = api
-    .get<{ reportDate: string; summary?: HealthOverview["summary"]; attentionTotal?: number; sleepReports?: SleepReport[] }>(
-      "/api/cockpit/v2/elder/dashboard",
-      { params: { reportLimit: 1000, rankingLimit: 1, attentionLimit: 1 } },
-    )
-    .then((r) => ({ reportDate: r.data?.reportDate ?? "", summary: r.data?.summary, attentionTotal: r.data?.attentionTotal, reports: r.data?.sleepReports ?? [] }));
-  overviewCache = { orgId, at: Date.now(), data };
-  data.catch(() => (overviewCache = null));
-  return data;
-}
-
-export async function getLastNightReports(orgId: string) {
-  const o = await getHealthOverview(orgId);
-  return new Map(o.reports.map((x) => [x.memberId, x]));
-}
-
 /** 单个长者某一天的睡眠分期（健康画像接口；没有评分，用于驾驶舱里没有这位长者时兜底） */
 export async function getPortraitSleep(memberId: string, date: string) {
   const r = await api.get<{ sleepReport?: Omit<SleepReport, "memberId" | "reportDate"> }>("/api/health/portrait-report", {

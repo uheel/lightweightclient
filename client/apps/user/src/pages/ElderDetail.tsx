@@ -8,7 +8,6 @@ import { ATTENTION_REASON } from "../care/api";
 import NightTimeline from "../care/NightTimeline";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
-  getLastNightReports,
   getMemberSleepReport,
   SLEEP_SOURCES,
   getMemberInfo,
@@ -64,12 +63,13 @@ export default function ElderDetail({
     setPostures(undefined);
     getMemberInfo(member.memberId).then((x) => !cancelled && setInfo(x), () => {});
 
-    // 昨夜睡眠：按长者绑定设备对应的报告来源（AIO / Ultra / UltraFall …）查询；
-    // 都没有时用驾驶舱报告（只有 AIO），再不行用健康画像兜底（没有评分）
+    // 昨夜睡眠：按长者绑定设备对应的报告来源（AIO / Ultra / UltraFall …）查询，没有再用健康画像兜底（没有评分）。
+    // 不使用驾驶舱数据：驾驶舱只统计 AIO 来源，而且平台的汇总页面有不少问题
     const today = dayjs().format("YYYY-MM-DD");
-    getMemberSleepReport(member, today)
-      .then(async (r) => (r?.sleepScore !== undefined ? r : ((await getLastNightReports(orgId).catch(() => undefined))?.get(member.memberId) ?? r ?? null)))
-      .then((r) => !cancelled && setReport(r), () => !cancelled && setReport(null));
+    getMemberSleepReport(member, today).then(
+      (r) => !cancelled && setReport(r ?? null),
+      () => !cancelled && setReport(null),
+    );
 
     // 近 7 天睡眠时长（同样按来源逐天查询）
     const days = Array.from({ length: 7 }, (_, i) => dayjs().subtract(6 - i, "day").format("YYYY-MM-DD"));
