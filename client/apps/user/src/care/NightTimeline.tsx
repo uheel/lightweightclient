@@ -106,7 +106,12 @@ export default function NightTimeline({
   const t0 = Math.min(...starts);
   const t1 = Math.max(...ends, t0 + 60_000);
   const x = (t: number) => ((t - t0) / (t1 - t0)) * W;
-  const runs = postures?.length ? presenceRuns(postures, t0, t1) : undefined;
+  // 雷达位置：有心率呼吸的分钟算在床（见 presenceRuns 的说明）
+  // 每分钟数据直接用；报告趋势每 10 分钟一个点，把这一点覆盖的 10 分钟都算上
+  const vitalTimes = series.flatMap((s) =>
+    s.points.flatMap((p) => (s.gap > 5 * 60_000 ? Array.from({ length: TREND_STEP / 60_000 }, (_, k) => p.t + k * 60_000) : [p.t])),
+  );
+  const runs = postures?.length || vitalTimes.length ? presenceRuns(postures ?? [], t0, t1, vitalTimes) : undefined;
 
   // 整点刻度（范围太长时每 2 小时一个）
   const every = (t1 - t0) / 3_600_000 > 10 ? 2 : 1;

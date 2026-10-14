@@ -325,3 +325,4 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `GET /api/health/sleep-report?memberId&date&source&windowMinutes=1`（雷达类来源带 windowMinutes=1）：完整报告，字段有 `sleepScore, sleepScoreText, sleepDescription, sleepSummary{各阶段分钟}, metrics{sleepEfficiency, timeInBed, leaveBedCount, awakeCount, avgHeartRate, avgBreathingRate, ahi…}, bedTime/fallAsleepTime/wakeUpTime/getUpTime, sleepDetails[], heartRate[{timestamp,value}], breathingRate[], apnea[]`（心率呼吸约每分钟一个点，共 720 个）
 - **健康驾驶舱 `/api/cockpit/v2/elder/dashboard` 的 sleepReports 只有 AIO 来源**：藕塘社区 40 位长者里 38 位用 UltraFall，驾驶舱只列出 1 位；按来源逐个查询能拿到 31 位
 - **报告是第一次被请求时才生成的**：首次请求可能要几秒到几十秒，之后约 100ms。批量查询时不要设短超时
+- **判断"在床"用心率呼吸，不用姿态**（2026-10-14 与用户确认）：设备只有人平躺时才报姿态"在床"，翻身、坐起会报成"坐""静止"，但人还在床上。实测 3楼05床 10-14 05:15–06:05：下床走开的 05:29–05:53 每分钟心率呼吸全无，05:54 回床立刻恢复；仅起身那几分钟（坐床边）仍有读数。客户端"雷达位置"一行据此判断：有心率呼吸 = 在床，无心率呼吸但有跟踪目标 = 在房间，都没有 = 未检测到人

@@ -240,7 +240,7 @@ const IN_BED_POSTURES = new Set([6, 9, 10, 11]);
 export type RadarPresence = "bed" | "room" | "none";
 
 export const RADAR_PRESENCE: Record<RadarPresence, { label: string; color: string }> = {
-  bed: { label: "在床", color: "#2E9F6B" },
+  bed: { label: "在床（测到心率呼吸）", color: "#2E9F6B" },
   room: { label: "在房间（不在床）", color: "#E08A3C" },
   none: { label: "未检测到人", color: "#F1F2F7" },
 };
@@ -254,23 +254,35 @@ export interface PresenceRun {
 }
 
 /**
- * 合并所有目标，按分钟得到雷达位置：任一目标在床 → 在床；有目标但都不在床 → 在房间；没有目标 → 未检测到人。
- * 连续相同状态合并成一段。
+ * 按分钟得到雷达位置，连续相同状态合并成一段：
+ * - 在床：这一分钟测到了心率或呼吸
+ * - 在房间（不在床）：没有心率呼吸，但雷达跟踪到有人（任一目标）
+ * - 未检测到人：两样都没有
+ *
+ * 为什么不按姿态判断在床：设备只有人平躺时才报"在床"，夜里翻身、坐起会报成"坐""静止"，
+ * 但人其实还在床上。实测（藕塘社区 3楼05床，10-14 05:15–06:05）心率呼吸与是否在床吻合：
+ * 下床走开的 25 分钟里一分钟都没有，回到床上立刻恢复；只有起身的几分钟（坐在床边）仍有读数。
+ * vitalTimes 为空（这一晚没有心率呼吸数据，比如设备不支持）时，退回按姿态判断。
  */
-export function presenceRuns(segs: PostureSeg[], start: number, end: number): PresenceRun[] {
+export function presenceRuns(segs: PostureSeg[], start: number, end: number, vitalTimes: number[] = []): PresenceRun[] {
   const MIN = 60_000;
   const n = Math.max(0, Math.ceil((end - start) / MIN));
   const bed = new Uint8Array(n);
   const any = new Uint8Array(n);
   const ids: Set<number>[] = Array.from({ length: n }, () => new Set());
+  const byVitals = vitalTimes.length > 0;
   for (const s of segs) {
     const a = Math.max(0, Math.floor((s.start - start) / MIN));
     const b = Math.min(n, Math.ceil((s.end - start) / MIN));
     for (let i = a; i < b; i++) {
       any[i] = 1;
       ids[i].add(s.userId);
-      if (IN_BED_POSTURES.has(s.posture)) bed[i] = 1;
+      if (!byVitals && IN_BED_POSTURES.has(s.posture)) bed[i] = 1;
     }
+  }
+  for (const t of vitalTimes) {
+    const i = Math.floor((t - start) / MIN);
+    if (i >= 0 && i < n) bed[i] = 1;
   }
   const runs: PresenceRun[] = [];
   for (let i = 0; i < n; i++) {
