@@ -5,6 +5,8 @@ import { api } from "@radar/core";
 export interface MemberDevice {
   deviceId: string;
   sn: string;
+  /** 设备类型：6 AIO，12 Ultra 呼吸睡眠，13 UltraFall，15 Ultra Plus …（决定睡眠报告来源） */
+  deviceType?: number;
   isOnline?: boolean;
   /** 设备监测的区域，例如"房间""卫生间" */
   rangeName?: string;
@@ -113,4 +115,27 @@ export async function getAlert(id: string) {
  */
 export async function processAlert(id: string, alertProcessTypeId: string, processingResults: string) {
   await api.put("/api/alert/process", { id, alertProcessTypeId, processingResults });
+}
+
+export interface AlertRecord extends CareAlert {
+  alertProcessTypeName?: string;
+  processingResults?: string;
+  processByUserName?: string;
+  processAt?: string;
+}
+
+/** 用户端可见的告警分组（离线、安装姿态属于运维，不出现） */
+export const ALERT_GROUPS = [
+  { value: 2, label: "事件告警" },
+  { value: 1, label: "场景告警" },
+  { value: 4, label: "紧急求助" },
+];
+
+/** 告警分页查询（服务端分页，按时间倒序）。时间范围格式 "YYYY-MM-DD HH:mm:ss,YYYY-MM-DD HH:mm:ss" */
+export async function getAlertPage(q: { group: number; status?: 1 | 2; range?: [string, string]; current: number; pageSize: number }) {
+  const res = await api.get<AlertRecord[]>("/api/alert/pages", {
+    params: { current: q.current, pageSize: q.pageSize },
+    filter: { alertTypeGroup: q.group, alertStatus: q.status, createdAt: q.range ? q.range.join(",") : undefined },
+  });
+  return { list: res.data ?? [], total: res.total ?? 0 };
 }

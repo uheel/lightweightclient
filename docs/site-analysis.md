@@ -309,7 +309,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `GET /api/alert/pages?filter[memberId]=` | **memberId 筛选不生效**，按长者筛选告警只能取最近的告警后在本地过滤 `members[]` |
 
 **睡眠报告字段**：`sleepScore, bedTime, fallAsleepTime, wakeUpTime, getUpTime`（"YYYY-MM-DD HH:mm:ss"），`totalSleepMinutes, totalNightSleepMinutes, deepSleepMinutes, lightSleepMinutes, remSleepMinutes, awakeMinutes, outOfBedMinutes, timeInBed`（分钟），`sleepEfficiency`（%），`leaveBedCount, awakeCount, avgHeartRate, avgBreathingRate, ahi`，`sleepDetails[{status, startTime, endTime}]`（毫秒），`heartRateTrend / breathingTrend`（从入睡开始每 10 分钟一个点，≤0 表示没有数据）
-- **睡眠分段状态（实测）**：1 深睡，2 浅睡，3 清醒，4 离床，5 眼动。用 16 份真实报告核对过，按分段累计的时长与汇总字段吻合。**网页端代码里定义的是 1 清醒 / 2 眼动 / 3 浅睡 / 4 深睡 / 7 离床，和实际数据对不上，所以网页端睡眠结构的颜色是错的（建议反馈给平台）**。汇总里的清醒 / 离床只算入睡后的部分
+- **睡眠分段状态**：1 深睡，2 浅睡，3 清醒，4 离床，5 眼动，6 入睡潜伏期（平台健康模块的枚举 sH，common 模块 27905；与 16 份真实报告核对一致）。网页端另有一个 1 清醒 / 2 快速眼动 / 3 浅睡 / 4 深睡 / 7 离床 的枚举，那是设备实时睡眠状态用的，**不是**报告分段的编码（早前误以为网页端显示有误，已更正）。汇总里的清醒 / 离床只算入睡后的部分
 - 每分钟心率呼吸：`radar-vital-minute-pages` 支持 `filter[minuteAt]=开始,结束`（"YYYY-MM-DD HH:mm:ss"），一晚约 600 条，可以一次取完
 - 网页端的评分分级：≥80 良好，≥70 一般，其余为需关注
 - **睡眠报告的"离床"与雷达位置经常不一致**（2026-10-14 核对藕塘社区两例）：
@@ -317,3 +317,11 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
   - 3楼16床，报告离床 20:01–23:13；雷达显示大部分时间有目标在床，且同时跟踪 3～4 个目标（可能同屋有人）
   - 结论：平台内部睡眠报告与位置数据矛盾，原因待平台确认。客户端在夜间时间线上加了"雷达位置"一行对照显示
 - **姿态时间线 `posture-timeline` 不传 userId 时只返回目标 1**（不是截断）。雷达给每个跟踪目标编号，人离开后再回来常变成新编号（上例回床后是目标 2），同屋有人时也会同时有多个目标，所以要按 userId=1..N 逐个查后合并
+
+## 睡眠报告按来源查询（2026-10-14）
+
+- **睡眠报告有多个来源**（枚举 gX）：1 AIO（睡眠-AIO），2 戒指，3 Ultra，4 手表，5 UltraFall，6 Ultra Plus。网页端"报告记录"里的"睡眠-AIO / 睡眠-戒指 …"几列就是它
+- **长者用哪个来源取决于设备类型**：deviceType 6 AIO → 1，12 Ultra 呼吸睡眠 → 3，13 UltraFall → 5，15 Ultra Plus → 6
+- `GET /api/health/sleep-report?memberId&date&source&windowMinutes=1`（雷达类来源带 windowMinutes=1）：完整报告，字段有 `sleepScore, sleepScoreText, sleepDescription, sleepSummary{各阶段分钟}, metrics{sleepEfficiency, timeInBed, leaveBedCount, awakeCount, avgHeartRate, avgBreathingRate, ahi…}, bedTime/fallAsleepTime/wakeUpTime/getUpTime, sleepDetails[], heartRate[{timestamp,value}], breathingRate[], apnea[]`（心率呼吸约每分钟一个点，共 720 个）
+- **健康驾驶舱 `/api/cockpit/v2/elder/dashboard` 的 sleepReports 只有 AIO 来源**：藕塘社区 40 位长者里 38 位用 UltraFall，驾驶舱只列出 1 位；按来源逐个查询能拿到 31 位
+- **报告是第一次被请求时才生成的**：首次请求可能要几秒到几十秒，之后约 100ms。批量查询时不要设短超时

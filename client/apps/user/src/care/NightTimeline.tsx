@@ -17,8 +17,9 @@ import {
  * 鼠标悬停时一条竖线贯穿三行，提示框显示该时刻的睡眠阶段、心率、呼吸。
  *
  * 心率呼吸数据来源（优先级从高到低）：
- * 1. 每分钟数据 vitals（radar-vital-minute-pages，每分钟一个点）
- * 2. 报告里的 heartRateTrend / breathingTrend（从入睡时间起每 10 分钟一个点，<= 0 表示没有数据）
+ * 1. 睡眠报告自带的每分钟数据 hrPoints / brPoints（/api/health/sleep-report）
+ * 2. 每分钟数据 vitals（radar-vital-minute-pages）
+ * 3. 驾驶舱报告里的 heartRateTrend / breathingTrend（从入睡时间起每 10 分钟一个点，<= 0 表示没有数据）
  */
 const TREND_STEP = 10 * 60_000;
 const W = 1000;
@@ -67,21 +68,34 @@ export default function NightTimeline({
     const fromTrend = (vals?: number[]): Point[] =>
       trendStart === undefined ? [] : (vals ?? []).flatMap((v, i) => (v > 0 ? [{ t: trendStart + i * TREND_STEP, v }] : []));
     const useMinutes = !!vitals?.some((p) => p.hr || p.rr);
-    const mk = (label: string, color: string, minute: (p: VitalPoint) => number | undefined, trend?: number[], avg?: number): Series => {
-      const points = useMinutes
-        ? (vitals ?? []).flatMap((p) => {
-            const v = minute(p);
-            return v ? [{ t: p.t, v }] : [];
-          })
-        : fromTrend(trend);
+    const mk = (
+      label: string,
+      color: string,
+      own: Point[] | undefined,
+      minute: (p: VitalPoint) => number | undefined,
+      trend?: number[],
+      avg?: number,
+    ): Series => {
+      let points: Point[];
+      let fine = true;
+      if (own?.length) points = own;
+      else if (useMinutes)
+        points = (vitals ?? []).flatMap((p) => {
+          const v = minute(p);
+          return v ? [{ t: p.t, v }] : [];
+        });
+      else {
+        points = fromTrend(trend);
+        fine = false;
+      }
       const mean = points.length ? Math.round(points.reduce((n, p) => n + p.v, 0) / points.length) : undefined;
-      return { label, unit: "次/分", color, points, gap: useMinutes ? 5 * 60_000 : TREND_STEP * 1.5, avg: useMinutes ? mean : (avg ?? mean) };
+      return { label, unit: "次/分", color, points, gap: fine ? 5 * 60_000 : TREND_STEP * 1.5, avg: avg ?? mean };
     };
     return [
-      mk("心率", "#E5484D", (p) => p.hr, r.heartRateTrend, r.avgHeartRate),
-      mk("呼吸", "#3B4FD8", (p) => p.rr, r.breathingTrend, r.avgBreathingRate),
+      mk("心率", "#E5484D", r.hrPoints, (p) => p.hr, r.heartRateTrend, r.avgHeartRate),
+      mk("呼吸", "#3B4FD8", r.brPoints, (p) => p.rr, r.breathingTrend, r.avgBreathingRate),
     ].filter((s) => s.points.length);
-  }, [vitals, r.heartRateTrend, r.breathingTrend, r.avgHeartRate, r.avgBreathingRate, trendStart]);
+  }, [vitals, r.hrPoints, r.brPoints, r.heartRateTrend, r.breathingTrend, r.avgHeartRate, r.avgBreathingRate, trendStart]);
 
   // 共同的时间范围：睡眠分段、上床 / 起床时间、心率呼吸数据，取并集
   const starts = [segs[0]?.startTime, parseTime(r.bedTime), ...series.map((s) => s.points[0]?.t)].filter((x): x is number => x !== undefined);
@@ -133,7 +147,7 @@ export default function NightTimeline({
   };
   const info = hover !== undefined ? at(hover) : undefined;
   const hoverPct = hover !== undefined ? ((hover - t0) / (t1 - t0)) * 100 : 0;
-  const source = vitals?.some((p) => p.hr || p.rr) ? "每分钟数据" : series.length ? "报告趋势（每 10 分钟）" : "";
+  const source = r.hrPoints?.length || r.brPoints?.length ? "睡眠报告（每分钟）" : vitals?.some((p) => p.hr || p.rr) ? "每分钟数据" : series.length ? "报告趋势（每 10 分钟）" : "";
 
   return (
     <div className="night">

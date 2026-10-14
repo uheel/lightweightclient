@@ -1,10 +1,8 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, Empty, Skeleton } from "antd";
-import type { Session } from "@radar/core";
-import { useCareData } from "../care/useCareData";
+import { useCare } from "../care/CareContext";
 import { alertLocation, careState, sinceText, TONE_STYLE, type CareState } from "../care/state";
-import { ATTENTION_REASON, type CareAlert, type Member } from "../care/api";
-import ElderDetail from "./ElderDetail";
+import { ATTENTION_REASON, type Member } from "../care/api";
 
 type Filter = "all" | "attention" | "bed" | "away" | "paused";
 
@@ -34,21 +32,9 @@ function match(f: Filter, st: CareState, m: Member, attention: Set<string>) {
 /** 告警优先，其次需留意，再按床位排序 */
 const TONE_ORDER = { alert: 0, warn: 1, active: 2, bed: 3, idle: 4, unknown: 5 } as const;
 
-export default function CareHome({
-  s,
-  alerts,
-  onProcess,
-}: {
-  s: Session;
-  /** 待处理告警（应用层 useAlertWatcher 统一维护） */
-  alerts: { list: CareAlert[]; total: number };
-  onProcess: (a: CareAlert) => void;
-}) {
-  const { members, attention, alertByMember, liveOf, loading, error, now } = useCareData(s.orgId, alerts.list);
+export default function CareHome() {
+  const { s, alerts, members, attention, alertByMember, liveOf, loading, error, now, openElder, process: setProcessing } = useCare();
   const [filter, setFilter] = useState<Filter>("all");
-  const setProcessing = onProcess;
-  /** 正在查看详情的长者 */
-  const [selected, setSelected] = useState<string>();
 
   const attentionIds = useMemo(() => new Set(attention.items.map((a) => a.memberId)), [attention.items]);
 
@@ -64,26 +50,11 @@ export default function CareHome({
     for (const f of FILTERS) c[f.key] = rows.filter((r) => match(f.key, r.st, r.m, attentionIds)).length;
     return c;
   }, [rows, attentionIds]);
-  const selectedMember = selected ? members.find((m) => m.memberId === selected) : undefined;
   const visible = rows.filter((r) => match(filter, r.st, r.m, attentionIds));
   const inRoom = rows.filter((r) => r.st.tone !== "idle" && r.st.tone !== "unknown").length;
 
   return (
     <div className="care">
-      {selectedMember ? (
-        <main className="care-main">
-          <ElderDetail
-            orgId={s.orgId}
-            member={selectedMember}
-            live={liveOf(selectedMember)}
-            alert={alertByMember[selectedMember.memberId]}
-            attention={attention.items.find((a) => a.memberId === selectedMember.memberId)}
-            now={now}
-            onBack={() => setSelected(undefined)}
-            onProcess={onProcess}
-          />
-        </main>
-      ) : (
       <main className="care-main">
         <div className="care-head">
           <div>
@@ -126,9 +97,9 @@ export default function CareHome({
                   key={m.memberId}
                   className={`elder-card clickable tone-${st.tone}`}
                   style={{ borderColor: tone.border }}
-                  onClick={() => setSelected(m.memberId)}
+                  onClick={() => openElder(m.memberId)}
                   tabIndex={0}
-                  onKeyDown={(e) => e.key === "Enter" && setSelected(m.memberId)}
+                  onKeyDown={(e) => e.key === "Enter" && openElder(m.memberId)}
                 >
                   <div className="elder-who">
                     <span className="elder-avatar" style={{ background: tone.bg, color: tone.color }}>
@@ -171,7 +142,6 @@ export default function CareHome({
           </div>
         )}
       </main>
-      )}
 
       <aside className="care-side">
         <section>

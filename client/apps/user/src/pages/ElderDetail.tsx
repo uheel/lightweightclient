@@ -9,8 +9,9 @@ import NightTimeline from "../care/NightTimeline";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
   getLastNightReports,
+  getMemberSleepReport,
+  SLEEP_SOURCES,
   getMemberInfo,
-  getPortraitSleep,
   getRecentAlertsOf,
   minutesText,
   scoreLevel,
@@ -63,15 +64,16 @@ export default function ElderDetail({
     setPostures(undefined);
     getMemberInfo(member.memberId).then((x) => !cancelled && setInfo(x), () => {});
 
-    // 昨夜睡眠：优先用驾驶舱报告（带评分和趋势），没有再用健康画像兜底
+    // 昨夜睡眠：按长者绑定设备对应的报告来源（AIO / Ultra / UltraFall …）查询；
+    // 都没有时用驾驶舱报告（只有 AIO），再不行用健康画像兜底（没有评分）
     const today = dayjs().format("YYYY-MM-DD");
-    getLastNightReports(orgId)
-      .then(async (map) => map.get(member.memberId) ?? (await getPortraitSleep(member.memberId, today)) ?? null)
+    getMemberSleepReport(member, today)
+      .then(async (r) => (r?.sleepScore !== undefined ? r : ((await getLastNightReports(orgId).catch(() => undefined))?.get(member.memberId) ?? r ?? null)))
       .then((r) => !cancelled && setReport(r), () => !cancelled && setReport(null));
 
-    // 近 7 天睡眠时长（健康画像按天查询）
+    // 近 7 天睡眠时长（同样按来源逐天查询）
     const days = Array.from({ length: 7 }, (_, i) => dayjs().subtract(6 - i, "day").format("YYYY-MM-DD"));
-    Promise.all(days.map((d) => getPortraitSleep(member.memberId, d).catch(() => undefined))).then(
+    Promise.all(days.map((d) => getMemberSleepReport(member, d).catch(() => undefined))).then(
       (rs) => !cancelled && setWeek(days.map((d, i) => ({ date: d, minutes: rs[i]?.totalNightSleepMinutes ?? rs[i]?.totalSleepMinutes }))),
     );
 
@@ -79,6 +81,7 @@ export default function ElderDetail({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, member.memberId]);
 
   // 报告加载后，按这一晚的时间范围取每分钟心率呼吸（比报告里每 10 分钟一个点更细）
@@ -92,10 +95,12 @@ export default function ElderDetail({
     const endC = [segs[segs.length - 1]?.endTime, p(report.getUpTime)].filter((x): x is number => !!x && !Number.isNaN(x));
     const start = startC.length ? Math.min(...startC) : night.subtract(1, "day").hour(20).valueOf();
     const end = endC.length ? Math.max(...endC) : night.hour(9).valueOf();
-    getVitalMinutes(member.memberId, start, end).then(
-      (v) => !cancelled && setVitals(v),
-      () => !cancelled && setVitals([]),
-    );
+    if (report.hrPoints?.length || report.brPoints?.length) setVitals([]);
+    else
+      getVitalMinutes(member.memberId, start, end).then(
+        (v) => !cancelled && setVitals(v),
+        () => !cancelled && setVitals([]),
+      );
     // 同一时段的雷达位置（所有跟踪目标），用来和睡眠报告对照
     const sns = (member.devices ?? []).map((d) => d.sn).filter(Boolean);
     if (sns.length)
@@ -168,7 +173,10 @@ export default function ElderDetail({
 
       <div className="detail-grid">
         <section className="card detail-sleep">
-          <h2>昨夜睡眠{report?.reportDate ? ` · ${dayjs(report.reportDate).subtract(1, "day").format("M 月 D 日")}晚` : ""}</h2>
+          <h2>
+            昨夜睡眠{report?.reportDate ? ` · ${dayjs(report.reportDate).subtract(1, "day").format("M 月 D 日")}晚` : ""}
+            {report?.reportSource && SLEEP_SOURCES[report.reportSource] ? <span className="source-tag">睡眠-{SLEEP_SOURCES[report.reportSource]}</span> : null}
+          </h2>
           {report === undefined ? (
             <Skeleton active />
           ) : report === null ? (

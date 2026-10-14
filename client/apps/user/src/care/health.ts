@@ -19,7 +19,7 @@ export async function getMemberInfo(memberId: string) {
   return (await api.get<MemberInfo>("/api/member/info", { params: { memberId } })).data;
 }
 
-export type StageKey = "deep" | "light" | "rem" | "awake" | "leave";
+export type StageKey = "deep" | "light" | "rem" | "awake" | "leave" | "latency";
 
 export const STAGES: Record<StageKey, { label: string; color: string }> = {
   deep: { label: "深睡", color: "#3B4FD8" },
@@ -27,18 +27,16 @@ export const STAGES: Record<StageKey, { label: string; color: string }> = {
   rem: { label: "眼动", color: "#B48CF2" },
   awake: { label: "清醒", color: "#F5C26B" },
   leave: { label: "离床", color: "#E5484D" },
+  latency: { label: "入睡潜伏", color: "#C9CEDF" },
 };
-export const STAGE_ORDER: StageKey[] = ["deep", "light", "rem", "awake", "leave"];
+export const STAGE_ORDER: StageKey[] = ["deep", "light", "rem", "awake", "leave", "latency"];
 
 /**
- * 睡眠分段 status 的编码（2026-10-14 用藕塘社区、象屿慈爱共 16 份真实报告核对，按分段累计的深睡 / 浅睡 / 眼动时长与汇总字段误差在几分钟内）：
- * - 实际数据（青岚雷达，reportSource 1 和 5 都是）：1 深睡，2 浅睡，3 清醒，4 离床，5 眼动
- * - 网页端代码里的定义（标准）：1 清醒，2 眼动，3 浅睡，4 深睡，7 离床。和实际数据对不上，网页端的睡眠结构颜色因此是错的
- * 这里先用分段与汇总字段比对来判断，以后有设备真的按"标准"编码上报，也能自动识别。
- * 汇总里的清醒 / 离床只算入睡后的部分，所以这两项与分段累计可能差得较多，判断时以深睡 / 浅睡 / 眼动为主。
+ * 睡眠分段 status 编码：平台健康模块的枚举（common 模块 27905 的 sH），
+ * 与真实数据核对一致（按分段累计的时长与汇总字段吻合）：
+ * 1 深睡，2 浅睡，3 清醒，4 离床，5 眼动，6 入睡潜伏期
  */
-const STANDARD: Record<number, StageKey> = { 1: "awake", 2: "rem", 3: "light", 4: "deep", 7: "leave" };
-const QINGLAN: Record<number, StageKey> = { 1: "deep", 2: "light", 3: "awake", 4: "leave", 5: "rem" };
+const PLATFORM: Record<number, StageKey> = { 1: "deep", 2: "light", 3: "awake", 4: "leave", 5: "rem", 6: "latency" };
 
 function segMinutes(segs: SleepSegment[], codes: Record<number, StageKey>) {
   const m: Partial<Record<StageKey, number>> = {};
@@ -49,26 +47,8 @@ function segMinutes(segs: SleepSegment[], codes: Record<number, StageKey>) {
   return m;
 }
 
-/** 判断一份报告用的是哪套编码：拿分段累计时长和汇总字段比，误差小的就是 */
-export function stageCodesOf(r: SleepReport & { reportSource?: number }): Record<number, StageKey> {
-  const segs = r.sleepDetails ?? [];
-  if (segs.some((s) => s.status === 5)) return QINGLAN;
-  const summary: Partial<Record<StageKey, number | undefined>> = {
-    deep: r.deepSleepMinutes,
-    light: r.lightSleepMinutes,
-    rem: r.remSleepMinutes,
-    awake: r.awakeMinutes,
-    leave: r.outOfBedMinutes,
-  };
-  const known = STAGE_ORDER.filter((k) => summary[k] !== undefined);
-  if (segs.length && known.length >= 3) {
-    const err = (codes: Record<number, StageKey>) => {
-      const m = segMinutes(segs, codes);
-      return known.reduce((n, k) => n + Math.abs((m[k] ?? 0) - (summary[k] ?? 0)), 0);
-    };
-    return err(QINGLAN) < err(STANDARD) ? QINGLAN : STANDARD;
-  }
-  return r.reportSource === 5 ? QINGLAN : STANDARD;
+export function stageCodesOf(_r?: SleepReport): Record<number, StageKey> {
+  return PLATFORM;
 }
 
 /** 各阶段时长（分钟）：有分段明细时按明细统计，否则用汇总字段 */
@@ -76,9 +56,9 @@ export function stageMinutesOf(r: SleepReport, codes: Record<number, StageKey>):
   const segs = r.sleepDetails ?? [];
   if (segs.length) {
     const m = segMinutes(segs, codes);
-    return { deep: m.deep ?? 0, light: m.light ?? 0, rem: m.rem ?? 0, awake: m.awake ?? 0, leave: m.leave ?? 0 };
+    return { deep: m.deep ?? 0, light: m.light ?? 0, rem: m.rem ?? 0, awake: m.awake ?? 0, leave: m.leave ?? 0, latency: m.latency ?? 0 };
   }
-  return { deep: r.deepSleepMinutes, light: r.lightSleepMinutes, rem: r.remSleepMinutes, awake: r.awakeMinutes, leave: r.outOfBedMinutes };
+  return { deep: r.deepSleepMinutes, light: r.lightSleepMinutes, rem: r.remSleepMinutes, awake: r.awakeMinutes, leave: r.outOfBedMinutes, latency: undefined };
 }
 
 /** 报告缺少入睡 / 醒来时间、离床次数时，从分段明细推算 */
@@ -105,8 +85,18 @@ export interface SleepSegment {
 
 export interface SleepReport {
   memberId: string;
-  /** 报告来源：1 标准，5 青岚雷达（决定睡眠分段的编码） */
+  realName?: string;
+  buildingName?: string;
+  floorName?: string;
+  roomName?: string;
+  bedName?: string;
+  /** 报告来源，见 SLEEP_SOURCES */
   reportSource?: number;
+  sleepScoreText?: string;
+  sleepDescription?: string;
+  /** 每分钟心率 / 呼吸（sleep-report 接口自带，毫秒时间戳） */
+  hrPoints?: { t: number; v: number }[];
+  brPoints?: { t: number; v: number }[];
   reportDate: string;
   sleepScore?: number;
   bedTime?: string;
@@ -134,22 +124,35 @@ export interface SleepReport {
   heartRateTrend?: number[];
 }
 
-/**
- * 机构内所有长者"昨夜"的睡眠报告（健康驾驶舱的数据源，带评分、效率、趋势）。
- * 一次取整个机构，缓存 10 分钟，打开不同长者的详情不重复请求。
- */
-let reportCache: { orgId: string; at: number; data: Promise<Map<string, SleepReport>> } | null = null;
+export interface HealthOverview {
+  reportDate: string;
+  summary?: { inHospitalElderCount?: number; validMonitoringCount?: number; todayAttentionCount?: number };
+  attentionTotal?: number;
+  reports: SleepReport[];
+}
 
-export function getLastNightReports(orgId: string) {
-  if (reportCache && reportCache.orgId === orgId && Date.now() - reportCache.at < 10 * 60_000) return reportCache.data;
+/**
+ * 机构内所有长者"昨夜"的睡眠报告与概况（健康驾驶舱的数据源，带评分、效率、趋势）。
+ * 一次取整个机构，缓存 10 分钟，长者详情和健康总览共用。
+ */
+let overviewCache: { orgId: string; at: number; data: Promise<HealthOverview> } | null = null;
+
+export function getHealthOverview(orgId: string, force = false) {
+  if (!force && overviewCache && overviewCache.orgId === orgId && Date.now() - overviewCache.at < 10 * 60_000) return overviewCache.data;
   const data = api
-    .get<{ reportDate: string; sleepReports?: SleepReport[] }>("/api/cockpit/v2/elder/dashboard", {
-      params: { reportLimit: 1000, rankingLimit: 1, attentionLimit: 1 },
-    })
-    .then((r) => new Map((r.data?.sleepReports ?? []).map((x) => [x.memberId, x])));
-  reportCache = { orgId, at: Date.now(), data };
-  data.catch(() => (reportCache = null));
+    .get<{ reportDate: string; summary?: HealthOverview["summary"]; attentionTotal?: number; sleepReports?: SleepReport[] }>(
+      "/api/cockpit/v2/elder/dashboard",
+      { params: { reportLimit: 1000, rankingLimit: 1, attentionLimit: 1 } },
+    )
+    .then((r) => ({ reportDate: r.data?.reportDate ?? "", summary: r.data?.summary, attentionTotal: r.data?.attentionTotal, reports: r.data?.sleepReports ?? [] }));
+  overviewCache = { orgId, at: Date.now(), data };
+  data.catch(() => (overviewCache = null));
   return data;
+}
+
+export async function getLastNightReports(orgId: string) {
+  const o = await getHealthOverview(orgId);
+  return new Map(o.reports.map((x) => [x.memberId, x]));
 }
 
 /** 单个长者某一天的睡眠分期（健康画像接口；没有评分，用于驾驶舱里没有这位长者时兜底） */
@@ -310,4 +313,135 @@ export function presenceRuns(segs: PostureSeg[], start: number, end: number): Pr
     } else runs.push({ state, start: start + i * MIN, end: start + (i + 1) * MIN, targets: ids[i].size });
   }
   return runs;
+}
+
+/**
+ * 睡眠报告来源（平台枚举 gX）：网页端"报告记录"里的 睡眠-AIO / 戒指 / Ultra / 手表 / UltraFall / Ultra Plus。
+ * 每位长者用哪个来源，取决于他绑定的设备类型。
+ */
+export const SLEEP_SOURCES: Record<number, string> = { 1: "AIO", 2: "戒指", 3: "Ultra", 4: "手表", 5: "UltraFall", 6: "Ultra Plus" };
+
+/** 设备类型 → 睡眠报告来源（设备类型枚举：6 AIO，12 Ultra 呼吸睡眠，13 UltraFall，15 Ultra Plus） */
+const SOURCE_BY_DEVICE_TYPE: Record<number, number> = { 6: 1, 12: 3, 13: 5, 15: 6 };
+/** 雷达类来源要带 windowMinutes=1（与网页端一致） */
+const RADAR_SOURCES = new Set([1, 3, 5, 6]);
+
+export function sourcesOf(member: { devices?: { deviceType?: number }[] }) {
+  const set = new Set<number>();
+  for (const d of member.devices ?? []) {
+    const s = d.deviceType !== undefined ? SOURCE_BY_DEVICE_TYPE[d.deviceType] : undefined;
+    if (s) set.add(s);
+  }
+  return [...set];
+}
+
+interface RawSleepReport {
+  reportDate: string;
+  reportSource?: number;
+  sleepScore?: number;
+  sleepScoreText?: string;
+  sleepDescription?: string;
+  bedTime?: string;
+  fallAsleepTime?: string;
+  wakeUpTime?: string;
+  getUpTime?: string;
+  sleepSummary?: Partial<SleepReport>;
+  metrics?: { sleepEfficiency?: number; timeInBed?: number; leaveBedCount?: number; awakeCount?: number; avgHeartRate?: number; avgBreathingRate?: number; ahi?: number; ahiEvaluation?: string };
+  sleepDetails?: SleepSegment[];
+  heartRate?: { timestamp: number; value?: number }[];
+  breathingRate?: { timestamp: number; value?: number }[];
+}
+
+/** 某位长者某天、某个来源的睡眠报告（/api/health/sleep-report，带评分、指标、分段和每分钟心率呼吸） */
+export async function getSleepReport(memberId: string, date: string, source: number): Promise<SleepReport | undefined> {
+  const r = await api.get<RawSleepReport | null>("/api/health/sleep-report", {
+    params: { memberId, date, source, windowMinutes: RADAR_SOURCES.has(source) ? 1 : undefined },
+  });
+  const d = r.data;
+  if (!d || !(d.sleepDetails?.length || d.sleepSummary?.totalSleepMinutes)) return undefined;
+  const pts = (xs?: { timestamp: number; value?: number }[]) => (xs ?? []).flatMap((x) => (x.value && x.value > 0 ? [{ t: x.timestamp, v: x.value }] : []));
+  const m = d.metrics ?? {};
+  return {
+    ...d.sleepSummary,
+    memberId,
+    reportDate: d.reportDate ?? date,
+    reportSource: d.reportSource ?? source,
+    sleepScore: d.sleepScore || undefined,
+    sleepScoreText: d.sleepScoreText,
+    sleepDescription: d.sleepDescription,
+    bedTime: d.bedTime,
+    fallAsleepTime: d.fallAsleepTime,
+    wakeUpTime: d.wakeUpTime,
+    getUpTime: d.getUpTime,
+    sleepEfficiency: m.sleepEfficiency,
+    timeInBed: m.timeInBed,
+    leaveBedCount: m.leaveBedCount,
+    avgHeartRate: m.avgHeartRate,
+    avgBreathingRate: m.avgBreathingRate,
+    ahi: m.ahi,
+    ahiEvaluation: m.ahiEvaluation,
+    sleepDetails: d.sleepDetails,
+    hrPoints: pts(d.heartRate),
+    brPoints: pts(d.breathingRate),
+  };
+}
+
+/**
+ * 长者某天的睡眠报告：按绑定设备对应的来源依次查（多台设备时取第一份有数据的），
+ * 都没有时再用健康画像兜底（没有评分）。date 是报告日期（醒来那天）。
+ */
+export async function getMemberSleepReport(member: { memberId: string; devices?: { deviceType?: number }[] }, date: string) {
+  for (const s of sourcesOf(member)) {
+    const r = await getSleepReport(member.memberId, date, s).catch(() => undefined);
+    if (r) return r;
+  }
+  return getPortraitSleep(member.memberId, date).catch(() => undefined);
+}
+
+/** 并发受限地对一组任务求值（避免一次发出几十个请求） */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>, onProgress?: (done: number) => void): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  let done = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) {
+        const k = i++;
+        out[k] = await fn(items[k]);
+        onProgress?.(++done);
+      }
+    }),
+  );
+  return out;
+}
+
+/**
+ * 机构内所有长者某天的睡眠报告：逐个长者按其设备对应的来源查询（并发 4 个）。
+ * 驾驶舱接口只返回 AIO 来源的报告，用 Ultra / UltraFall 等设备的长者会漏掉，所以不用它做列表。
+ * 注意：平台在某份报告第一次被请求时才生成，首次可能要几秒到几十秒，之后约 100ms；所以不设超时。
+ * 结果按 机构 + 日期 缓存 10 分钟。
+ */
+let orgReportCache: { key: string; at: number; data: Promise<SleepReport[]> } | null = null;
+
+export function getOrgSleepReports(
+  orgId: string,
+  members: { memberId: string; realName?: string; bedName?: string; devices?: { deviceType?: number }[] }[],
+  date: string,
+  force = false,
+  onProgress?: (done: number) => void,
+) {
+  const key = `${orgId}|${date}|${members.length}`;
+  if (!force && orgReportCache && orgReportCache.key === key && Date.now() - orgReportCache.at < 10 * 60_000) return orgReportCache.data;
+  const data = mapLimit(
+    members,
+    4,
+    async (m): Promise<SleepReport | undefined> => {
+      const r = await getMemberSleepReport(m, date).catch(() => undefined);
+      return r ? { ...r, realName: r.realName ?? m.realName, bedName: r.bedName ?? m.bedName } : undefined;
+    },
+    onProgress,
+  ).then((xs) => xs.filter((x): x is SleepReport => !!x));
+  orgReportCache = { key, at: Date.now(), data };
+  data.catch(() => (orgReportCache = null));
+  return data;
 }

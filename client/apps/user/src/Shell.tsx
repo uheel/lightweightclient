@@ -7,6 +7,12 @@ import Placeholder from "./pages/Placeholder";
 import CareHome from "./pages/CareHome";
 import AlertProcessDialog from "./care/AlertProcessDialog";
 import { useAlertCenter } from "./care/useAlertCenter";
+import { useCareData } from "./care/useCareData";
+import { CareProvider, type CareCtx } from "./care/CareContext";
+import ElderDetail from "./pages/ElderDetail";
+import EldersPage from "./pages/EldersPage";
+import AlertsPage from "./pages/AlertsPage";
+import HealthPage from "./pages/HealthPage";
 
 type NavKey = "home" | "elders" | "alerts" | "health";
 
@@ -32,11 +38,20 @@ export default function Shell({ s }: { s: Session }) {
   const rt = useRealtime(s.orgId);
   // 告警中心：有告警权限的账号才启用（管理者视图下也照常提醒）
   const alertCenter = useAlertCenter(s.orgId, hasAnyPermission(s, [...RES.alert]));
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
+  // 长者列表与实时状态：所有模块共用一份（只订阅一次设备频道）
+  const care = useCareData(s.orgId, alertCenter.alerts.list);
+  const now = care.now;
+  /** 正在查看详情的长者；切换模块或机构时关闭 */
+  const [detailId, setDetailId] = useState<string>();
+  useEffect(() => setDetailId(undefined), [s.orgId]);
+  const ctx: CareCtx = {
+    ...care,
+    s,
+    alerts: alertCenter.alerts,
+    openElder: setDetailId,
+    process: alertCenter.setProcessing,
+    reloadAlerts: alertCenter.done,
+  };
 
   // 切换机构后权限会变，重新判断角色
   const rolesKey = roles.join(",");
@@ -103,6 +118,7 @@ export default function Shell({ s }: { s: Session }) {
   // 家属只关注自己的家人，不需要模块导航
   const showRail = role !== "family";
   const current = navItems.find((n) => n.key === nav) ?? navItems[0];
+  const detailMember = detailId ? care.members.find((m) => m.memberId === detailId) : undefined;
 
   return (
     <div className="shell">
@@ -133,7 +149,14 @@ export default function Shell({ s }: { s: Session }) {
         {showRail && (
           <nav className="shell-rail" aria-label="模块">
             {navItems.map((n) => (
-              <button key={n.key} className={`rail-item${n.key === current.key ? " active" : ""}`} onClick={() => setNav(n.key)}>
+              <button
+                key={n.key}
+                className={`rail-item${n.key === current.key ? " active" : ""}`}
+                onClick={() => {
+                  setNav(n.key);
+                  setDetailId(undefined);
+                }}
+              >
                 {n.icon}
                 {n.label}
               </button>
@@ -141,13 +164,32 @@ export default function Shell({ s }: { s: Session }) {
           </nav>
         )}
         <main className="shell-content">
-          {current.key === "home" && role === "care" ? (
-            <CareHome s={s} alerts={alertCenter.alerts} onProcess={alertCenter.setProcessing} />
-          ) : current.key === "home" || !showRail ? (
-            <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role]} />
-          ) : (
-            <Placeholder title={current.label} desc="建设中" />
-          )}
+          <CareProvider value={ctx}>
+            {detailMember ? (
+              <div className="page">
+                <ElderDetail
+                  orgId={s.orgId}
+                  member={detailMember}
+                  live={care.liveOf(detailMember)}
+                  alert={care.alertByMember[detailMember.memberId]}
+                  attention={care.attention.items.find((a) => a.memberId === detailMember.memberId)}
+                  now={now}
+                  onBack={() => setDetailId(undefined)}
+                  onProcess={alertCenter.setProcessing}
+                />
+              </div>
+            ) : current.key === "elders" ? (
+              <EldersPage />
+            ) : current.key === "alerts" ? (
+              <AlertsPage />
+            ) : current.key === "health" ? (
+              <HealthPage />
+            ) : current.key === "home" && role === "care" ? (
+              <CareHome />
+            ) : (
+              <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role]} />
+            )}
+          </CareProvider>
         </main>
       </div>
       <AlertProcessDialog
