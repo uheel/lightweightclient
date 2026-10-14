@@ -169,3 +169,32 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .history li { display: grid; grid-template-columns: 88px 1fr auto; gap: 8px; padding: 7px 0; border-bottom: 1px solid #F1F2F6; font-size: 13px; }
 .history li .mono { color: #8A8FA8; font-size: 12px; }
+
+/* 夜间时间线 */
+.detail-span3 { grid-column: 1 / -1; }
+.night { display: flex; flex-direction: column; gap: 10px; }
+.night-legend, .night-summary { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #5B6078; }
+.night-legend span, .night-summary span { display: flex; align-items: center; gap: 5px; }
+.night-legend i, .night-summary i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.night-summary b { color: #1B1D2E; }
+.night-body { display: flex; gap: 10px; padding-right: 28px; }
+.night-labels { flex: 0 0 36px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: #5B6078; }
+.night-labels span { display: flex; align-items: center; }
+.night-plot { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-bottom: 22px; cursor: crosshair; }
+.night-stage { position: relative; height: 30px; border-radius: 6px; overflow: hidden; background: #F1F2F7; }
+.night-stage span { position: absolute; top: 0; bottom: 0; }
+.night-series { position: relative; height: 90px; background: #FAFBFD; border-radius: 6px; }
+.night-series svg { position: absolute; left: 0; top: 5px; width: 100%; height: 80px; }
+.night-axis { position: absolute; right: -28px; font-size: 11px; color: #8A8FA8; margin-top: 5px; }
+.night-ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; font-size: 11px; color: #8A8FA8; }
+.night-ticks span { position: absolute; white-space: nowrap; }
+.night-ticks .tick { transform: translateX(-50%); }
+.night-grid { position: absolute; top: 0; bottom: 22px; width: 0; border-left: 1px dashed #E4E6EF; pointer-events: none; }
+.night-cursor { position: absolute; top: 0; bottom: 22px; width: 0; border-left: 1.5px solid #1B1D2E; pointer-events: none; }
+.night-tip {
+  position: absolute; top: 6px; z-index: 2; pointer-events: none; min-width: 132px;
+  background: rgba(27, 29, 46, 0.92); color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.7;
+}
+.night-tip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.night-dot { position: absolute; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; pointer-events: none; }
+.night-tip-note { margin-top: 4px; font-size: 11px; color: #F5C26B; }

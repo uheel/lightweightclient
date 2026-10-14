@@ -305,5 +305,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `GET /api/alert/pages?filter[memberId]=` | **memberId 筛选不生效**，按长者筛选告警只能取最近的告警后在本地过滤 `members[]` |
 
 **睡眠报告字段**：`sleepScore, bedTime, fallAsleepTime, wakeUpTime, getUpTime`（"YYYY-MM-DD HH:mm:ss"），`totalSleepMinutes, totalNightSleepMinutes, deepSleepMinutes, lightSleepMinutes, remSleepMinutes, awakeMinutes, outOfBedMinutes, timeInBed`（分钟），`sleepEfficiency`（%），`leaveBedCount, awakeCount, avgHeartRate, avgBreathingRate, ahi`，`sleepDetails[{status, startTime, endTime}]`（毫秒），`heartRateTrend / breathingTrend`（从入睡开始每 10 分钟一个点，≤0 表示没有数据）
-- 睡眠分段状态：1 清醒，2 眼动，3 浅睡，4 深睡，7 离床
+- **睡眠分段状态（实测）**：1 深睡，2 浅睡，3 清醒，4 离床，5 眼动。用 16 份真实报告核对过，按分段累计的时长与汇总字段吻合。**网页端代码里定义的是 1 清醒 / 2 眼动 / 3 浅睡 / 4 深睡 / 7 离床，和实际数据对不上，所以网页端睡眠结构的颜色是错的（建议反馈给平台）**。汇总里的清醒 / 离床只算入睡后的部分
+- 每分钟心率呼吸：`radar-vital-minute-pages` 支持 `filter[minuteAt]=开始,结束`（"YYYY-MM-DD HH:mm:ss"），一晚约 600 条，可以一次取完
 - 网页端的评分分级：≥80 良好，≥70 一般，其余为需关注
+- **"离床"期间也有心率呼吸**：这是平台数据本来的样子。例如藕塘社区一位长者，离床段 05:28–07:36 共 128 分钟，其中 102 分钟有每分钟心率呼吸（presenceSampleCount=1），同一时段的姿态时间线是行走 / 坐 / 在床交替。重症监护模式（qlWorkingType=15）的雷达监测整个房间，"离床"只表示不在床上，不表示人不在房间；活动中的数值准确性较差

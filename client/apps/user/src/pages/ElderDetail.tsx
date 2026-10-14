@@ -5,18 +5,24 @@ import dayjs from "dayjs";
 import type { LiveData } from "@radar/core";
 import type { AttentionItem, CareAlert, Member } from "../care/api";
 import { ATTENTION_REASON } from "../care/api";
+import NightTimeline from "../care/NightTimeline";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
   getLastNightReports,
   getMemberInfo,
   getPortraitSleep,
   getRecentAlertsOf,
-  hm,
   minutesText,
   scoreLevel,
-  SLEEP_STAGE,
+  STAGES,
+  STAGE_ORDER,
+  derivedTimes,
+  getVitalMinutes,
+  stageCodesOf,
+  stageMinutesOf,
   type MemberInfo,
   type SleepReport,
+  type VitalPoint,
 } from "../care/health";
 
 /** 长者详情（界面稿"长者详情 · 健康数据"）：现在的状态、昨夜睡眠、夜间心率呼吸、近 7 天、近期告警 */
@@ -43,12 +49,14 @@ export default function ElderDetail({
   const [report, setReport] = useState<SleepReport | null>();
   const [week, setWeek] = useState<{ date: string; minutes?: number }[]>();
   const [history, setHistory] = useState<CareAlert[]>();
+  const [vitals, setVitals] = useState<VitalPoint[]>();
 
   useEffect(() => {
     let cancelled = false;
     setReport(undefined);
     setWeek(undefined);
     setHistory(undefined);
+    setVitals(undefined);
     getMemberInfo(member.memberId).then((x) => !cancelled && setInfo(x), () => {});
 
     // 昨夜睡眠：优先用驾驶舱报告（带评分和趋势），没有再用健康画像兜底
@@ -68,6 +76,26 @@ export default function ElderDetail({
       cancelled = true;
     };
   }, [orgId, member.memberId]);
+
+  // 报告加载后，按这一晚的时间范围取每分钟心率呼吸（比报告里每 10 分钟一个点更细）
+  useEffect(() => {
+    if (!report) return;
+    let cancelled = false;
+    const segs = report.sleepDetails ?? [];
+    const p = (t?: string) => (t ? Date.parse(t.replace(" ", "T")) : NaN);
+    const night = dayjs(report.reportDate);
+    const startC = [segs[0]?.startTime, p(report.bedTime)].filter((x): x is number => !!x && !Number.isNaN(x));
+    const endC = [segs[segs.length - 1]?.endTime, p(report.getUpTime)].filter((x): x is number => !!x && !Number.isNaN(x));
+    const start = startC.length ? Math.min(...startC) : night.subtract(1, "day").hour(20).valueOf();
+    const end = endC.length ? Math.max(...endC) : night.hour(9).valueOf();
+    getVitalMinutes(member.memberId, start, end).then(
+      (v) => !cancelled && setVitals(v),
+      () => !cancelled && setVitals([]),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [report, member.memberId]);
 
   const st = careState(member, live, alert, now);
   const tone = TONE_STYLE[st.tone];
@@ -144,23 +172,20 @@ export default function ElderDetail({
           <AttentionList report={report ?? undefined} attention={attention} />
         </section>
 
+        <section className="card detail-span3">
+          <h2>夜间时间线</h2>
+          {report === undefined ? (
+            <Skeleton active paragraph={{ rows: 4 }} />
+          ) : report && (report.sleepDetails?.length || report.heartRateTrend?.some((v) => v > 0) || report.breathingTrend?.some((v) => v > 0) || vitals?.length) ? (
+            <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} />
+          ) : (
+            <Empty description="没有夜间睡眠与体征数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </section>
+
         <section className="card">
           <h2>近 7 天睡眠时长</h2>
           {!week ? <Skeleton active paragraph={{ rows: 3 }} /> : <WeekBars week={week} />}
-        </section>
-
-        <section className="card detail-span2">
-          <h2>夜间心率与呼吸</h2>
-          {report === undefined ? (
-            <Skeleton active paragraph={{ rows: 3 }} />
-          ) : report?.heartRateTrend?.some((v) => v > 0) || report?.breathingTrend?.some((v) => v > 0) ? (
-            <>
-              <Trend label="心率" unit="次/分" color="#E5484D" values={report.heartRateTrend} avg={report.avgHeartRate} start={report.fallAsleepTime} />
-              <Trend label="呼吸" unit="次/分" color="#3B4FD8" values={report.breathingTrend} avg={report.avgBreathingRate} start={report.fallAsleepTime} />
-            </>
-          ) : (
-            <Empty description="没有夜间心率呼吸数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          )}
         </section>
 
         <section className="card">
@@ -189,17 +214,11 @@ export default function ElderDetail({
 function SleepSummary({ r }: { r: SleepReport }) {
   const level = scoreLevel(r.sleepScore);
   const total = r.totalNightSleepMinutes ?? r.totalSleepMinutes;
-  const segs = useMemo(() => [...(r.sleepDetails ?? [])].sort((a, b) => a.startTime - b.startTime), [r.sleepDetails]);
-  const t0 = segs[0]?.startTime ?? 0;
-  const span = Math.max((segs[segs.length - 1]?.endTime ?? t0) - t0, 1);
-  const stages = [
-    [4, r.deepSleepMinutes],
-    [3, r.lightSleepMinutes],
-    [2, r.remSleepMinutes],
-    [1, r.awakeMinutes],
-    [7, r.outOfBedMinutes],
-  ] as const;
-  const stageTotal = stages.reduce((n, [, m]) => n + (m ?? 0), 0) || 1;
+  // 睡眠分段有两套编码，先判断；各阶段时长有分段明细时按明细统计（汇总字段有时和明细对不上）
+  const codes = useMemo(() => stageCodesOf(r), [r]);
+  const minutes = stageMinutesOf(r, codes);
+  const derived = derivedTimes(r, codes);
+  const stageTotal = STAGE_ORDER.reduce((n, k) => n + (minutes[k] ?? 0), 0) || 1;
   const pct = r.sleepScore !== undefined ? Math.max(0, Math.min(100, r.sleepScore)) : 0;
 
   return (
@@ -236,48 +255,23 @@ function SleepSummary({ r }: { r: SleepReport }) {
           </div>
           <div>
             <dt>夜间离床</dt>
-            <dd>{r.leaveBedCount !== undefined ? `${r.leaveBedCount} 次` : "—"}</dd>
+            <dd>{derived.leaveBedCount !== undefined ? `${derived.leaveBedCount} 次` : "—"}</dd>
           </div>
           <div>
             <dt>入睡 / 醒来</dt>
             <dd className="mono">
-              {hm(r.fallAsleepTime)} – {hm(r.wakeUpTime)}
+              {derived.fallAsleep} – {derived.wakeUp}
             </dd>
           </div>
         </dl>
       </div>
 
-      {segs.length > 0 && (
-        <div>
-          <div className="stage-bar" role="img" aria-label="睡眠结构">
-            {segs.map((s, i) => {
-              const st = SLEEP_STAGE[s.status];
-              if (!st) return null;
-              return (
-                <span
-                  key={i}
-                  title={`${st.label} ${dayjs(s.startTime).format("HH:mm")}–${dayjs(s.endTime).format("HH:mm")}`}
-                  style={{
-                    left: `${((s.startTime - t0) / span) * 100}%`,
-                    width: `${((s.endTime - s.startTime) / span) * 100}%`,
-                    background: st.color,
-                  }}
-                />
-              );
-            })}
-          </div>
-          <div className="stage-axis mono">
-            <span>{dayjs(t0).format("HH:mm")}</span>
-            <span>{dayjs(t0 + span).format("HH:mm")}</span>
-          </div>
-        </div>
-      )}
       <div className="stage-legend">
-        {stages.map(([k, m]) => (
+        {STAGE_ORDER.map((k) => (
           <span key={k}>
-            <i style={{ background: SLEEP_STAGE[k].color }} />
-            {SLEEP_STAGE[k].label} {minutesText(m)}
-            <em> {Math.round(((m ?? 0) / stageTotal) * 100)}%</em>
+            <i style={{ background: STAGES[k].color }} />
+            {STAGES[k].label} {minutesText(minutes[k])}
+            <em> {Math.round(((minutes[k] ?? 0) / stageTotal) * 100)}%</em>
           </span>
         ))}
       </div>
@@ -315,47 +309,6 @@ function WeekBars({ week }: { week: { date: string; minutes?: number }[] }) {
           <small>{dayjs(d.date).format("ddd")}</small>
         </div>
       ))}
-    </div>
-  );
-}
-
-/** 夜间趋势：从入睡开始，每 10 分钟一个点，<= 0 为无数据 */
-function Trend({ label, unit, color, values = [], avg, start }: { label: string; unit: string; color: string; values?: number[]; avg?: number; start?: string }) {
-  const pts = values.map((v) => (v > 0 ? v : undefined));
-  const nums = pts.filter((v): v is number => v !== undefined);
-  if (!nums.length) return null;
-  const lo = Math.min(...nums) - 3;
-  const hi = Math.max(...nums) + 3;
-  const W = 600;
-  const H = 70;
-  const x = (i: number) => (pts.length > 1 ? (i / (pts.length - 1)) * W : 0);
-  const y = (v: number) => H - ((v - lo) / Math.max(hi - lo, 1)) * H;
-  // 无数据处断开
-  let d = "";
-  let pen = false;
-  pts.forEach((v, i) => {
-    if (v === undefined) return void (pen = false);
-    d += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
-    pen = true;
-  });
-  const t0 = start ? dayjs(start) : undefined;
-  return (
-    <div className="trend">
-      <div className="trend-meta">
-        <span style={{ color }}>{label}</span>
-        <span className="muted">
-          平均 <b className="mono">{avg ?? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)}</b> {unit} · 范围 {Math.min(...nums)}–{Math.max(...nums)}
-        </span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="trend-svg" role="img" aria-label={`${label}夜间趋势`}>
-        <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-      </svg>
-      {t0 && (
-        <div className="stage-axis mono">
-          <span>{t0.format("HH:mm")}</span>
-          <span>{t0.add((pts.length - 1) * 10, "minute").format("HH:mm")}</span>
-        </div>
-      )}
     </div>
   );
 }
