@@ -3,8 +3,8 @@ import { Button, Empty, Skeleton } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { LiveData } from "@radar/core";
-import type { AttentionItem, CareAlert, Member } from "../care/api";
-import { ATTENTION_REASON } from "../care/api";
+import type { CareAlert, Member } from "../care/api";
+import { attentionReasons } from "../care/attention";
 import NightTimeline from "../care/NightTimeline";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
@@ -33,7 +33,6 @@ export default function ElderDetail({
   member,
   live,
   alert,
-  attention,
   now,
   onBack,
   onProcess,
@@ -42,7 +41,6 @@ export default function ElderDetail({
   member: Member;
   live?: LiveData;
   alert?: CareAlert;
-  attention?: AttentionItem;
   now: number;
   onBack: () => void;
   onProcess: (a: CareAlert) => void;
@@ -188,7 +186,7 @@ export default function ElderDetail({
 
         <section className="card detail-attention">
           <h2>需要关注</h2>
-          <AttentionList report={report ?? undefined} attention={attention} />
+          <AttentionList report={report ?? undefined} alert={alert} />
         </section>
 
         <section className="card detail-span3">
@@ -298,19 +296,13 @@ function SleepSummary({ r }: { r: SleepReport }) {
   );
 }
 
-function AttentionList({ report, attention }: { report?: SleepReport; attention?: AttentionItem }) {
-  const items: string[] = (attention?.attentionReasons ?? []).map((r) => ATTENTION_REASON[r] ?? r);
-  if (report) {
-    const total = report.totalNightSleepMinutes ?? report.totalSleepMinutes;
-    if (report.sleepScore !== undefined && report.sleepScore < 60 && !items.includes("睡眠评分过低")) items.push(`睡眠评分 ${report.sleepScore} 分，低于 60 分`);
-    if (total !== undefined && total > 0 && total < 300 && !items.includes("睡眠时长过短")) items.push(`睡眠时长只有 ${minutesText(total)}`);
-    if ((report.leaveBedCount ?? 0) >= 4 && !items.includes("频繁起夜")) items.push(`夜间离床 ${report.leaveBedCount} 次`);
-    if (report.ahi !== undefined && report.ahi >= 15 && !items.includes("呼吸紊乱指数偏高")) items.push(`呼吸紊乱指数 ${report.ahi}，偏高`);
-  }
-  if (!items.length) return <p className="muted">目前没有需要特别关注的地方</p>;
+/** 需要关注：与总览、长者列表同一套规则（attention.ts），这里用本页加载的报告重新算一遍，保证和页面上显示的报告一致 */
+function AttentionList({ report, alert }: { report?: SleepReport; alert?: CareAlert }) {
+  const { reasons } = attentionReasons(report, alert ? [alert] : []);
+  if (!reasons.length) return <p className="muted">目前没有需要特别关注的地方</p>;
   return (
     <ul className="attention-reasons">
-      {items.map((t) => (
+      {reasons.map((t) => (
         <li key={t}>{t}</li>
       ))}
     </ul>

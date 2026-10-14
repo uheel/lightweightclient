@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Alert, Button, Empty, Skeleton } from "antd";
 import { useCare } from "../care/CareContext";
 import { alertLocation, careState, sinceText, TONE_STYLE, type CareState } from "../care/state";
-import { ATTENTION_REASON, type Member } from "../care/api";
+import type { Member } from "../care/api";
 
 type Filter = "all" | "attention" | "bed" | "away" | "paused";
 
@@ -133,7 +133,7 @@ export default function CareHome() {
                   </div>
                   {note && (
                     <span className="elder-note">
-                      {(note.attentionReasons ?? []).map((r) => ATTENTION_REASON[r] ?? r).join("、") || note.attentionConclusion}
+                      {note.reasons.join(" · ")}
                     </span>
                   )}
                 </article>
@@ -176,7 +176,7 @@ export default function CareHome() {
         <section>
           <div className="side-head">
             <h2>今日需关注{attention.total ? ` ${attention.total} 位` : ""}</h2>
-            <span className="muted">{attention.total > attention.items.length ? `显示前 ${attention.items.length} 位` : "来自昨夜监测"}</span>
+            <span className="muted">昨夜睡眠与未处理告警</span>
           </div>
           {attention.items.length === 0 ? (
             <p className="muted">今天没有需要特别关注的长者</p>
@@ -187,7 +187,7 @@ export default function CareHome() {
                   <span className="elder-avatar small">{(a.realName ?? "?").charAt(0)}</span>
                   <span>
                     <b>{a.realName ?? "未命名长者"}</b>
-                    <small>{(a.attentionReasons ?? []).map((r) => ATTENTION_REASON[r] ?? r).join("、") || a.attentionConclusion}</small>
+                    <small>{a.reasons.join(" · ")}</small>
                   </span>
                 </li>
               ))}

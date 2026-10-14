@@ -172,7 +172,6 @@ export default function Shell({ s }: { s: Session }) {
                   member={detailMember}
                   live={care.liveOf(detailMember)}
                   alert={care.alertByMember[detailMember.memberId]}
-                  attention={care.attention.items.find((a) => a.memberId === detailMember.memberId)}
                   now={now}
                   onBack={() => setDetailId(undefined)}
                   onProcess={alertCenter.setProcessing}

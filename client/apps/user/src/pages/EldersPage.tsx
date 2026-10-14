@@ -1,36 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Input, Segmented, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { useCare } from "../care/CareContext";
 import { careState, TONE_STYLE, type CareState } from "../care/state";
-import { ATTENTION_REASON, type Member } from "../care/api";
-import dayjs from "dayjs";
-import { getOrgSleepReports, scoreLevel, type SleepReport } from "../care/health";
+import type { Member } from "../care/api";
+import { scoreLevel, type SleepReport } from "../care/health";
 
 type Row = { m: Member; st: CareState; report?: SleepReport; reasons: string[] };
 type Filter = "all" | "attention" | "bed" | "away" | "paused";
 
 /** 长者列表：所有长者一览，点一行进入详情 */
 export default function EldersPage() {
-  const { s, members, liveOf, alertByMember, attention, loading, error, now, openElder } = useCare();
+  const { s, members, liveOf, alertByMember, attention, sleepReports: reports, loading, error, now, openElder } = useCare();
   const [keyword, setKeyword] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [reports, setReports] = useState<Map<string, SleepReport>>();
-
-  // 昨夜睡眠评分：按每位长者的设备来源查询（与健康页共用缓存）
-  useEffect(() => {
-    if (!members.length) return;
-    let cancelled = false;
-    getOrgSleepReports(s.orgId, members, dayjs().format("YYYY-MM-DD")).then(
-      (list) => !cancelled && setReports(new Map(list.map((x) => [x.memberId, x]))),
-      () => !cancelled && setReports(new Map()),
-    );
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.orgId, members.length]);
 
   const rows: Row[] = useMemo(
     () =>
@@ -40,7 +24,7 @@ export default function EldersPage() {
           m,
           st: careState(m, liveOf(m), alertByMember[m.memberId], now),
           report: reports?.get(m.memberId),
-          reasons: (att?.attentionReasons ?? []).map((r) => ATTENTION_REASON[r] ?? r),
+          reasons: att?.reasons ?? [],
         };
       }),
     [members, liveOf, alertByMember, now, reports, attention.items],

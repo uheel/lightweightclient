@@ -66,38 +66,6 @@ export async function getPendingAlerts(limit = 30) {
   return { list, total };
 }
 
-export interface AttentionItem {
-  memberId: string;
-  realName?: string;
-  buildingName?: string;
-  floorName?: string;
-  roomName?: string;
-  bedName?: string;
-  attentionConclusion?: string;
-  /** pendingFall / effectiveFall / nightFallRisk / lowSleepScore / shortSleep / frequentLeaveBed / highAhi */
-  attentionReasons?: string[];
-}
-
-export const ATTENTION_REASON: Record<string, string> = {
-  pendingFall: "跌倒告警未处理",
-  effectiveFall: "发生过跌倒",
-  nightFallRisk: "夜间跌倒风险高",
-  lowSleepScore: "睡眠评分过低",
-  shortSleep: "睡眠时长过短",
-  frequentLeaveBed: "频繁起夜",
-  highAhi: "呼吸紊乱指数偏高",
-};
-
-/**
- * 今日需关注名单（平台按每位长者的设备来源、昨夜监测和告警判定）。
- * total 是真实总数；items 平台最多只返回 20 条，且没有分页参数。
- * 注意：健康驾驶舱 /api/cockpit/v2/elder/dashboard 的 attentionTotal 只统计 AIO 来源，数字偏小，不要用。
- */
-export async function getAttention(limit = 20) {
-  const res = await api.get<{ total: number; items: AttentionItem[] }>("/api/cockpit/elder/attention", { params: { limit } });
-  return res.data ?? { total: 0, items: [] };
-}
-
 export interface Option {
   label: string;
   value: string;

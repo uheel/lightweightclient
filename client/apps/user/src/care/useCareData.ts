@@ -7,7 +7,10 @@ import {
   type DeviceDataMessage,
   type LiveData,
 } from "@radar/core";
-import { getAttention, getMembers, type AttentionItem, type CareAlert, type Member } from "./api";
+import dayjs from "dayjs";
+import { getMembers, type CareAlert, type Member } from "./api";
+import { getOrgSleepReports, type SleepReport } from "./health";
+import { buildAttention } from "./attention";
 
 /**
  * 护理值守首页的数据：
@@ -18,7 +21,8 @@ import { getAttention, getMembers, type AttentionItem, type CareAlert, type Memb
  */
 export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
   const [members, setMembers] = useState<Member[]>([]);
-  const [attention, setAttention] = useState<{ total: number; items: AttentionItem[] }>({ total: 0, items: [] });
+  /** 昨夜睡眠报告（按设备来源逐个查询），undefined 表示还在查询 */
+  const [sleepReports, setSleepReports] = useState<Map<string, SleepReport>>();
   const [liveBySn, setLiveBySn] = useState<Record<string, LiveData>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -34,14 +38,28 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
       .then((m) => !cancelled && setMembers(m))
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !cancelled && setLoading(false));
-    // 需关注名单只是补充信息，失败不影响主页面
-    getAttention()
-      .then((a) => !cancelled && setAttention(a))
-      .catch(() => !cancelled && setAttention({ total: 0, items: [] }));
+    setSleepReports(undefined);
     return () => {
       cancelled = true;
     };
   }, [orgId]);
+
+  // 昨夜睡眠报告：长者列表加载后按设备来源逐个查询（与健康页共用缓存）
+  useEffect(() => {
+    if (!members.length) return;
+    let cancelled = false;
+    getOrgSleepReports(orgId, members, dayjs().format("YYYY-MM-DD")).then(
+      (list) => !cancelled && setSleepReports(new Map(list.map((x) => [x.memberId, x]))),
+      () => !cancelled && setSleepReports(new Map()),
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, members]);
+
+  // 今日需关注：客户端按设备数据自己判断（规则见 attention.ts）
+  const attention = useMemo(() => buildAttention(members, sleepReports, pendingAlerts), [members, sleepReports, pendingAlerts]);
 
   // 订阅所有长者设备的频道
   const sns = useMemo(() => [...new Set(members.flatMap((m) => m.devices?.map((d) => d.sn) ?? []))].filter(Boolean), [members]);
@@ -86,5 +104,5 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
     return map;
   }, [pendingAlerts]);
 
-  return { members, attention, alertByMember, liveOf, loading, error, now };
+  return { members, attention, sleepReports, alertByMember, liveOf, loading, error, now };
 }
