@@ -35,7 +35,8 @@ export default function EldersPage() {
     if (kw && !`${r.m.realName}${r.m.bedName ?? ""}`.includes(kw)) return false;
     switch (filter) {
       case "attention":
-        return r.st.tone === "alert" || r.st.tone === "warn" || r.m.focusLevel === 1 || r.reasons.length > 0;
+        // 与总览"今日需关注"同一份名单（规则见 care/attention.ts）
+        return r.reasons.length > 0;
       case "bed":
         return r.st.tone === "bed";
       case "away":

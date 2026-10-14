@@ -17,7 +17,8 @@ const FILTERS: { key: Filter; label: string }[] = [
 function match(f: Filter, st: CareState, m: Member, attention: Set<string>) {
   switch (f) {
     case "attention":
-      return st.tone === "alert" || st.tone === "warn" || m.focusLevel === 1 || attention.has(m.memberId);
+      // 与右侧"今日需关注"同一份名单（规则见 care/attention.ts）
+      return attention.has(m.memberId);
     case "bed":
       return st.tone === "bed";
     case "away":
