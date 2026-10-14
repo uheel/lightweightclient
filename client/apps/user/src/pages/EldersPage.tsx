@@ -87,7 +87,6 @@ export default function EldersPage() {
       title: "床位",
       key: "bed",
       width: 140,
-      defaultSortOrder: "ascend",
       sorter: (a, b) => (a.m.bedName ?? "").localeCompare(b.m.bedName ?? "", "zh"),
       render: (_, r) => r.m.bedName ?? "未分配",
     },

@@ -68,7 +68,6 @@ export default function HealthPage() {
       title: "睡眠评分",
       key: "score",
       width: 130,
-      defaultSortOrder: "ascend",
       sorter: (a, b) => (a.sleepScore ?? 999) - (b.sleepScore ?? 999),
       render: (_, r) => {
         const lv = scoreLevel(r.sleepScore);
