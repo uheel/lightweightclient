@@ -93,12 +93,11 @@ export default function ElderDetail({
     const endC = [segs[segs.length - 1]?.endTime, p(report.getUpTime)].filter((x): x is number => !!x && !Number.isNaN(x));
     const start = startC.length ? Math.min(...startC) : night.subtract(1, "day").hour(20).valueOf();
     const end = endC.length ? Math.max(...endC) : night.hour(9).valueOf();
-    if (report.hrPoints?.length || report.brPoints?.length) setVitals([]);
-    else
-      getVitalMinutes(member.memberId, start, end).then(
-        (v) => !cancelled && setVitals(v),
-        () => !cancelled && setVitals([]),
-      );
+    // 设备每分钟上报的心率呼吸：曲线和"在床"判断都以它为准（报告附带的序列是平台加工的，偶有空缺）
+    getVitalMinutes(member.memberId, start, end).then(
+      (v) => !cancelled && setVitals(v),
+      () => !cancelled && setVitals([]),
+    );
     // 同一时段的雷达位置（所有跟踪目标），用来和睡眠报告对照
     const sns = (member.devices ?? []).map((d) => d.sn).filter(Boolean);
     if (sns.length)

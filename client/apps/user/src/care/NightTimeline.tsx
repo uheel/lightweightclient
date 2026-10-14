@@ -17,9 +17,10 @@ import {
  * 鼠标悬停时一条竖线贯穿三行，提示框显示该时刻的睡眠阶段、心率、呼吸。
  *
  * 心率呼吸数据来源（优先级从高到低）：
- * 1. 睡眠报告自带的每分钟数据 hrPoints / brPoints（/api/health/sleep-report）
- * 2. 每分钟数据 vitals（radar-vital-minute-pages）
- * 3. 驾驶舱报告里的 heartRateTrend / breathingTrend（从入睡时间起每 10 分钟一个点，<= 0 表示没有数据）
+ * 1. 设备每分钟上报的记录 vitals（radar-vital-minute-pages）——设备原始数据，最可靠
+ * 2. 睡眠报告附带的序列 hrPoints / brPoints（平台生成报告时加工的，偶有空缺：
+ *    例如迪立莱 10-14 03:24 报告里为空，设备记录却有 64/11）
+ * 3. 报告里的 heartRateTrend / breathingTrend（从入睡时间起每 10 分钟一个点，<= 0 表示没有数据）
  */
 const TREND_STEP = 10 * 60_000;
 const W = 1000;
@@ -78,12 +79,12 @@ export default function NightTimeline({
     ): Series => {
       let points: Point[];
       let fine = true;
-      if (own?.length) points = own;
-      else if (useMinutes)
+      if (useMinutes)
         points = (vitals ?? []).flatMap((p) => {
           const v = minute(p);
           return v ? [{ t: p.t, v }] : [];
         });
+      else if (own?.length) points = own;
       else {
         points = fromTrend(trend);
         fine = false;
@@ -107,10 +108,15 @@ export default function NightTimeline({
   const t1 = Math.max(...ends, t0 + 60_000);
   const x = (t: number) => ((t - t0) / (t1 - t0)) * W;
   // 雷达位置：有心率呼吸的分钟算在床（见 presenceRuns 的说明）
-  // 每分钟数据直接用；报告趋势每 10 分钟一个点，把这一点覆盖的 10 分钟都算上
-  const vitalTimes = series.flatMap((s) =>
-    s.points.flatMap((p) => (s.gap > 5 * 60_000 ? Array.from({ length: TREND_STEP / 60_000 }, (_, k) => p.t + k * 60_000) : [p.t])),
-  );
+  // 判断在床：设备每分钟记录与报告附带序列取并集，任一份这一分钟有心率或呼吸就算在床；
+  // 报告趋势每 10 分钟一个点，把这一点覆盖的 10 分钟都算上
+  const vitalTimes = [
+    ...(vitals ?? []).filter((p) => p.hr || p.rr).map((p) => p.t),
+    ...[...(r.hrPoints ?? []), ...(r.brPoints ?? [])].map((p) => p.t),
+    ...series.flatMap((s) =>
+      s.points.flatMap((p) => (s.gap > 5 * 60_000 ? Array.from({ length: TREND_STEP / 60_000 }, (_, k) => p.t + k * 60_000) : [p.t])),
+    ),
+  ];
   const runs = postures?.length || vitalTimes.length ? presenceRuns(postures ?? [], t0, t1, vitalTimes) : undefined;
 
   // 整点刻度（范围太长时每 2 小时一个）
@@ -152,7 +158,13 @@ export default function NightTimeline({
   };
   const info = hover !== undefined ? at(hover) : undefined;
   const hoverPct = hover !== undefined ? ((hover - t0) / (t1 - t0)) * 100 : 0;
-  const source = r.hrPoints?.length || r.brPoints?.length ? "睡眠报告（每分钟）" : vitals?.some((p) => p.hr || p.rr) ? "每分钟数据" : series.length ? "报告趋势（每 10 分钟）" : "";
+  const source = vitals?.some((p) => p.hr || p.rr)
+    ? "设备每分钟记录"
+    : r.hrPoints?.length || r.brPoints?.length
+      ? "睡眠报告附带序列"
+      : series.length
+        ? "报告趋势（每 10 分钟）"
+        : "";
 
   return (
     <div className="night">
