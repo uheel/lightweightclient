@@ -47,6 +47,8 @@ export default function HealthPage() {
     {
       title: "长者",
       key: "name",
+      width: 200,
+      ellipsis: true,
       render: (_, r) => (
         <span>
           <b>{r.realName ?? "未命名长者"}</b>
@@ -192,7 +194,8 @@ export default function HealthPage() {
               columns={columns}
               dataSource={list}
               loading={loading}
-              scroll={{ x: 960 }}
+              tableLayout="fixed"
+              scroll={{ x: 1240 }}
               locale={{ emptyText: "昨夜没有睡眠报告" }}
               pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 位` }}
               onRow={(r) =>

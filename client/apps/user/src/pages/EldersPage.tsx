@@ -5,7 +5,8 @@ import { SearchOutlined } from "@ant-design/icons";
 import { useCare } from "../care/CareContext";
 import { careState, TONE_STYLE, type CareState } from "../care/state";
 import { ATTENTION_REASON, type Member } from "../care/api";
-import { getLastNightReports, scoreLevel, type SleepReport } from "../care/health";
+import dayjs from "dayjs";
+import { getOrgSleepReports, scoreLevel, type SleepReport } from "../care/health";
 
 type Row = { m: Member; st: CareState; report?: SleepReport; reasons: string[] };
 type Filter = "all" | "attention" | "bed" | "away" | "paused";
@@ -17,16 +18,19 @@ export default function EldersPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [reports, setReports] = useState<Map<string, SleepReport>>();
 
+  // 昨夜睡眠评分：按每位长者的设备来源查询（与健康页共用缓存）
   useEffect(() => {
+    if (!members.length) return;
     let cancelled = false;
-    getLastNightReports(s.orgId).then(
-      (m) => !cancelled && setReports(m),
+    getOrgSleepReports(s.orgId, members, dayjs().format("YYYY-MM-DD")).then(
+      (list) => !cancelled && setReports(new Map(list.map((x) => [x.memberId, x]))),
       () => !cancelled && setReports(new Map()),
     );
     return () => {
       cancelled = true;
     };
-  }, [s.orgId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.orgId, members.length]);
 
   const rows: Row[] = useMemo(
     () =>
@@ -63,6 +67,8 @@ export default function EldersPage() {
     {
       title: "长者",
       key: "name",
+      width: 220,
+      ellipsis: true,
       sorter: (a, b) => a.m.realName.localeCompare(b.m.realName, "zh"),
       render: (_, r) => (
         <span className="cell-who">
@@ -88,7 +94,8 @@ export default function EldersPage() {
     {
       title: "现在",
       key: "state",
-      width: 190,
+      width: 220,
+      ellipsis: true,
       render: (_, r) => (
         <span>
           <b style={{ color: TONE_STYLE[r.st.tone].color }}>{r.st.text}</b>
@@ -117,6 +124,7 @@ export default function EldersPage() {
       width: 130,
       sorter: (a, b) => (a.report?.sleepScore ?? 999) - (b.report?.sleepScore ?? 999),
       render: (_, r) => {
+        if (!reports) return <span className="muted">查询中…</span>;
         if (!r.report?.sleepScore) return <span className="muted">—</span>;
         const lv = scoreLevel(r.report.sleepScore);
         return (
@@ -132,6 +140,7 @@ export default function EldersPage() {
     {
       title: "需关注",
       key: "reasons",
+      width: 300,
       render: (_, r) =>
         r.reasons.length ? (
           r.reasons.map((t) => (
@@ -185,7 +194,8 @@ export default function EldersPage() {
           loading={loading}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 位` }}
           onRow={(r) => ({ onClick: () => openElder(r.m.memberId), style: { cursor: "pointer" } })}
-          scroll={{ x: 960 }}
+          tableLayout="fixed"
+          scroll={{ x: 1300 }}
         />
       </div>
     </div>

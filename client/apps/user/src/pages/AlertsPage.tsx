@@ -83,7 +83,7 @@ export default function AlertsPage() {
           <span className="muted">未关联长者</span>
         ),
     },
-    { title: "位置", key: "where", render: (_, r) => alertLocation(r) || <span className="muted">未配置</span> },
+    { title: "位置", key: "where", width: 240, ellipsis: true, render: (_, r) => alertLocation(r) || <span className="muted">未配置</span> },
     {
       title: "处理情况",
       key: "result",
@@ -166,7 +166,8 @@ export default function AlertsPage() {
           columns={columns}
           dataSource={data.list}
           loading={loading}
-          scroll={{ x: 1000 }}
+          tableLayout="fixed"
+          scroll={{ x: 1240 }}
           pagination={{
             ...page,
             total: data.total,
