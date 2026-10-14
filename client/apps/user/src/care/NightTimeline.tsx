@@ -1,6 +1,16 @@
 import { useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
-import { STAGE_ORDER, STAGES, type SleepReport, type StageKey, type VitalPoint } from "./health";
+import {
+  presenceRuns,
+  RADAR_PRESENCE,
+  STAGE_ORDER,
+  STAGES,
+  type PostureSeg,
+  type RadarPresence,
+  type SleepReport,
+  type StageKey,
+  type VitalPoint,
+} from "./health";
 
 /**
  * 夜间时间线：睡眠结构、心率、呼吸三行共用一条时间轴（从上床到起床）。
@@ -38,11 +48,14 @@ export default function NightTimeline({
   r,
   codes,
   vitals,
+  postures,
 }: {
   r: SleepReport;
   /** 睡眠分段 status → 阶段（两套编码由 stageCodesOf 判断） */
   codes: Record<number, StageKey>;
   vitals?: VitalPoint[];
+  /** 雷达姿态（所有目标），用来画"雷达位置"一行，和睡眠报告对照 */
+  postures?: PostureSeg[];
 }) {
   const [hover, setHover] = useState<number>();
   const box = useRef<HTMLDivElement>(null);
@@ -79,6 +92,7 @@ export default function NightTimeline({
   const t0 = Math.min(...starts);
   const t1 = Math.max(...ends, t0 + 60_000);
   const x = (t: number) => ((t - t0) / (t1 - t0)) * W;
+  const runs = postures?.length ? presenceRuns(postures, t0, t1) : undefined;
 
   // 整点刻度（范围太长时每 2 小时一个）
   const every = (t1 - t0) / 3_600_000 > 10 ? 2 : 1;
@@ -101,7 +115,21 @@ export default function NightTimeline({
       for (const p of s.points) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
       return best && Math.abs(best.t - t) <= s.gap / 2 ? best.v : undefined;
     });
-    return { stage: seg ? STAGES[codes[seg.status]].label : "无数据", leave: seg ? codes[seg.status] === "leave" : false, values };
+    const run = runs?.find((x) => t >= x.start && t < x.end);
+    const targets = new Set((postures ?? []).filter((p) => t >= p.start && t < p.end).map((p) => p.userId)).size;
+    const stageKey = seg ? codes[seg.status] : undefined;
+    // 睡眠报告和雷达明显矛盾：报告说离床、雷达看到在床；或报告说在睡、雷达看到没人在床
+    const conflict =
+      !!run &&
+      ((stageKey === "leave" && run.state === "bed") || ((stageKey === "deep" || stageKey === "light" || stageKey === "rem") && run.state !== "bed"));
+    return {
+      stage: stageKey ? STAGES[stageKey].label : "无数据",
+      leave: stageKey === "leave",
+      radar: run?.state as RadarPresence | undefined,
+      targets,
+      conflict,
+      values,
+    };
   };
   const info = hover !== undefined ? at(hover) : undefined;
   const hoverPct = hover !== undefined ? ((hover - t0) / (t1 - t0)) * 100 : 0;
@@ -120,11 +148,23 @@ export default function NightTimeline({
           <i style={{ background: "#F1F2F7", border: "1px solid #DADCE6" }} />
           无数据
         </span>
+        {runs && (
+          <>
+            <span className="night-legend-sep">雷达：</span>
+            {(["bed", "room"] as const).map((k) => (
+              <span key={k}>
+                <i style={{ background: RADAR_PRESENCE[k].color }} />
+                {RADAR_PRESENCE[k].label}
+              </span>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="night-body">
         <div className="night-labels">
           <span style={{ height: 30 }}>睡眠</span>
+          {runs && <span style={{ height: 14 }}>雷达</span>}
           {series.map((s) => (
             <span key={s.label} style={{ height: 90, color: s.color }}>
               {s.label}
@@ -144,6 +184,19 @@ export default function NightTimeline({
               ) : null;
             })}
           </div>
+
+          {runs && (
+            <div className="night-radar" role="img" aria-label="雷达位置">
+              {runs
+                .filter((x) => x.state !== "none")
+                .map((x) => (
+                  <span
+                    key={x.start}
+                    style={{ left: `${(((x.start - t0) / (t1 - t0)) * 100).toFixed(3)}%`, width: `${(((x.end - x.start) / (t1 - t0)) * 100).toFixed(3)}%`, background: RADAR_PRESENCE[x.state].color }}
+                  />
+                ))}
+            </div>
+          )}
 
           {series.map((s) => {
             const nums = s.points.map((p) => p.v);
@@ -202,8 +255,15 @@ export default function NightTimeline({
               <div className="night-tip" style={hoverPct > 70 ? { right: `${100 - hoverPct}%`, marginRight: 10 } : { left: `${hoverPct}%`, marginLeft: 10 }}>
                 <b className="mono">{dayjs(hover).format("HH:mm")}</b>
                 <div>
-                  睡眠 <b>{info.stage}</b>
+                  睡眠报告 <b>{info.stage}</b>
                 </div>
+                {runs && (
+                  <div>
+                    雷达 <b>{info.radar ? RADAR_PRESENCE[info.radar].label : "无数据"}</b>
+                    {info.targets > 1 ? `（${info.targets} 个目标）` : ""}
+                  </div>
+                )}
+                {info.conflict && <div className="night-tip-note warn">睡眠报告与雷达位置不一致</div>}
                 {series.map((s, i) => (
                   <div key={s.label}>
                     <i style={{ background: s.color }} />

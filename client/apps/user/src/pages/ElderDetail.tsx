@@ -17,11 +17,13 @@ import {
   STAGES,
   STAGE_ORDER,
   derivedTimes,
+  getPostureTimeline,
   getVitalMinutes,
   stageCodesOf,
   stageMinutesOf,
   type MemberInfo,
   type SleepReport,
+  type PostureSeg,
   type VitalPoint,
 } from "../care/health";
 
@@ -50,6 +52,7 @@ export default function ElderDetail({
   const [week, setWeek] = useState<{ date: string; minutes?: number }[]>();
   const [history, setHistory] = useState<CareAlert[]>();
   const [vitals, setVitals] = useState<VitalPoint[]>();
+  const [postures, setPostures] = useState<PostureSeg[]>();
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +60,7 @@ export default function ElderDetail({
     setWeek(undefined);
     setHistory(undefined);
     setVitals(undefined);
+    setPostures(undefined);
     getMemberInfo(member.memberId).then((x) => !cancelled && setInfo(x), () => {});
 
     // 昨夜睡眠：优先用驾驶舱报告（带评分和趋势），没有再用健康画像兜底
@@ -92,10 +96,17 @@ export default function ElderDetail({
       (v) => !cancelled && setVitals(v),
       () => !cancelled && setVitals([]),
     );
+    // 同一时段的雷达位置（所有跟踪目标），用来和睡眠报告对照
+    const sns = (member.devices ?? []).map((d) => d.sn).filter(Boolean);
+    if (sns.length)
+      getPostureTimeline(sns, start, end).then(
+        (x) => !cancelled && setPostures(x),
+        () => !cancelled && setPostures([]),
+      );
     return () => {
       cancelled = true;
     };
-  }, [report, member.memberId]);
+  }, [report, member.memberId, member.devices]);
 
   const st = careState(member, live, alert, now);
   const tone = TONE_STYLE[st.tone];
@@ -177,7 +188,7 @@ export default function ElderDetail({
           {report === undefined ? (
             <Skeleton active paragraph={{ rows: 4 }} />
           ) : report && (report.sleepDetails?.length || report.heartRateTrend?.some((v) => v > 0) || report.breathingTrend?.some((v) => v > 0) || vitals?.length) ? (
-            <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} />
+            <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} postures={postures} />
           ) : (
             <Empty description="没有夜间睡眠与体征数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           )}

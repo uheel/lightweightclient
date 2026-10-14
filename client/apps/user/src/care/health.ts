@@ -224,3 +224,90 @@ export async function getVitalMinutes(memberId: string, start: number, end: numb
     .filter((x) => !Number.isNaN(x.t))
     .sort((a, b) => a.t - b.t);
 }
+
+/**
+ * 雷达位置（姿态时间线）。注意两个坑（2026-10-14 实测）：
+ * - 接口不传 userId 时只返回目标 1。雷达给每个跟踪到的人编号，人离开后再回来常会变成新编号
+ *   （例如起床后回到床上从目标 1 变成目标 2），同屋有别人时也会同时有多个目标，所以要按编号逐个查
+ * - 单次查询不能超过 24 小时
+ */
+export interface PostureSeg {
+  userId: number;
+  posture: number;
+  start: number;
+  end: number;
+}
+
+const MAX_TARGETS = 6;
+
+export async function getPostureTimeline(sns: string[], start: number, end: number): Promise<PostureSeg[]> {
+  const fmt = (t: number) => {
+    const d = new Date(t);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+  const jobs = sns.flatMap((sn) =>
+    Array.from({ length: MAX_TARGETS }, (_, i) =>
+      api
+        .get<{ segments?: { posture: number; userId: number; startAt: string; endAt: string }[] }>("/api/device/human-position/posture-timeline", {
+          params: { sn, startAt: fmt(start), endAt: fmt(end), userId: i + 1 },
+        })
+        .then((r) => r.data?.segments ?? [])
+        .catch(() => []),
+    ),
+  );
+  const all = (await Promise.all(jobs)).flat();
+  return all
+    .map((s) => ({ userId: s.userId, posture: s.posture, start: Date.parse(s.startAt.replace(" ", "T")), end: Date.parse(s.endAt.replace(" ", "T")) }))
+    .filter((s) => !Number.isNaN(s.start) && !Number.isNaN(s.end) && s.end > s.start);
+}
+
+/** 在床的姿态：6 在床，9 床上坐起，10 / 11 床上坐起告警 */
+const IN_BED_POSTURES = new Set([6, 9, 10, 11]);
+
+export type RadarPresence = "bed" | "room" | "none";
+
+export const RADAR_PRESENCE: Record<RadarPresence, { label: string; color: string }> = {
+  bed: { label: "在床", color: "#2E9F6B" },
+  room: { label: "在房间（不在床）", color: "#E08A3C" },
+  none: { label: "未检测到人", color: "#F1F2F7" },
+};
+
+export interface PresenceRun {
+  state: RadarPresence;
+  start: number;
+  end: number;
+  /** 这段时间里同时跟踪到的最多目标数 */
+  targets: number;
+}
+
+/**
+ * 合并所有目标，按分钟得到雷达位置：任一目标在床 → 在床；有目标但都不在床 → 在房间；没有目标 → 未检测到人。
+ * 连续相同状态合并成一段。
+ */
+export function presenceRuns(segs: PostureSeg[], start: number, end: number): PresenceRun[] {
+  const MIN = 60_000;
+  const n = Math.max(0, Math.ceil((end - start) / MIN));
+  const bed = new Uint8Array(n);
+  const any = new Uint8Array(n);
+  const ids: Set<number>[] = Array.from({ length: n }, () => new Set());
+  for (const s of segs) {
+    const a = Math.max(0, Math.floor((s.start - start) / MIN));
+    const b = Math.min(n, Math.ceil((s.end - start) / MIN));
+    for (let i = a; i < b; i++) {
+      any[i] = 1;
+      ids[i].add(s.userId);
+      if (IN_BED_POSTURES.has(s.posture)) bed[i] = 1;
+    }
+  }
+  const runs: PresenceRun[] = [];
+  for (let i = 0; i < n; i++) {
+    const state: RadarPresence = bed[i] ? "bed" : any[i] ? "room" : "none";
+    const last = runs[runs.length - 1];
+    if (last && last.state === state) {
+      last.end = start + (i + 1) * MIN;
+      last.targets = Math.max(last.targets, ids[i].size);
+    } else runs.push({ state, start: start + i * MIN, end: start + (i + 1) * MIN, targets: ids[i].size });
+  }
+  return runs;
+}

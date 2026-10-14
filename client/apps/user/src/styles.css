@@ -198,3 +198,7 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .night-tip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
 .night-dot { position: absolute; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; pointer-events: none; }
 .night-tip-note { margin-top: 4px; font-size: 11px; color: #F5C26B; }
+.night-radar { position: relative; height: 14px; border-radius: 4px; overflow: hidden; background: #F1F2F7; margin-top: -4px; }
+.night-radar span { position: absolute; top: 0; bottom: 0; }
+.night-legend-sep { margin-left: 8px; color: #8A8FA8; }
+.night-tip-note.warn { color: #FF9AA2; }
