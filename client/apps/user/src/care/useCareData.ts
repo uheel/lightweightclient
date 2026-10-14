@@ -10,7 +10,7 @@ import {
 import dayjs from "dayjs";
 import { getMembers, type CareAlert, type Member } from "./api";
 import { getOrgSleepReports, type SleepReport } from "./health";
-import { buildAttention } from "./attention";
+import { buildAttention, useAttentionRules } from "./attention";
 
 /**
  * 护理值守首页的数据：
@@ -59,7 +59,8 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
   }, [orgId, members]);
 
   // 今日需关注：客户端按设备数据自己判断（规则见 attention.ts）
-  const attention = useMemo(() => buildAttention(members, sleepReports, pendingAlerts), [members, sleepReports, pendingAlerts]);
+  const rules = useAttentionRules();
+  const attention = useMemo(() => buildAttention(members, sleepReports, pendingAlerts, rules), [members, sleepReports, pendingAlerts, rules]);
 
   // 订阅所有长者设备的频道
   const sns = useMemo(() => [...new Set(members.flatMap((m) => m.devices?.map((d) => d.sn) ?? []))].filter(Boolean), [members]);

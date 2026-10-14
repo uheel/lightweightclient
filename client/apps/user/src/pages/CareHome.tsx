@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { Alert, Button, Empty, Skeleton } from "antd";
+import { Alert, Button, Empty, Skeleton, Tooltip } from "antd";
+import { SettingOutlined } from "@ant-design/icons";
+import AttentionRulesDialog from "../care/AttentionRulesDialog";
 import { useCare } from "../care/CareContext";
 import { alertLocation, careState, sinceText, TONE_STYLE, type CareState } from "../care/state";
 import type { Member } from "../care/api";
@@ -36,6 +38,7 @@ const TONE_ORDER = { alert: 0, warn: 1, active: 2, bed: 3, idle: 4, unknown: 5 }
 export default function CareHome() {
   const { s, alerts, members, attention, alertByMember, liveOf, loading, error, now, openElder, process: setProcessing } = useCare();
   const [filter, setFilter] = useState<Filter>("all");
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const attentionIds = useMemo(() => new Set(attention.items.map((a) => a.memberId)), [attention.items]);
 
@@ -177,7 +180,11 @@ export default function CareHome() {
         <section>
           <div className="side-head">
             <h2>今日需关注{attention.total ? ` ${attention.total} 位` : ""}</h2>
-            <span className="muted">昨夜睡眠与未处理告警</span>
+            <Tooltip title="设置需关注规则">
+              <Button type="text" size="small" icon={<SettingOutlined />} onClick={() => setRulesOpen(true)}>
+                规则
+              </Button>
+            </Tooltip>
           </div>
           {attention.items.length === 0 ? (
             <p className="muted">今天没有需要特别关注的长者</p>
@@ -196,6 +203,7 @@ export default function CareHome() {
           )}
         </section>
       </aside>
+      <AttentionRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </div>
   );
 }

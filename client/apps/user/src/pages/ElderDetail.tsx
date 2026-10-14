@@ -4,7 +4,7 @@ import { ArrowLeftOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { LiveData } from "@radar/core";
 import type { CareAlert, Member } from "../care/api";
-import { attentionReasons } from "../care/attention";
+import { attentionReasons, useAttentionRules } from "../care/attention";
 import NightTimeline from "../care/NightTimeline";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
@@ -298,7 +298,8 @@ function SleepSummary({ r }: { r: SleepReport }) {
 
 /** 需要关注：与总览、长者列表同一套规则（attention.ts），这里用本页加载的报告重新算一遍，保证和页面上显示的报告一致 */
 function AttentionList({ report, alert }: { report?: SleepReport; alert?: CareAlert }) {
-  const { reasons } = attentionReasons(report, alert ? [alert] : []);
+  const rules = useAttentionRules();
+  const { reasons } = attentionReasons(report, alert ? [alert] : [], rules);
   if (!reasons.length) return <p className="muted">目前没有需要特别关注的地方</p>;
   return (
     <ul className="attention-reasons">

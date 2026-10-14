@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, Dropdown, Result, type MenuProps } from "antd";
-import { AppstoreOutlined, BellOutlined, DownOutlined, HeartOutlined, LogoutOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, BellOutlined, DownOutlined, HeartOutlined, LogoutOutlined, SettingOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
 import { hasAnyPermission, OrgPicker, RES, session, signOut, status, stopRealtime, useRealtime, type Session } from "@radar/core";
 import { availableRoles, ROLE_LABEL, type Role } from "./roles";
 import Placeholder from "./pages/Placeholder";
@@ -9,6 +9,7 @@ import AlertProcessDialog from "./care/AlertProcessDialog";
 import { useAlertCenter } from "./care/useAlertCenter";
 import { useCareData } from "./care/useCareData";
 import { CareProvider, type CareCtx } from "./care/CareContext";
+import AttentionRulesDialog from "./care/AttentionRulesDialog";
 import ElderDetail from "./pages/ElderDetail";
 import EldersPage from "./pages/EldersPage";
 import AlertsPage from "./pages/AlertsPage";
@@ -43,6 +44,7 @@ export default function Shell({ s }: { s: Session }) {
   const now = care.now;
   /** 正在查看详情的长者；切换模块或机构时关闭 */
   const [detailId, setDetailId] = useState<string>();
+  const [rulesOpen, setRulesOpen] = useState(false);
   useEffect(() => setDetailId(undefined), [s.orgId]);
   const ctx: CareCtx = {
     ...care,
@@ -112,7 +114,11 @@ export default function Shell({ s }: { s: Session }) {
       { type: "divider" },
     );
   }
-  menuItems.push({ key: "logout", label: "退出登录", icon: <LogoutOutlined />, danger: true, onClick: logout });
+  menuItems.push(
+    { key: "rules", label: "需关注规则", icon: <SettingOutlined />, onClick: () => setRulesOpen(true) },
+    { type: "divider" },
+    { key: "logout", label: "退出登录", icon: <LogoutOutlined />, danger: true, onClick: logout },
+  );
 
   const displayName = s.realName || s.nickName || s.userName;
   // 家属只关注自己的家人，不需要模块导航
@@ -188,6 +194,7 @@ export default function Shell({ s }: { s: Session }) {
             ) : (
               <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role]} />
             )}
+            <AttentionRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
           </CareProvider>
         </main>
       </div>

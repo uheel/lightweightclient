@@ -216,3 +216,11 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .page .care-head h1 { margin: 0; font-size: 22px; font-weight: 700; }
 .page .care-head p { margin: 2px 0 0; color: #5B6078; font-size: 13px; }
 .source-tag { margin-left: 8px; font-size: 12px; font-weight: 400; padding: 1px 8px; border-radius: 10px; background: #EEF1FF; color: #3B4FD8; vertical-align: middle; }
+
+/* 需关注规则设置 */
+.rules { display: flex; flex-direction: column; border-top: 1px solid #F1F2F6; }
+.rule-row { display: grid; grid-template-columns: 1fr 150px 56px; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #F1F2F6; }
+.rule-text { display: flex; flex-direction: column; }
+.rule-text small { color: #8A8FA8; font-size: 12px; }
+.rule-hit { text-align: right; color: #9A5B00; font-size: 13px; }
+.side-head .ant-btn { color: #5B6078; }
