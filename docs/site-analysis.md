@@ -291,3 +291,19 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `DeviceData` 的格式是 `{sn, msgType, payload, timestamp, dataType}`：msgType 1 呼吸心率，2 人体存在，3 跌倒，4 青岚呼吸心率（含睡眠状态），5 青岚轨迹（含姿态），6 超宽带呼吸睡眠，7 超宽带存在，11 在线状态。解析见 `client/packages/core/src/liveData.ts`
 - 其他推送：`Alert`、`AlertClose`、`AlertCount`、`Record`、`Person`、`DeviceConfigChange`、`DeviceResponse`
 - 状态枚举：睡眠状态 0 离床 / 1 浅睡 / 2 深睡 / 3 眼动 / 4 清醒；人体存在 0 无人 / 1 有人 / 2 信号弱；生命状态 3 表示生命体征弱；呼吸状态 0 正常 / 1 过低 / 2 过高 / 3 暂停
+
+## 长者健康数据（2026-10-14，已用一条真实样本脱敏核对）
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/member/info?memberId=` | `realName, gender, age, phoneNumber, checkedInAt` |
+| `GET /api/cockpit/v2/elder/dashboard?reportLimit&rankingLimit&attentionLimit` | 健康驾驶舱：`summary`、`attentionItems`、`rankings`，以及 **`sleepReports`（机构内各长者"昨夜"的睡眠报告，带评分和趋势）**。`reportLimit=1000` 可用 |
+| `GET /api/health/portrait-report?memberId&date` | 健康画像。`sleepReport` 里有某一天的睡眠分期（**没有评分**），可以按天查历史；另有 BMI、身高体重、运动统计 |
+| `GET /api/member/data/radar-vital-minute-pages?filter[memberId]=` | 每分钟心率呼吸：`minuteAt, heartRateAverage/Min/Max, respiratoryRateAverage/Min/Max, qualityStatus`（memberId 必须写成 `filter[memberId]`） |
+| `GET /api/member-report/date?reportType=1&memberId&date=YYYY-MM` | 当月哪几天有报告。reportType：1 睡眠，2 安全守护，3 空间活力，4 跌倒监测，5 健康画像 |
+| `GET /api/sleep-analysis/report?memberId&queryAt` | 实测返回 404，不使用 |
+| `GET /api/alert/pages?filter[memberId]=` | **memberId 筛选不生效**，按长者筛选告警只能取最近的告警后在本地过滤 `members[]` |
+
+**睡眠报告字段**：`sleepScore, bedTime, fallAsleepTime, wakeUpTime, getUpTime`（"YYYY-MM-DD HH:mm:ss"），`totalSleepMinutes, totalNightSleepMinutes, deepSleepMinutes, lightSleepMinutes, remSleepMinutes, awakeMinutes, outOfBedMinutes, timeInBed`（分钟），`sleepEfficiency`（%），`leaveBedCount, awakeCount, avgHeartRate, avgBreathingRate, ahi`，`sleepDetails[{status, startTime, endTime}]`（毫秒），`heartRateTrend / breathingTrend`（从入睡开始每 10 分钟一个点，≤0 表示没有数据）
+- 睡眠分段状态：1 清醒，2 眼动，3 浅睡，4 深睡，7 离床
+- 网页端的评分分级：≥80 良好，≥70 一般，其余为需关注

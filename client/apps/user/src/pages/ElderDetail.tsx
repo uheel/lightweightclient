@@ -1,0 +1,361 @@
+import { useEffect, useMemo, useState } from "react";
+import { Button, Empty, Skeleton } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
+import type { LiveData } from "@radar/core";
+import type { AttentionItem, CareAlert, Member } from "../care/api";
+import { ATTENTION_REASON } from "../care/api";
+import { careState, sinceText, TONE_STYLE } from "../care/state";
+import {
+  getLastNightReports,
+  getMemberInfo,
+  getPortraitSleep,
+  getRecentAlertsOf,
+  hm,
+  minutesText,
+  scoreLevel,
+  SLEEP_STAGE,
+  type MemberInfo,
+  type SleepReport,
+} from "../care/health";
+
+/** 长者详情（界面稿"长者详情 · 健康数据"）：现在的状态、昨夜睡眠、夜间心率呼吸、近 7 天、近期告警 */
+export default function ElderDetail({
+  orgId,
+  member,
+  live,
+  alert,
+  attention,
+  now,
+  onBack,
+  onProcess,
+}: {
+  orgId: string;
+  member: Member;
+  live?: LiveData;
+  alert?: CareAlert;
+  attention?: AttentionItem;
+  now: number;
+  onBack: () => void;
+  onProcess: (a: CareAlert) => void;
+}) {
+  const [info, setInfo] = useState<MemberInfo>();
+  const [report, setReport] = useState<SleepReport | null>();
+  const [week, setWeek] = useState<{ date: string; minutes?: number }[]>();
+  const [history, setHistory] = useState<CareAlert[]>();
+
+  useEffect(() => {
+    let cancelled = false;
+    setReport(undefined);
+    setWeek(undefined);
+    setHistory(undefined);
+    getMemberInfo(member.memberId).then((x) => !cancelled && setInfo(x), () => {});
+
+    // 昨夜睡眠：优先用驾驶舱报告（带评分和趋势），没有再用健康画像兜底
+    const today = dayjs().format("YYYY-MM-DD");
+    getLastNightReports(orgId)
+      .then(async (map) => map.get(member.memberId) ?? (await getPortraitSleep(member.memberId, today)) ?? null)
+      .then((r) => !cancelled && setReport(r), () => !cancelled && setReport(null));
+
+    // 近 7 天睡眠时长（健康画像按天查询）
+    const days = Array.from({ length: 7 }, (_, i) => dayjs().subtract(6 - i, "day").format("YYYY-MM-DD"));
+    Promise.all(days.map((d) => getPortraitSleep(member.memberId, d).catch(() => undefined))).then(
+      (rs) => !cancelled && setWeek(days.map((d, i) => ({ date: d, minutes: rs[i]?.totalNightSleepMinutes ?? rs[i]?.totalSleepMinutes }))),
+    );
+
+    getRecentAlertsOf(member.memberId).then((x) => !cancelled && setHistory(x), () => !cancelled && setHistory([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, member.memberId]);
+
+  const st = careState(member, live, alert, now);
+  const tone = TONE_STYLE[st.tone];
+  const showVitals = live && (live.heartRate || live.respiratoryRate) && st.tone !== "unknown";
+  const gender = info?.gender === 1 ? "男" : info?.gender === 2 ? "女" : "";
+
+  return (
+    <div className="page detail">
+      <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} className="detail-back">
+        返回
+      </Button>
+
+      {alert && (
+        <div className="detail-alert">
+          <span>
+            <b>{alert.alertTypeName}</b> · {sinceText(alert.createdAt, now)}，尚未处理
+          </span>
+          <Button type="primary" danger onClick={() => onProcess(alert)}>
+            处理
+          </Button>
+        </div>
+      )}
+
+      <section className="card detail-head">
+        <span className="elder-avatar big" style={{ background: tone.bg, color: tone.color }}>
+          {member.realName.charAt(0)}
+        </span>
+        <div className="detail-who">
+          <h1>{member.realName}</h1>
+          <span>{[member.age ?? info?.age ? `${member.age ?? info?.age} 岁` : "", gender, member.bedName].filter(Boolean).join(" · ")}</span>
+          {info?.checkedInAt && <small>{info.checkedInAt.slice(0, 10)} 入住</small>}
+        </div>
+        <div className="detail-now">
+          <div>
+            <small>现在</small>
+            <b style={{ color: tone.color }}>{st.text}</b>
+            <small>{st.detail ?? " "}</small>
+          </div>
+          {showVitals && (
+            <>
+              <div>
+                <small>心率</small>
+                <b>
+                  <span className="mono">{live?.heartRate ?? "—"}</span>
+                  <i> 次/分</i>
+                </b>
+              </div>
+              <div>
+                <small>呼吸</small>
+                <b>
+                  <span className="mono">{live?.respiratoryRate ?? "—"}</span>
+                  <i> 次/分</i>
+                </b>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      <div className="detail-grid">
+        <section className="card detail-sleep">
+          <h2>昨夜睡眠{report?.reportDate ? ` · ${dayjs(report.reportDate).subtract(1, "day").format("M 月 D 日")}晚` : ""}</h2>
+          {report === undefined ? (
+            <Skeleton active />
+          ) : report === null ? (
+            <Empty description="昨夜没有睡眠数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <SleepSummary r={report} />
+          )}
+        </section>
+
+        <section className="card detail-attention">
+          <h2>需要关注</h2>
+          <AttentionList report={report ?? undefined} attention={attention} />
+        </section>
+
+        <section className="card">
+          <h2>近 7 天睡眠时长</h2>
+          {!week ? <Skeleton active paragraph={{ rows: 3 }} /> : <WeekBars week={week} />}
+        </section>
+
+        <section className="card detail-span2">
+          <h2>夜间心率与呼吸</h2>
+          {report === undefined ? (
+            <Skeleton active paragraph={{ rows: 3 }} />
+          ) : report?.heartRateTrend?.some((v) => v > 0) || report?.breathingTrend?.some((v) => v > 0) ? (
+            <>
+              <Trend label="心率" unit="次/分" color="#E5484D" values={report.heartRateTrend} avg={report.avgHeartRate} start={report.fallAsleepTime} />
+              <Trend label="呼吸" unit="次/分" color="#3B4FD8" values={report.breathingTrend} avg={report.avgBreathingRate} start={report.fallAsleepTime} />
+            </>
+          ) : (
+            <Empty description="没有夜间心率呼吸数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </section>
+
+        <section className="card">
+          <h2>近期告警</h2>
+          {!history ? (
+            <Skeleton active paragraph={{ rows: 3 }} />
+          ) : history.length === 0 ? (
+            <p className="muted">最近没有告警</p>
+          ) : (
+            <ul className="history">
+              {history.map((a) => (
+                <li key={a.id}>
+                  <span className="mono">{a.createdAt.slice(5, 16)}</span>
+                  <b style={{ color: a.alertStatus === 1 ? "#B4232A" : undefined }}>{a.alertTypeName}</b>
+                  <span className="muted">{a.alertStatus === 1 ? "未处理" : ((a as { alertProcessTypeName?: string }).alertProcessTypeName ?? "已处理")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SleepSummary({ r }: { r: SleepReport }) {
+  const level = scoreLevel(r.sleepScore);
+  const total = r.totalNightSleepMinutes ?? r.totalSleepMinutes;
+  const segs = useMemo(() => [...(r.sleepDetails ?? [])].sort((a, b) => a.startTime - b.startTime), [r.sleepDetails]);
+  const t0 = segs[0]?.startTime ?? 0;
+  const span = Math.max((segs[segs.length - 1]?.endTime ?? t0) - t0, 1);
+  const stages = [
+    [4, r.deepSleepMinutes],
+    [3, r.lightSleepMinutes],
+    [2, r.remSleepMinutes],
+    [1, r.awakeMinutes],
+    [7, r.outOfBedMinutes],
+  ] as const;
+  const stageTotal = stages.reduce((n, [, m]) => n + (m ?? 0), 0) || 1;
+  const pct = r.sleepScore !== undefined ? Math.max(0, Math.min(100, r.sleepScore)) : 0;
+
+  return (
+    <div className="sleep">
+      <div className="sleep-top">
+        <div className="score-ring" aria-label={`睡眠评分 ${r.sleepScore ?? "暂无"}`}>
+          <svg width="108" height="108" viewBox="0 0 108 108" aria-hidden="true">
+            <circle cx="54" cy="54" r="46" fill="none" stroke="#F1F2F7" strokeWidth="10" />
+            <circle
+              cx="54"
+              cy="54"
+              r="46"
+              fill="none"
+              stroke={level.color}
+              strokeWidth="10"
+              strokeLinecap="round"
+              strokeDasharray={`${(pct / 100) * 289} 289`}
+              transform="rotate(-90 54 54)"
+            />
+          </svg>
+          <div>
+            <b className="mono">{r.sleepScore ?? "—"}</b>
+            <small style={{ color: level.color }}>{level.text}</small>
+          </div>
+        </div>
+        <dl className="sleep-stats">
+          <div>
+            <dt>睡眠时长</dt>
+            <dd>{minutesText(total)}</dd>
+          </div>
+          <div>
+            <dt>睡眠效率</dt>
+            <dd className="mono">{r.sleepEfficiency !== undefined ? `${r.sleepEfficiency}%` : "—"}</dd>
+          </div>
+          <div>
+            <dt>夜间离床</dt>
+            <dd>{r.leaveBedCount !== undefined ? `${r.leaveBedCount} 次` : "—"}</dd>
+          </div>
+          <div>
+            <dt>入睡 / 醒来</dt>
+            <dd className="mono">
+              {hm(r.fallAsleepTime)} – {hm(r.wakeUpTime)}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {segs.length > 0 && (
+        <div>
+          <div className="stage-bar" role="img" aria-label="睡眠结构">
+            {segs.map((s, i) => {
+              const st = SLEEP_STAGE[s.status];
+              if (!st) return null;
+              return (
+                <span
+                  key={i}
+                  title={`${st.label} ${dayjs(s.startTime).format("HH:mm")}–${dayjs(s.endTime).format("HH:mm")}`}
+                  style={{
+                    left: `${((s.startTime - t0) / span) * 100}%`,
+                    width: `${((s.endTime - s.startTime) / span) * 100}%`,
+                    background: st.color,
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="stage-axis mono">
+            <span>{dayjs(t0).format("HH:mm")}</span>
+            <span>{dayjs(t0 + span).format("HH:mm")}</span>
+          </div>
+        </div>
+      )}
+      <div className="stage-legend">
+        {stages.map(([k, m]) => (
+          <span key={k}>
+            <i style={{ background: SLEEP_STAGE[k].color }} />
+            {SLEEP_STAGE[k].label} {minutesText(m)}
+            <em> {Math.round(((m ?? 0) / stageTotal) * 100)}%</em>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AttentionList({ report, attention }: { report?: SleepReport; attention?: AttentionItem }) {
+  const items: string[] = (attention?.attentionReasons ?? []).map((r) => ATTENTION_REASON[r] ?? r);
+  if (report) {
+    const total = report.totalNightSleepMinutes ?? report.totalSleepMinutes;
+    if (report.sleepScore !== undefined && report.sleepScore < 60 && !items.includes("睡眠评分过低")) items.push(`睡眠评分 ${report.sleepScore} 分，低于 60 分`);
+    if (total !== undefined && total > 0 && total < 300 && !items.includes("睡眠时长过短")) items.push(`睡眠时长只有 ${minutesText(total)}`);
+    if ((report.leaveBedCount ?? 0) >= 4 && !items.includes("频繁起夜")) items.push(`夜间离床 ${report.leaveBedCount} 次`);
+    if (report.ahi !== undefined && report.ahi >= 15 && !items.includes("呼吸紊乱指数偏高")) items.push(`呼吸紊乱指数 ${report.ahi}，偏高`);
+  }
+  if (!items.length) return <p className="muted">目前没有需要特别关注的地方</p>;
+  return (
+    <ul className="attention-reasons">
+      {items.map((t) => (
+        <li key={t}>{t}</li>
+      ))}
+    </ul>
+  );
+}
+
+function WeekBars({ week }: { week: { date: string; minutes?: number }[] }) {
+  const max = Math.max(480, ...week.map((d) => d.minutes ?? 0));
+  return (
+    <div className="week">
+      {week.map((d) => (
+        <div key={d.date} className="week-col">
+          <small className="mono">{d.minutes ? (d.minutes / 60).toFixed(1) : "—"}</small>
+          <span style={{ height: `${((d.minutes ?? 0) / max) * 96}px`, background: (d.minutes ?? 0) < 300 ? "#F5C26B" : "#8EA0FF" }} />
+          <small>{dayjs(d.date).format("ddd")}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 夜间趋势：从入睡开始，每 10 分钟一个点，<= 0 为无数据 */
+function Trend({ label, unit, color, values = [], avg, start }: { label: string; unit: string; color: string; values?: number[]; avg?: number; start?: string }) {
+  const pts = values.map((v) => (v > 0 ? v : undefined));
+  const nums = pts.filter((v): v is number => v !== undefined);
+  if (!nums.length) return null;
+  const lo = Math.min(...nums) - 3;
+  const hi = Math.max(...nums) + 3;
+  const W = 600;
+  const H = 70;
+  const x = (i: number) => (pts.length > 1 ? (i / (pts.length - 1)) * W : 0);
+  const y = (v: number) => H - ((v - lo) / Math.max(hi - lo, 1)) * H;
+  // 无数据处断开
+  let d = "";
+  let pen = false;
+  pts.forEach((v, i) => {
+    if (v === undefined) return void (pen = false);
+    d += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
+    pen = true;
+  });
+  const t0 = start ? dayjs(start) : undefined;
+  return (
+    <div className="trend">
+      <div className="trend-meta">
+        <span style={{ color }}>{label}</span>
+        <span className="muted">
+          平均 <b className="mono">{avg ?? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)}</b> {unit} · 范围 {Math.min(...nums)}–{Math.max(...nums)}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="trend-svg" role="img" aria-label={`${label}夜间趋势`}>
+        <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {t0 && (
+        <div className="stage-axis mono">
+          <span>{t0.format("HH:mm")}</span>
+          <span>{t0.add((pts.length - 1) * 10, "minute").format("HH:mm")}</span>
+        </div>
+      )}
+    </div>
+  );
+}

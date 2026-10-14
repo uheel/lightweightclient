@@ -3,7 +3,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
+import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
+
+dayjs.locale("zh-cn");
 import { baseTheme } from "@radar/core";
 import RootApp from "./App";
 import "./styles.css";

@@ -4,6 +4,7 @@ import type { Session } from "@radar/core";
 import { useCareData } from "../care/useCareData";
 import { alertLocation, careState, sinceText, TONE_STYLE, type CareState } from "../care/state";
 import { ATTENTION_REASON, type CareAlert, type Member } from "../care/api";
+import ElderDetail from "./ElderDetail";
 
 type Filter = "all" | "attention" | "bed" | "away" | "paused";
 
@@ -46,6 +47,8 @@ export default function CareHome({
   const { members, attention, alertByMember, liveOf, loading, error, now } = useCareData(s.orgId, alerts.list);
   const [filter, setFilter] = useState<Filter>("all");
   const setProcessing = onProcess;
+  /** 正在查看详情的长者 */
+  const [selected, setSelected] = useState<string>();
 
   const attentionIds = useMemo(() => new Set(attention.items.map((a) => a.memberId)), [attention.items]);
 
@@ -61,11 +64,26 @@ export default function CareHome({
     for (const f of FILTERS) c[f.key] = rows.filter((r) => match(f.key, r.st, r.m, attentionIds)).length;
     return c;
   }, [rows, attentionIds]);
+  const selectedMember = selected ? members.find((m) => m.memberId === selected) : undefined;
   const visible = rows.filter((r) => match(filter, r.st, r.m, attentionIds));
   const inRoom = rows.filter((r) => r.st.tone !== "idle" && r.st.tone !== "unknown").length;
 
   return (
     <div className="care">
+      {selectedMember ? (
+        <main className="care-main">
+          <ElderDetail
+            orgId={s.orgId}
+            member={selectedMember}
+            live={liveOf(selectedMember)}
+            alert={alertByMember[selectedMember.memberId]}
+            attention={attention.items.find((a) => a.memberId === selectedMember.memberId)}
+            now={now}
+            onBack={() => setSelected(undefined)}
+            onProcess={onProcess}
+          />
+        </main>
+      ) : (
       <main className="care-main">
         <div className="care-head">
           <div>
@@ -106,9 +124,11 @@ export default function CareHome({
               return (
                 <article
                   key={m.memberId}
-                  className={`elder-card tone-${st.tone}${alertByMember[m.memberId] ? " clickable" : ""}`}
+                  className={`elder-card clickable tone-${st.tone}`}
                   style={{ borderColor: tone.border }}
-                  onClick={alertByMember[m.memberId] ? () => setProcessing(alertByMember[m.memberId]) : undefined}
+                  onClick={() => setSelected(m.memberId)}
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === "Enter" && setSelected(m.memberId)}
                 >
                   <div className="elder-who">
                     <span className="elder-avatar" style={{ background: tone.bg, color: tone.color }}>
@@ -151,6 +171,7 @@ export default function CareHome({
           </div>
         )}
       </main>
+      )}
 
       <aside className="care-side">
         <section>
