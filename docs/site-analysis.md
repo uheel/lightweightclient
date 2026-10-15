@@ -454,3 +454,19 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `spaceType`（空间区域类型，干扰区和门没有）、`spaceTypeOut`（门的"出区域类型"）：字典 `GET /sapi/code/options?codeType=ROOM_SPACE_TYPE`，51 床、52 沙发、53 过道、54 会客、55 餐厅、56 马桶、57 淋浴、58 洗漱、59 更衣、60 阅读
 - 雷达元素的 `rangeType`（安装区域）：字典 `RADAR_INSTALL_AREA`，1 卧室、2 客厅、3 卫生间、4 厨房、5 其他
 - 下发给设备的 `QL_radar_para_area` 只带 `[index, type, 坐标]`，`spaceType` 不下发，只在平台侧使用
+
+## 长者建档与入住（2026-10-15 在李虎机构实测）
+
+| 接口 | 说明 |
+|---|---|
+| `POST /api/member` | 建档，返回长者 id。必填 `realName`、`phoneNumber`；其他：`gender`（1 男 2 女）、`age`、`birthDate`、`idType`（字典 `ID_TYPE`：1 身份证，2 护照，3 港澳通行证，4 台湾通行证，5 其他）、`idNumber`、`memberType`（老人分类，字典 `HEALTH_STATUS`：1 健康，2 慢性病，3 重病，4 残疾，5 空巢老人，6 重点看护）、`height`、`weight`、`address` 等 |
+| `GET /api/member?id=` | 详情，手机号不打码 |
+| `GET /api/member/pages?filter[phoneNumber]=` | 列表，可按手机号筛选，返回的手机号**打码**（`100****0001`）；`checkType` 1 已登记 / 2 已入住，带楼栋、楼层、房间、床位 |
+| `GET /api/member/search?keyword=` | **只返回已登记未入住的长者**（入住办理用），不能拿来判断是否已有档案 |
+| `GET /api/member/checked-in-search?keyword=` | 只返回已入住的 |
+| `PUT /api/member/check-in` | `{memberId, bedId, date:"YYYY-MM-DD"}` 办理入住 |
+| `PUT /api/member/check-out` | `{memberId, checkOutReason, description}` 退住 |
+| `GET /api/bed/options-with-floor?buildingId&floorId` | 某楼层的床位 `{bedId, bedName, roomName, memberId?, realName?}`，**必须带楼栋和楼层**；楼栋 `/api/building/options`，楼层 `/api/floor/options?buildingId=` |
+
+- **平台按手机号识别长者**：`POST /api/member` 时手机号已存在（实测那位长者最后由别的机构编辑过），平台不新建、不改资料，直接返回已有长者的 id，而且这位长者随后出现在当前机构的列表里
+- 床位名常带房间号前缀（如"101房间-1床"）

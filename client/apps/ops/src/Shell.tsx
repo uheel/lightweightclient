@@ -1,14 +1,15 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, FileSearchOutlined, HddOutlined, LogoutOutlined, NotificationOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, FileSearchOutlined, HddOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import AlertsPage from "./pages/AlertsPage";
 import LogsPage from "./pages/LogsPage";
 import ScenesPage from "./pages/ScenesPage";
+import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 
-type NavKey = "devices" | "scenes" | "alerts" | "logs" | "realtime";
+type NavKey = "devices" | "scenes" | "members" | "alerts" | "logs" | "realtime";
 
 async function logout() {
   await stopRealtime();
@@ -42,6 +43,7 @@ export default function Shell({ s }: { s: Session }) {
   const items: ShellNavItem<NavKey>[] = [
     { key: "devices", label: "设备", icon: <HddOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
+    { key: "members", label: "长者", icon: <TeamOutlined /> },
     { key: "alerts", label: "告警", icon: <AlertOutlined /> },
     { key: "logs", label: "日志", icon: <FileSearchOutlined /> },
     { key: "realtime", label: "推送", icon: <NotificationOutlined />, badge: nav === "realtime" ? 0 : unread },
@@ -83,6 +85,8 @@ export default function Shell({ s }: { s: Session }) {
           <DevicesPage onOpenLogs={openLogs} />
         ) : nav === "scenes" ? (
           <ScenesPage />
+        ) : nav === "members" ? (
+          <MembersPage />
         ) : nav === "alerts" ? (
           <AlertsPage />
         ) : nav === "logs" ? (

@@ -238,3 +238,19 @@
 .scene-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #5B6078; }
 .scene-progress .ant-progress { width: 160px; margin: 0; }
 .scene-fail { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* 批量导入长者 */
+.mem-start { display: flex; flex-direction: column; gap: 18px; }
+.mem-steps { display: grid; grid-template-columns: 1fr 1.4fr; gap: 24px; }
+.mem-steps h2 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+.mem-steps p { margin: 0 0 12px; font-size: 13px; }
+.mem-steps .ant-upload-wrapper { display: block; }
+.mem-cell { display: flex; flex-direction: column; line-height: 1.4; min-width: 0; }
+.mem-cell b { font-weight: 500; }
+.mem-cell small { font-size: 12px; color: #8A8FA8; }
+.mem-msgs { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.mem-result { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.mem-result small { font-size: 12px; color: #5B6078; }
+.mem-row-err td { background: #FFF8F8 !important; }
+.mem-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #5B6078; }
+.mem-progress .ant-progress { width: 160px; margin: 0; }
