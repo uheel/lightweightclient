@@ -202,7 +202,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 ```
 
 3. 实时推送的每个目标包含 `{x, y, userIndex, areaName, posture}`，这些字段在 RoomView store 的 `userPositions` 里
-   - 轨迹帧（msgType 5）每个目标是 `[人数, x, y, z, 姿态, 目标序号, 区域名, 区域序号]`。**区域名 / 区域序号是这个人最近一次进入的区域，不是当前所在位置**，进入下一个区域前一直不变；序号 255 表示还没进过任何区域（2026-10-15 实测藕塘 03房07床：从门进房后在房间中间来回走动，一直报"门|1"）。区域来自设备自身的配置，房间平面图的 `ranges` 是空的。事件时间线里的进出房间事件（1 / 2）也带着经过的门
+   - 轨迹帧（msgType 5）每个目标是 `[人数, x, y, z, 姿态, 目标序号, 区域名, 区域序号]`。**区域名 / 区域序号是这个人最近一次进入的区域，不是当前所在位置**，进入下一个区域前一直不变；序号 255 表示还没进过任何区域（2026-10-15 实测藕塘 03房07床：从门进房后在房间中间来回走动，一直报"门|1"）。区域在平台的房间户型里配置后下发到设备：`/api/room-view/room-info` 里的 `ranges` 是空的，完整配置在 `/api/room-view/v3/detail?roomId=` 每个雷达的 `qingLanConfig.ranges`（`{type, index, text, x, y, width, height}`，单位 cm，门是 10 cm 宽的细条）。侧装朝右（installType 1，installDirection 2）时，实时目标 (x, y) 对应区域坐标 (radar.x − y, radar.y − x)，用在床的点核对过（2026-10-15）。客户端暂不显示当前位置（用户决定先不做）。事件时间线里的进出房间事件（1 / 2）也带着经过的门
 4. **历史轨迹点 `trajectory-points` / 热力图 `heatmap-points` 的坐标系因设备类型而异**（2026-10-14 实测）。平台自带的轨迹回放和热力图都是直接画原始坐标，**对 FallSense 一类设备是错的**，人会被画到房间外面
    - **AIO Care Terminal（类型 6）**：原始坐标就是房间坐标（cm），直接画即可
    - **FallSense Terminal（类型 13）**：原始坐标是相对雷达的（cm），而且 **y 轴方向和实时数据相反**。先把 y 取反，再用上面的 `toRoom`（单位 cm，不带旋转）换算
