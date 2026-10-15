@@ -1,12 +1,12 @@
 import { Alert, Button, Card, Empty, Tag, Typography } from "antd";
 import dayjs from "dayjs";
-import { realtime, startRealtime, type RealtimeEvent, type RealtimeState } from "@radar/core";
+import { realtime, startRealtime, status, type RealtimeEvent, type RealtimeState } from "@radar/core";
 
-export const STATE_TEXT: Record<RealtimeState, { text: string; color: string }> = {
-  connected: { text: "已连接", color: "success" },
-  connecting: { text: "连接中", color: "processing" },
-  reconnecting: { text: "重连中", color: "warning" },
-  disconnected: { text: "未连接", color: "default" },
+export const STATE_TEXT: Record<RealtimeState, { text: string; color: string; dot: string }> = {
+  connected: { text: "已连接", color: "success", dot: status.online.dot },
+  connecting: { text: "连接中", color: "processing", dot: status.warning.dot },
+  reconnecting: { text: "重连中", color: "warning", dot: status.warning.dot },
+  disconnected: { text: "未连接", color: "default", dot: status.alert.dot },
 };
 
 export default function RealtimePage({

@@ -1,5 +1,5 @@
 import { LoginPage, SessionGate } from "@radar/core";
-import MainLayout from "./pages/MainLayout";
+import Shell from "./Shell";
 
 export default function RootApp() {
   return (
@@ -13,7 +13,7 @@ export default function RootApp() {
         />
       )}
     >
-      {(s) => <MainLayout s={s} />}
+      {(s) => <Shell s={s} />}
     </SessionGate>
   );
 }
