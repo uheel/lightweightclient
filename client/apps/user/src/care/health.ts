@@ -179,13 +179,22 @@ export function scoreLevel(score?: number) {
 export interface VitalPoint {
   /** 毫秒时间戳（整分钟） */
   t: number;
+  /** 这一分钟有效读数的平均值 */
   hr?: number;
   rr?: number;
-  /** 这一分钟平台的每分钟汇总里没有，是用设备原始记录补上的 */
-  filled?: boolean;
+  hrMin?: number;
+  hrMax?: number;
+  rrMin?: number;
+  rrMax?: number;
+  /** 这一分钟有效读数条数（心率或呼吸大于 0 的记录）；平台每分钟汇总兜底时没有 */
+  n?: number;
 }
 
-/** 每分钟心率呼吸（按时间范围查询，已实测 filter[minuteAt]=开始,结束 可用） */
+/**
+ * 平台的每分钟心率呼吸汇总（filter[minuteAt]=开始,结束）。
+ * 注意：名为平均，实际每分钟只取 1 个样本（heartRateSampleCount 恒为 1，取样秒数在整分钟内漂移），
+ * 取样时刻正好没有记录时整分钟丢掉。只在设备原始记录查不到时兜底用，见 getDeviceVitals。
+ */
 export async function getVitalMinutes(memberId: string, start: number, end: number): Promise<VitalPoint[]> {
   const f = (t: number) => {
     const d = new Date(t);
@@ -464,64 +473,103 @@ function fmtSec(t: number) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+type RawVitalRow = { deviceTime?: string; createdAt?: string; heartRate?: number; respirationRate?: number };
+
+const RAW_PAGE = 5000;
+
 /**
- * 设备原始心率呼吸（/api/device/ql-respiratory-rate/pages，约每 2 秒一条），按分钟取平均。
- * AIO（6）和 UltraFall（13）都在这个接口里。
+ * 设备原始心率呼吸（/api/device/ql-respiratory-rate/pages，约每 2 秒一条），一台设备一段时间的全部记录。
+ * AIO（6）和 UltraFall（13）都在这个接口里。先取第一页拿到总数，其余页并行取。
+ * 实测（迪立莱 10-14 夜，12 小时 16385 条，约 2.3 MB）：整晚 0.4–0.5 秒。
  */
-export async function getRawVitalMinutes(sn: string, start: number, end: number): Promise<VitalPoint[]> {
-  const rows: { deviceTime?: string; createdAt?: string; heartRate?: number; respirationRate?: number }[] = [];
-  for (let page = 1; page <= 10; page++) {
-    const r = await api.get<typeof rows>("/api/device/ql-respiratory-rate/pages", {
-      params: { current: page, pageSize: 2000 },
+async function getRawVitalRows(sn: string, start: number, end: number): Promise<RawVitalRow[]> {
+  const page = (current: number) =>
+    api.get<RawVitalRow[]>("/api/device/ql-respiratory-rate/pages", {
+      params: { current, pageSize: RAW_PAGE },
       filter: { sn, deviceTime: `${fmtSec(start)},${fmtSec(end - 1000)}` },
     });
-    rows.push(...(r.data ?? []));
-    if (!r.data?.length || rows.length >= (r.total ?? 0)) break;
+  const first = await page(1);
+  const rows = [...(first.data ?? [])];
+  const pages = Math.min(20, Math.ceil((first.total ?? 0) / RAW_PAGE));
+  if (pages > 1) {
+    const rest = await mapLimit(
+      Array.from({ length: pages - 1 }, (_, i) => i + 2),
+      4,
+      page,
+    );
+    for (const r of rest) rows.push(...(r.data ?? []));
   }
-  const byMin = new Map<number, { hr: number[]; rr: number[] }>();
+  return rows;
+}
+
+/** 原始记录按整分钟归组：每分钟取有效读数（大于 0）的平均、最低、最高，并记下有效读数条数 */
+function minutesOfRaw(rows: RawVitalRow[]): VitalPoint[] {
+  const byMin = new Map<number, { hr: number[]; rr: number[]; n: number }>();
   for (const x of rows) {
     const t = Date.parse((x.deviceTime || x.createdAt || "").replace(" ", "T"));
     if (Number.isNaN(t)) continue;
+    const hr = x.heartRate && x.heartRate > 0 ? x.heartRate : 0;
+    const rr = x.respirationRate && x.respirationRate > 0 ? x.respirationRate : 0;
+    if (!hr && !rr) continue;
     const m = Math.floor(t / 60_000) * 60_000;
-    const b = byMin.get(m) ?? { hr: [], rr: [] };
-    if (x.heartRate && x.heartRate > 0) b.hr.push(x.heartRate);
-    if (x.respirationRate && x.respirationRate > 0) b.rr.push(x.respirationRate);
+    const b = byMin.get(m) ?? { hr: [], rr: [], n: 0 };
+    if (hr) b.hr.push(hr);
+    if (rr) b.rr.push(rr);
+    b.n++;
     byMin.set(m, b);
   }
   const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : undefined);
+  const min = (xs: number[]) => (xs.length ? Math.min(...xs) : undefined);
+  const max = (xs: number[]) => (xs.length ? Math.max(...xs) : undefined);
   return [...byMin.entries()]
-    .map(([t, b]) => ({ t, hr: avg(b.hr), rr: avg(b.rr), filled: true }))
-    .filter((p) => p.hr || p.rr)
+    .map(([t, b]) => ({ t, hr: avg(b.hr), rr: avg(b.rr), hrMin: min(b.hr), hrMax: max(b.hr), rrMin: min(b.rr), rrMax: max(b.rr), n: b.n }))
     .sort((a, b) => a.t - b.t);
 }
 
+// 已结束时段的结果存在本机（数据不会再变）：内存一份，localStorage 一份，最多保留 30 晚（每晚约 50 KB）
+const VITAL_CACHE_KEY = "RC_VITAL_CACHE_V1";
+const VITAL_CACHE_MAX = 30;
+const vitalMem = new Map<string, VitalPoint[]>();
+
+function vitalCacheRead(key: string): VitalPoint[] | undefined {
+  if (vitalMem.has(key)) return vitalMem.get(key);
+  try {
+    const all = JSON.parse(localStorage.getItem(VITAL_CACHE_KEY) || "{}") as Record<string, { at: number; v: VitalPoint[] }>;
+    const hit = all[key]?.v;
+    if (hit) vitalMem.set(key, hit);
+    return hit;
+  } catch {
+    return undefined;
+  }
+}
+
+function vitalCacheWrite(key: string, v: VitalPoint[]) {
+  vitalMem.set(key, v);
+  try {
+    const all = JSON.parse(localStorage.getItem(VITAL_CACHE_KEY) || "{}") as Record<string, { at: number; v: VitalPoint[] }>;
+    all[key] = { at: Date.now(), v };
+    const keys = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
+    for (const k of keys.slice(VITAL_CACHE_MAX)) delete all[k];
+    localStorage.setItem(VITAL_CACHE_KEY, JSON.stringify(all));
+  } catch {
+    /* 存不下就只留内存缓存 */
+  }
+}
+
 /**
- * 用设备原始记录补上每分钟汇总里缺的分钟。
- * 平台按分钟汇总时，样本少的分钟会被整分钟丢掉（例如迪立莱 10-15 04:13 原始记录有 12 条心率呼吸，汇总里却没有这一分钟），
- * 导致这一分钟被误判为不在床。只对缺的时段去查原始记录，每段一次请求。
+ * 一晚的每分钟心率呼吸：直接取设备原始记录，客户端自己按分钟求平均。
+ * 不用平台的每分钟汇总：它每分钟只取 1 个样本，数值不是平均，还会整分钟丢失（见 getVitalMinutes）。
+ * 长者绑了多台设备时，同一分钟的读数合在一起算。原始接口查不到任何记录（其他类型的设备）时，才退回平台汇总。
  */
-export async function fillVitalGaps(vitals: VitalPoint[], sns: string[], start: number, end: number): Promise<VitalPoint[]> {
-  if (!sns.length) return vitals;
-  const MIN = 60_000;
-  const have = new Set(vitals.filter((p) => p.hr || p.rr).map((p) => Math.floor(p.t / MIN)));
-  const runs: [number, number][] = [];
-  for (let m = Math.floor(start / MIN); m * MIN < end; m++) {
-    if (have.has(m)) continue;
-    const last = runs[runs.length - 1];
-    if (last && last[1] === m * MIN) last[1] = (m + 1) * MIN;
-    else runs.push([m * MIN, (m + 1) * MIN]);
+export async function getDeviceVitals(memberId: string, sns: string[], start: number, end: number): Promise<VitalPoint[]> {
+  const key = `${sns.join(",")}|${start}|${end}`;
+  const closed = end < Date.now() - 5 * 60_000;
+  if (closed) {
+    const hit = vitalCacheRead(key);
+    if (hit) return hit;
   }
-  if (!runs.length) return vitals;
-  const filled = (
-    await mapLimit(runs, 4, async ([a, b]) => {
-      const parts = await Promise.all(sns.map((sn) => getRawVitalMinutes(sn, a, b).catch(() => [] as VitalPoint[])));
-      return parts.flat();
-    })
-  ).flat();
-  const merged = new Map<number, VitalPoint>();
-  for (const p of [...vitals, ...filled]) {
-    const k = Math.floor(p.t / MIN);
-    if (!merged.has(k)) merged.set(k, { ...p, t: k * MIN });
-  }
-  return [...merged.values()].sort((a, b) => a.t - b.t);
+  const rows = (await Promise.all(sns.map((sn) => getRawVitalRows(sn, start, end).catch(() => [] as RawVitalRow[])))).flat();
+  const v = rows.length ? minutesOfRaw(rows) : await getVitalMinutes(memberId, start, end);
+  if (closed && rows.length) vitalCacheWrite(key, v);
+  return v;
 }

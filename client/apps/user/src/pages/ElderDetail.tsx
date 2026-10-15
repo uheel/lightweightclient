@@ -18,8 +18,7 @@ import {
   STAGE_ORDER,
   derivedTimes,
   getPostureTimeline,
-  getVitalMinutes,
-  fillVitalGaps,
+  getDeviceVitals,
   stageCodesOf,
   wakeCutByCover,
   stageMinutesOf,
@@ -96,11 +95,9 @@ export default function ElderDetail({
     const start = startC.length ? Math.min(...startC) : night.subtract(1, "day").hour(20).valueOf();
     // 报告有固定的统计窗口（例如到 08:00 截止），人可能之后才起床；设备数据在报告结束后多取 3 小时
     const end = Math.min(Date.now(), (endC.length ? Math.max(...endC) : night.hour(9).valueOf()) + 3 * 3_600_000);
-    // 设备每分钟上报的心率呼吸：曲线和"在床"判断都以它为准（报告附带的序列是平台加工的，偶有空缺）
-    // 平台每分钟汇总会丢掉样本少的分钟，缺的分钟再用设备原始记录补
+    // 设备原始心率呼吸（约每 2 秒一条），客户端自己按分钟求平均：曲线和"在床"判断都以它为准
     const sns = (member.devices ?? []).map((d) => d.sn).filter(Boolean);
-    getVitalMinutes(member.memberId, start, end)
-      .then((v) => fillVitalGaps(v, sns, start, Math.min(end, Date.now())))
+    getDeviceVitals(member.memberId, sns, start, end)
       .then(
         (v) => !cancelled && setVitals(v),
         () => !cancelled && setVitals([]),

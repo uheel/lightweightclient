@@ -202,6 +202,8 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .night-radar span { position: absolute; top: 0; bottom: 0; }
 .night-legend-sep { margin-left: 8px; color: #8A8FA8; }
 .night-tip-note.warn { color: #FF9AA2; }
+.night-tip-note.info { color: #B9BDD0; }
+.night-tip-range { margin-left: 4px; font-size: 11px; color: #B9BDD0; }
 
 /* 长者 / 告警 / 健康列表页 */
 .cell-who { display: flex; align-items: center; gap: 10px; }

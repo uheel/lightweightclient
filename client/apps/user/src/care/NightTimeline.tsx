@@ -18,7 +18,7 @@ import {
  * 鼠标悬停时一条竖线贯穿三行，提示框显示该时刻的睡眠阶段、心率、呼吸。
  *
  * 心率呼吸数据来源（优先级从高到低）：
- * 1. 设备每分钟上报的记录 vitals（radar-vital-minute-pages）——设备原始数据，最可靠
+ * 1. 设备原始记录 vitals（约每 2 秒一条，客户端按分钟求平均，见 getDeviceVitals）——最可靠
  * 2. 睡眠报告附带的序列 hrPoints / brPoints（平台生成报告时加工的，偶有空缺：
  *    例如迪立莱 10-14 03:24 报告里为空，设备记录却有 64/11）
  * 3. 报告里的 heartRateTrend / breathingTrend（从入睡时间起每 10 分钟一个点，<= 0 表示没有数据）
@@ -172,9 +172,12 @@ export default function NightTimeline({
     };
   };
   const info = hover !== undefined ? at(hover) : undefined;
+  const hoverVital = hover !== undefined && series.some((s) => s.gap <= 5 * 60_000) ? vitals?.find((p) => Math.floor(p.t / 60_000) === Math.floor(hover / 60_000)) : undefined;
   const hoverPct = hover !== undefined ? ((hover - t0) / (t1 - t0)) * 100 : 0;
   const source = vitals?.some((p) => p.hr || p.rr)
-    ? "设备每分钟记录"
+    ? vitals.some((p) => p.n !== undefined)
+      ? "设备原始记录（每分钟平均）"
+      : "平台每分钟汇总"
     : r.hrPoints?.length || r.brPoints?.length
       ? "睡眠报告附带序列"
       : series.length
@@ -316,15 +319,24 @@ export default function NightTimeline({
                   </div>
                 )}
                 {info.conflict && <div className="night-tip-note warn">睡眠报告与雷达位置不一致</div>}
-                {series.map((s, i) => (
-                  <div key={s.label}>
-                    <i style={{ background: s.color }} />
-                    {s.label} <b className="mono">{info.values[i] ?? "—"}</b> {info.values[i] !== undefined ? s.unit : ""}
-                  </div>
-                ))}
-                {hover !== undefined && vitals?.some((p) => p.filled && Math.floor(p.t / 60_000) === Math.floor(hover / 60_000)) && (
-                  <div className="night-tip-note">这一分钟来自设备原始记录（平台汇总里缺失）</div>
-                )}
+                {series.map((s, i) => {
+                  // 设备原始记录算出的分钟：附上这一分钟的最低–最高
+                  const lo = s.label === "心率" ? hoverVital?.hrMin : hoverVital?.rrMin;
+                  const hi = s.label === "心率" ? hoverVital?.hrMax : hoverVital?.rrMax;
+                  return (
+                    <div key={s.label}>
+                      <i style={{ background: s.color }} />
+                      {s.label} <b className="mono">{info.values[i] ?? "—"}</b> {info.values[i] !== undefined ? s.unit : ""}
+                      {info.values[i] !== undefined && lo !== undefined && hi !== undefined && lo !== hi && (
+                        <span className="night-tip-range mono">
+                          {" "}
+                          {lo}–{hi}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                {hoverVital?.n !== undefined && <div className="night-tip-note info">这一分钟设备有效读数 {hoverVital.n} 条，数值为平均</div>}
                 {/* 离床只表示不在床上：人离床后仍在雷达探测范围内活动时，平台照样记录心率呼吸，但活动中的数值不如静卧时准确 */}
                 {info.leave && info.values.some((v) => v !== undefined) && <div className="night-tip-note">离床活动中测得，仅供参考</div>}
               </div>

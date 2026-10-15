@@ -1,3 +1,6 @@
+#[path = "../../../../packages/core/rust/api_http.rs"]
+mod api_http;
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -24,8 +27,9 @@ pub fn run() {
     }
 
     builder
-        // 前端通过 plugin-http 发请求，请求由 Rust 层发出，不受 WebView 的 CORS 限制
+        // 平台接口由 Rust 层发出（不受 WebView 的 CORS 限制），共用一个连接池，见 api_http.rs
         .plugin(tauri_plugin_http::init())
+        .invoke_handler(tauri::generate_handler![api_http::api_request])
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "打开康养看护", true, None::<&str>)?;

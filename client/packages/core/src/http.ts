@@ -1,4 +1,4 @@
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { invoke } from "@tauri-apps/api/core";
 import { session } from "./session";
 
 /** 平台统一的响应格式 */
@@ -18,10 +18,16 @@ export class ApiError extends Error {
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
 /**
- * Tauri 里用 plugin-http（请求由 Rust 层发出，绕开 WebView 的 CORS）；
- * 普通浏览器调试时走 vite 的 /__proxy 代理，目标服务器见 vite.config.ts。
+ * Tauri 里调用 Rust 命令 api_request（请求由 Rust 层发出，绕开 WebView 的 CORS，并且共用连接池，见 rust/api_http.rs）；
+ * 普通浏览器调试时走 vite 的 /__proxy 代理，目标服务器见 vite.js。
  */
-const doFetch: typeof fetch = isTauri ? tauriFetch : window.fetch.bind(window);
+async function tauriFetch(url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<Response> {
+  const r = await invoke<{ status: number; body: string }>("api_request", { method: init.method, url, headers: init.headers, body: init.body ?? null });
+  const empty = r.status === 204 || r.status === 205 || r.status === 304;
+  return new Response(empty ? null : r.body, { status: r.status });
+}
+
+const doFetch = isTauri ? tauriFetch : (url: string, init: RequestInit) => window.fetch(url, init);
 
 export function apiBase(server: string) {
   return isTauri ? server.replace(/\/+$/, "") : "/__proxy";
