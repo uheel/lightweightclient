@@ -42,13 +42,16 @@ export function careState(member: Member, live: LiveData | undefined, alert: Car
   // 在床：最近 1 分钟内测到过心率或呼吸（人在床上设备一定测得到，离开后就没有；不看姿态，翻身、坐起时姿态常报成坐 / 静止）
   const t = Math.max(now, live.updatedAt);
   const inBed = live.vitalsAt !== undefined && t - live.vitalsAt <= IN_BED_MS;
+  // 房间里不止一个人时提示一下（姿态取的是在床上那个人，见 parseDeviceData）
+  const others = (live.targets ?? 0) > 1 ? `房间内 ${live.targets} 人` : undefined;
   if (inBed) {
     // 睡着只看设备的睡眠状态（1 浅睡，2 深睡）；醒着再按姿态说清楚在床上做什么
-    if (live.sleepStatus === 1 || live.sleepStatus === 2) return { text: "在床睡觉", tone: "bed", detail: live.sleepStatus === 2 ? "深睡" : "浅睡" };
+    if (live.sleepStatus === 1 || live.sleepStatus === 2)
+      return { text: "在床睡觉", tone: "bed", detail: [live.sleepStatus === 2 ? "深睡" : "浅睡", others].filter(Boolean).join(" · ") };
     const p = live.posture;
     const text =
       p === 9 ? "床上坐起" : p === 3 ? "在床坐着" : p === 0 || p === 4 ? "在床静止" : p === 6 ? "在床躺着" : p === 1 ? "在床活动" : "在床";
-    return { text, tone: "bed", detail: live.sleepStatus === 3 ? "醒着" : undefined };
+    return { text, tone: "bed", detail: [live.sleepStatus === 3 ? "醒着" : undefined, others].filter(Boolean).join(" · ") || undefined };
   }
   // 能测心率呼吸的设备、最近没测到：不在床上
   const vitalsDevice = live.vitalsAt !== undefined || live.sleepStatus !== undefined;

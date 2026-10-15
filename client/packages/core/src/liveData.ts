@@ -30,6 +30,8 @@ export interface LiveData {
   presence?: number;
   /** 姿态，见 POSTURE */
   posture?: number;
+  /** 雷达跟踪到的人数（轨迹上报） */
+  targets?: number;
   /** 所在区域名（房间里划的区域，例如"卫生间""监护床"） */
   areaName?: string;
   /** 青岚（msgType 4）：1 浅睡，2 深睡，3 清醒；超宽带（msgType 6）的编码未核对 */
@@ -65,6 +67,9 @@ export const POSTURE: Record<number, string> = {
   10: "疑似床上坐起",
   11: "确认床上坐起",
 };
+
+/** 人在床上的姿态：在床、床上坐起（含疑似 / 确认） */
+export const BED_POSTURES = new Set([6, 9, 10, 11]);
 
 /** 需要立即处理的姿态 */
 export const ALARM_POSTURES = new Set([2, 5, 7, 8, 10, 11]);
@@ -111,11 +116,13 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
     case 5: {
       if (!a) return null;
       const targets = a.filter(Array.isArray) as unknown[][];
-      // 有多个目标时，优先取需要处理的姿态
-      const sorted = [...targets].sort((x, y) => Number(ALARM_POSTURES.has(Number(y[4]))) - Number(ALARM_POSTURES.has(Number(x[4]))));
-      const t = sorted[0];
+      // 房间里有多人时（例如护理员在床边），优先取在床上的那个人：在床区域内、或姿态是在床 / 床上坐起；
+      // 没人在床再取需要处理的姿态，最后取第一个目标
+      const onBed = (t: unknown[]) => (typeof t[6] === "string" && t[6].includes("床")) || BED_POSTURES.has(Number(t[4]));
+      const t = targets.find(onBed) ?? targets.find((x) => ALARM_POSTURES.has(Number(x[4]))) ?? targets[0];
       return {
         presence: targets.length && (num(targets[0][0]) ?? 0) > 0 ? 1 : 0,
+        targets: targets.length,
         posture: t ? num(t[4]) : undefined,
         areaName: t && typeof t[6] === "string" ? t[6] : undefined,
         online: true,
