@@ -223,6 +223,7 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .rules { display: flex; flex-direction: column; border-top: 1px solid #F1F2F6; }
 .rule-row { display: grid; grid-template-columns: 1fr 150px 56px; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #F1F2F6; }
 .rule-text { display: flex; flex-direction: column; }
+.rules-section { margin: 20px 0 6px; font-size: 14px; font-weight: 700; }
 .rule-text small { color: #8A8FA8; font-size: 12px; }
 .rule-hit { text-align: right; color: #9A5B00; font-size: 13px; }
 .side-head .ant-btn { color: #5B6078; }

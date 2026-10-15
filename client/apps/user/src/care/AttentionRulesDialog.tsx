@@ -19,7 +19,7 @@ export default function AttentionRulesDialog({ open, onClose }: { open: boolean;
   const hits = useMemo(() => ruleHits(members, sleepReports, alerts.list, draft), [members, sleepReports, alerts.list, draft]);
   const set = <K extends keyof AttentionRules>(k: K, v: AttentionRules[K]) => setDraft((d) => ({ ...d, [k]: v }));
 
-  const rows: { key: keyof AttentionRules; title: string; desc: string; input: React.ReactNode }[] = [
+  const rows: { key: Exclude<keyof AttentionRules, "timelyMinutes">; title: string; desc: string; input: React.ReactNode }[] = [
     {
       key: "fallAlert",
       title: "未处理的跌倒告警",
@@ -99,6 +99,20 @@ export default function AttentionRulesDialog({ open, onClose }: { open: boolean;
         按这组规则，今日需关注共 <b>{sleepReports ? hits.total : "…"}</b> 位
         <span className="muted">（共 {members.length} 位长者，{sleepReports?.size ?? "…"} 位有昨夜睡眠报告）</span>
       </p>
+
+      <h3 className="rules-section">告警及时处理</h3>
+      <div className="rules">
+        <div className="rule-row">
+          <div className="rule-text">
+            <b>告警在多久内处理完算及时</b>
+            <small>从告警发生到在平台上点"处理"。用于机构概览的"及时处理率"，不影响需关注名单</small>
+          </div>
+          <div className="rule-input">
+            <InputNumber min={1} max={120} value={draft.timelyMinutes} onChange={(v) => set("timelyMinutes", v ?? 5)} addonAfter="分钟" style={{ width: 130 }} />
+          </div>
+          <div className="rule-hit" />
+        </div>
+      </div>
     </Modal>
   );
 }

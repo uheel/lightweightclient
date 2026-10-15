@@ -5,6 +5,7 @@ import dayjs from "dayjs";
 import { useCare } from "../care/CareContext";
 import { getAlertsInRange, getMemberPlaces, type AlertRecord, type MemberPlace } from "../care/api";
 import { durationText } from "../care/state";
+import { useAttentionRules } from "../care/attention";
 
 /**
  * 机构管理者 · 概览（界面稿：机构管理者 · 概览）。
@@ -32,9 +33,6 @@ function handleMinutes(a: AlertRecord) {
   return a.alertStatus === 2 && Number.isFinite(m) && m >= 0 ? m : undefined;
 }
 
-/** 及时处理：告警发生后这么多分钟内处理完 */
-const TIMELY_MIN = 5;
-
 function minText(m: number) {
   return m < 1 ? `${Math.round(m * 60)} 秒` : durationText(m);
 }
@@ -43,7 +41,7 @@ function minText(m: number) {
  * 及时处理率：分母 = 已处理的 + 已超过时限仍未处理的（刚发生、还在时限内的未处理告警不计入）；
  * 分子 = 时限内处理完的。另给出已处理告警的用时中位数
  */
-function timeliness(alerts: AlertRecord[], now: number) {
+function timeliness(alerts: AlertRecord[], now: number, limit: number) {
   let due = 0;
   let ok = 0;
   const used: number[] = [];
@@ -52,8 +50,8 @@ function timeliness(alerts: AlertRecord[], now: number) {
     if (h !== undefined) {
       due++;
       used.push(h);
-      if (h <= TIMELY_MIN) ok++;
-    } else if ((now - parse(a.createdAt)) / 60_000 > TIMELY_MIN) due++;
+      if (h <= limit) ok++;
+    } else if ((now - parse(a.createdAt)) / 60_000 > limit) due++;
   }
   used.sort((a, b) => a - b);
   const median = used.length ? used[Math.floor((used.length - 1) / 2)] : undefined;
@@ -77,6 +75,8 @@ interface AreaRow {
 export default function ManagerHome() {
   const { s, members, attention, sleepReports, alerts: pendingAlerts, liveOf, openElder, process, now } = useCare();
   const [period, setPeriod] = useState<Period>("today");
+  /** 及时处理的时限（分钟），在"需关注规则"里设置 */
+  const TIMELY_MIN = useAttentionRules().timelyMinutes || 5;
   const [places, setPlaces] = useState<MemberPlace[]>();
   const [records, setRecords] = useState<AlertRecord[]>();
   const [error, setError] = useState<string>();
@@ -119,7 +119,7 @@ export default function ManagerHome() {
 
   const list = records ?? [];
   const processed = list.filter((a) => a.alertStatus === 2);
-  const timelyAll = timeliness(list, now);
+  const timelyAll = timeliness(list, now, TIMELY_MIN);
   const monthStart = dayjs().startOf("month").valueOf();
   // 只算在床位上的长者（与"在院长者"同一口径；档案里还有没分配床位的人）
   const memberIds = new Set(members.map((m) => m.memberId));
@@ -204,7 +204,7 @@ export default function ManagerHome() {
       width: 120,
       render: (_, r) => {
         if (!records) return "…";
-        const t = timeliness(r.items, now);
+        const t = timeliness(r.items, now, TIMELY_MIN);
         return t.rate === undefined ? (
           <span className="muted">—</span>
         ) : (

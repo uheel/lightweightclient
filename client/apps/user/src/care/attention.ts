@@ -18,6 +18,8 @@ export interface AttentionRules {
   frequentLeaveBed: number;
   /** 呼吸紊乱指数（AHI）达到此值；0 表示不启用。5–15 轻度，15–30 中度，30 以上重度 */
   highAhi: number;
+  /** 告警在这么多分钟内处理完算"及时处理"（机构概览的及时处理率用；不影响需关注名单） */
+  timelyMinutes: number;
 }
 
 export const DEFAULT_RULES: AttentionRules = {
@@ -26,6 +28,7 @@ export const DEFAULT_RULES: AttentionRules = {
   shortSleepHours: 5,
   frequentLeaveBed: 3,
   highAhi: 15,
+  timelyMinutes: 5,
 };
 
 // ---------- 规则存储（本机 localStorage，改动后所有页面同步刷新） ----------
@@ -137,7 +140,7 @@ export function buildAttention(
 /** 各条规则单独命中的人数（设置弹窗里用来预览阈值的效果） */
 export function ruleHits(members: Member[], reports: Map<string, SleepReport> | undefined, pendingAlerts: CareAlert[], R: AttentionRules) {
   const only = (patch: Partial<AttentionRules>) =>
-    buildAttention(members, reports, pendingAlerts, { fallAlert: false, lowScore: 0, shortSleepHours: 0, frequentLeaveBed: 0, highAhi: 0, ...patch }).total;
+    buildAttention(members, reports, pendingAlerts, { fallAlert: false, lowScore: 0, shortSleepHours: 0, frequentLeaveBed: 0, highAhi: 0, timelyMinutes: R.timelyMinutes, ...patch }).total;
   return {
     fallAlert: R.fallAlert ? only({ fallAlert: true }) : 0,
     lowScore: only({ lowScore: R.lowScore }),
