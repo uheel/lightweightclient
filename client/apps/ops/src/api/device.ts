@@ -56,6 +56,7 @@ export interface QingLanConfig {
   installType?: number;
   /** 1 上，2 右，3 下，4 左 */
   installDirection?: number;
+  /** 安装高度，单位米（房间布局里其他坐标是厘米，这个不是） */
   installHeight?: number;
   /** 3 人员跟踪，7 跌倒监测，11 呼吸睡眠，15 床位监护 */
   workingType?: number;

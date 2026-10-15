@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Tabs } from "antd";
 import { FileSearchOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { deviceChannels, parseDeviceData, POSTURE, realtime, subscribeChannels, type DeviceDataMessage, type LiveData } from "@radar/core";
+import { deviceLink, POSTURE, type LiveData } from "@radar/core";
 import { getHeartbeats, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, WORKING_TYPE, type Heartbeat, type Radar, type RoomInfo } from "../api/device";
 import { lastSeen } from "../pages/DevicesPage";
 import { evaluate, GRADE_TEXT } from "./angle";
@@ -12,33 +12,17 @@ import LogTable from "./LogTable";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
 
-/** 订阅一台设备的实时推送，合并成最新状态 */
-function useLive(sn: string) {
-  const [live, setLive] = useState<LiveData>();
-  useEffect(() => {
-    const off = realtime.on("DeviceData", (payload) => {
-      const m = payload as DeviceDataMessage;
-      if (m?.sn !== sn) return;
-      const patch = parseDeviceData(m);
-      if (patch) setLive((cur) => ({ ...cur, ...patch, updatedAt: patch.updatedAt ?? Date.now() }));
-    });
-    const unsub = subscribeChannels(deviceChannels(sn));
-    return () => {
-      off();
-      unsub();
-    };
-  }, [sn]);
-  return live;
-}
-
 export default function DeviceDetail({
   d,
+  live,
   typeName,
   onOpenLogs,
   listHidden,
   onToggleList,
 }: {
   d: Radar;
+  /** 这台设备的实时推送（由设备列表统一订阅） */
+  live?: LiveData;
   typeName?: string;
   onOpenLogs: (sn: string) => void;
   listHidden: boolean;
@@ -48,7 +32,12 @@ export default function DeviceDetail({
   const [hb, setHb] = useState<Heartbeat>();
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
-  const live = useLive(d.sn);
+  // 每 30 秒更新一次"当前时间"，用来判断 10 分钟内有没有收到设备数据
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (d.roomId) getRoomInfo(d.roomId).then(setRoom, () => {});
@@ -56,19 +45,29 @@ export default function DeviceDetail({
     getHeartbeats(d.sn, [dayjs().subtract(2, "hour").format(FMT), dayjs().format(FMT)], 200)
       .then((list) => setHb(list[list.length - 1]), () => {})
       .finally(() => setHbLoading(false));
+    // 心跳约每分钟一次：每分钟取一次最新的，保持"最近心跳 / 在线"准确
+    const t = setInterval(() => {
+      getHeartbeats(d.sn, undefined, 8).then(
+        (list) => list.length && setHb((cur) => (cur && cur.t >= list[list.length - 1].t ? cur : list[list.length - 1])),
+        () => {},
+      );
+    }, 60_000);
+    return () => clearInterval(t);
   }, [d.sn, d.roomId]);
 
   const cfg = room?.configs.get(d.sn);
   const installType = cfg?.installType === 0 || cfg?.installType === 1 ? cfg.installType : undefined;
-  const statusCls = d.isDisabled ? "disabled" : d.isOnline ? "online" : "offline";
-  const statusText = d.isDisabled ? "已停用" : d.isOnline ? "在线" : "离线";
+  // 在线状态和最近活动以设备数据（实时推送、心跳）为准，没收到时才用平台记录（规则见 core 的 deviceLink，与用户端一致）
+  const link = deviceLink({ live, lastReportAt: hb?.t, platformOnline: d.isOnline, now: Math.max(now, live?.updatedAt ?? 0) });
+  const statusCls = d.isDisabled ? "disabled" : link.online ? "online" : "offline";
+  const statusText = (d.isDisabled ? "已停用" : link.online ? "在线" : "离线") + (link.source === "platform" && !d.isDisabled ? "（平台记录）" : "");
   const ev = hb ? evaluate(hb, installType ?? 1) : undefined;
 
   const rssi = hb?.rssi ?? d.rssi;
   const install = [
     installType !== undefined ? INSTALL_TYPE[installType] : undefined,
     cfg?.installDirection ? INSTALL_DIR[cfg.installDirection] : undefined,
-    cfg?.installHeight ? `高度 ${cfg.installHeight} cm` : undefined,
+    cfg?.installHeight ? `高度 ${cfg.installHeight} m` : undefined,
   ].filter(Boolean);
 
   const overview = (
@@ -112,7 +111,17 @@ export default function DeviceDetail({
             <dt>IP</dt>
             <dd className="mono">{hb?.ip ?? "—"}</dd>
             <dt>最近活动</dt>
-            <dd>{d.lastActivityTime ? `${d.lastActivityTime}（${lastSeen(d.lastActivityTime)}）` : "—"}</dd>
+            <dd>
+              {link.at ? (
+                `${dayjs(link.at).format("YYYY-MM-DD HH:mm:ss")}（${lastSeen(link.at)}）`
+              ) : d.lastActivityTime ? (
+                <span title="还没收到这台设备的数据，显示的是平台记录，可能有延迟">
+                  {d.lastActivityTime}（平台记录）
+                </span>
+              ) : (
+                "—"
+              )}
+            </dd>
           </dl>
         </div>
         <div className="ops-card">
@@ -185,7 +194,7 @@ export default function DeviceDetail({
         destroyOnHidden
         items={[
           { key: "overview", label: "概览", children: overview },
-          { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={d.isOnline} /> },
+          { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={link.online} /> },
           { key: "replay", label: "姿态回放", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} compact /> },
         ]}

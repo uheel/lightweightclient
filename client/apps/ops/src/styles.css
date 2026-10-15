@@ -213,6 +213,7 @@
 .attitude-stage.dragging { cursor: grabbing; }
 .attitude-stage canvas { position: absolute; left: 0; top: 0; }
 .attitude-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dev-row-last.plat { font-style: italic; }
 
 /* 批量场景 */
 .grow { flex: 1; }

@@ -1,4 +1,4 @@
-import { ALARM_POSTURES, POSTURE, type LiveData } from "@radar/core";
+import { ALARM_POSTURES, LIVE_STALE_MS, POSTURE, type LiveData } from "@radar/core";
 import type { CareAlert, Member } from "./api";
 
 /**
@@ -14,8 +14,8 @@ export interface CareState {
   detail?: string;
 }
 
-/** 超过这个时间没有任何数据，就认为状态未知 */
-const STALE_MS = 10 * 60 * 1000;
+/** 超过这个时间没有任何数据，就认为状态未知（与运维端判断设备离线用同一个值） */
+const STALE_MS = LIVE_STALE_MS;
 /** 最近这么久内测到过心率或呼吸，就算在床（设备约每 2 秒报一次，偶尔会断几十秒） */
 const IN_BED_MS = 60 * 1000;
 

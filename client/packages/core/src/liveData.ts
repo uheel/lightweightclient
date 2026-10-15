@@ -156,3 +156,27 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
       return null;
   }
 }
+
+/** 超过这个时间没有收到设备的任何数据（实时推送或心跳），就认为设备离线 / 状态未知。两端统一用这个值 */
+export const LIVE_STALE_MS = 10 * 60 * 1000;
+
+export interface DeviceLink {
+  online: boolean;
+  /** device = 根据设备自己上报的数据判断；platform = 没收到设备数据，用的是平台记录（可能有延迟） */
+  source: "device" | "platform";
+  /** 最近一次收到设备数据的时间（毫秒） */
+  at?: number;
+}
+
+/**
+ * 设备在线状态，以设备自己的数据为准（平台列表里的在线状态和最近活动时间有时延迟很久）：
+ * 1. 实时推送报离线（msgType 11 = false），且之后没有再收到心跳 → 离线；
+ * 2. 最近 10 分钟内收到过实时数据或心跳 → 在线，超过 → 离线；
+ * 3. 一直没收到设备数据，才用平台记录。
+ */
+export function deviceLink(o: { live?: LiveData; lastReportAt?: number; platformOnline?: boolean; now: number }): DeviceLink {
+  const at = Math.max(o.live?.updatedAt ?? 0, o.lastReportAt ?? 0) || undefined;
+  if (o.live?.online === false && (o.lastReportAt ?? 0) <= o.live.updatedAt) return { online: false, source: "device", at };
+  if (at) return { online: o.now - at <= LIVE_STALE_MS, source: "device", at };
+  return { online: !!o.platformOnline, source: "platform" };
+}

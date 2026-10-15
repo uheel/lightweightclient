@@ -2,19 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin } from "antd";
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { deviceLink, type DeviceLink } from "@radar/core";
 import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
 import DeviceDetail from "../devices/DeviceDetail";
+import { useLiveMap } from "../devices/useLiveMap";
 
 type Filter = "all" | "online" | "offline" | "disabled";
 
-const FILTERS: { key: Filter; label: string; test: (d: Radar) => boolean }[] = [
+const FILTERS: { key: Filter; label: string; test: (d: Radar, l: DeviceLink) => boolean }[] = [
   { key: "all", label: "全部", test: () => true },
-  { key: "online", label: "在线", test: (d) => d.isOnline && !d.isDisabled },
-  { key: "offline", label: "离线", test: (d) => !d.isOnline && !d.isDisabled },
+  { key: "online", label: "在线", test: (d, l) => l.online && !d.isDisabled },
+  { key: "offline", label: "离线", test: (d, l) => !l.online && !d.isDisabled },
   { key: "disabled", label: "停用", test: (d) => d.isDisabled },
 ];
 
-export function lastSeen(t?: string) {
+/** 设备不多时订阅全部设备的实时推送，在线状态全部以设备数据为准；太多时只订阅选中的那台，其余先用平台记录 */
+const SUBSCRIBE_ALL_MAX = 300;
+
+export function lastSeen(t?: string | number) {
   if (!t) return "—";
   const d = dayjs(t);
   return d.isValid() ? d.fromNow() : t;
@@ -49,17 +54,37 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
     getDeviceTypeMap().then(setTypes, () => {});
   }, [load]);
 
-  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.key, list.filter(f.test).length])) as Record<Filter, number>, [list]);
+  const subscribeAll = list.length <= SUBSCRIBE_ALL_MAX;
+  const selSn = list.find((d) => d.id === selId)?.sn;
+  const liveSns = useMemo(() => (subscribeAll ? list.map((d) => d.sn) : selSn ? [selSn] : []), [subscribeAll, list, selSn]);
+  const liveMap = useLiveMap(liveSns);
+  // 判断"10 分钟内有没有数据"用的当前时间，每 30 秒更新
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const links = useMemo(() => {
+    const m = new Map<string, DeviceLink>();
+    for (const d of list) m.set(d.id, deviceLink({ live: liveMap[d.sn], platformOnline: d.isOnline, now: Math.max(now, liveMap[d.sn]?.updatedAt ?? 0) }));
+    return m;
+  }, [list, liveMap, now]);
+  const linkOf = (d: Radar) => links.get(d.id)!;
+
+  const counts = useMemo(
+    () => Object.fromEntries(FILTERS.map((f) => [f.key, list.filter((d) => f.test(d, links.get(d.id)!)).length])) as Record<Filter, number>,
+    [list, links],
+  );
 
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const test = FILTERS.find((f) => f.key === filter)!.test;
     return list
-      .filter(test)
+      .filter((d) => test(d, links.get(d.id)!))
       .filter((d) => !kw || [d.deviceName, d.sn, d.roomName, d.realName].some((v) => v?.toLowerCase().includes(kw)))
-      // 在线的排前面，其次按最近活动时间
-      .sort((a, b) => Number(b.isOnline) - Number(a.isOnline) || (b.lastActivityTime ?? "").localeCompare(a.lastActivityTime ?? ""));
-  }, [list, filter, q]);
+      // 在线的排前面，其次按平台记录的最近活动时间（不按实时数据排序，免得列表一直跳）
+      .sort((a, b) => Number(links.get(b.id)!.online) - Number(links.get(a.id)!.online) || (b.lastActivityTime ?? "").localeCompare(a.lastActivityTime ?? ""));
+  }, [list, links, filter, q]);
 
   const sel = shown.find((d) => d.id === selId) ?? list.find((d) => d.id === selId);
 
@@ -111,7 +136,9 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
           ) : shown.length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的设备" />
           ) : (
-            shown.map((d) => (
+            shown.map((d) => {
+              const l = linkOf(d);
+              return (
               <div
                 key={d.id}
                 data-id={d.id}
@@ -120,25 +147,35 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
                 className={`dev-row${d.id === selId ? " on" : ""}`}
                 onClick={() => setSelId(d.id)}
               >
-                <i className={`dot ${d.isDisabled ? "disabled" : d.isOnline ? "online" : "offline"}`} />
+                <i className={`dot ${d.isDisabled ? "disabled" : l.online ? "online" : "offline"}`} />
                 <span className="dev-row-main">
                   <b>{d.deviceName || d.sn}</b>
                   <small>
                     <span className="mono">{d.sn}</span> · {d.roomName || "未绑定房间"}
                   </small>
                 </span>
-                <span className={`dev-row-last${d.isOnline ? "" : " off"}`}>{lastSeen(d.lastActivityTime)}</span>
+                {l.source === "device" ? (
+                  <span className={`dev-row-last${l.online ? "" : " off"}`} title="最近一次收到设备数据">
+                    {lastSeen(l.at)}
+                  </span>
+                ) : (
+                  <span className="dev-row-last off plat" title="还没收到这台设备的数据，显示的是平台记录，可能有延迟">
+                    {lastSeen(d.lastActivityTime)}
+                  </span>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
         <div className="dev-list-foot muted">
           显示 {shown.length} / {list.length} · ↑↓ 切换
+          {!subscribeAll && <div>设备超过 {SUBSCRIBE_ALL_MAX} 台，只有选中的设备按实时数据判断在线，其余为平台记录（斜体）</div>}
         </div>
       </section>
       <section className="dev-detail">
         {sel ? (
-          <DeviceDetail key={sel.id} d={sel} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} onOpenLogs={onOpenLogs} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
+          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} onOpenLogs={onOpenLogs} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
