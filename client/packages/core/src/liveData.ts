@@ -32,7 +32,11 @@ export interface LiveData {
   posture?: number;
   /** 雷达跟踪到的人数（轨迹上报） */
   targets?: number;
-  /** 所在区域名（房间里划的区域，例如"卫生间""监护床"） */
+  /**
+   * 区域名（房间里划的区域，例如"门""监护床"）。注意不是当前所在位置，而是这个人**最近一次进入的区域**，
+   * 换到下一个区域前一直不变（2026-10-15 实测：从门进房后在房间中间走动，仍一直报"门"；区域序号 255 表示还没进过任何区域）。
+   * 界面上不要拿它当位置显示
+   */
   areaName?: string;
   /** 青岚（msgType 4）：1 浅睡，2 深睡，3 清醒；超宽带（msgType 6）的编码未核对 */
   sleepStatus?: number;
@@ -116,10 +120,14 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
     case 5: {
       if (!a) return null;
       const targets = a.filter(Array.isArray) as unknown[][];
-      // 房间里有多人时（例如护理员在床边），优先取在床上的那个人：在床区域内、或姿态是在床 / 床上坐起；
+      // 房间里有多人时（例如护理员在床边），优先取在床上的那个人：先看姿态（在床 / 床上坐起），
+      // 再看最近进入的区域是监护床（区域名会一直保留到进入下一个区域，所以只作为第二依据）；
       // 没人在床再取需要处理的姿态，最后取第一个目标
-      const onBed = (t: unknown[]) => (typeof t[6] === "string" && t[6].includes("床")) || BED_POSTURES.has(Number(t[4]));
-      const t = targets.find(onBed) ?? targets.find((x) => ALARM_POSTURES.has(Number(x[4]))) ?? targets[0];
+      const t =
+        targets.find((x) => BED_POSTURES.has(Number(x[4]))) ??
+        targets.find((x) => typeof x[6] === "string" && x[6].includes("床")) ??
+        targets.find((x) => ALARM_POSTURES.has(Number(x[4]))) ??
+        targets[0];
       return {
         presence: targets.length && (num(targets[0][0]) ?? 0) > 0 ? 1 : 0,
         targets: targets.length,

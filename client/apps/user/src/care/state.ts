@@ -31,11 +31,11 @@ export function careState(member: Member, live: LiveData | undefined, alert: Car
   }
   if (live.online === false) return { text: "暂停监测", tone: "unknown", detail: "暂时收不到这位长者的数据" };
 
-  const area = live.areaName ? live.areaName : undefined;
+  // 不显示区域名：设备报的是最近一次进入的区域（例如从门进来后一直报"门"），不是当前位置，见 LiveData.areaName
   if (live.posture !== undefined && ALARM_POSTURES.has(live.posture)) {
-    return { text: POSTURE[live.posture], tone: "alert", detail: area };
+    return { text: POSTURE[live.posture], tone: "alert" };
   }
-  if (live.fall) return { text: "疑似跌倒", tone: "alert", detail: area };
+  if (live.fall) return { text: "疑似跌倒", tone: "alert" };
   if (live.lifeStatus === 3) return { text: "生命体征弱", tone: "warn", detail: "请留意" };
   if (live.breathStatus === 3) return { text: "呼吸暂停", tone: "alert" };
 
@@ -59,22 +59,22 @@ export function careState(member: Member, live: LiveData | undefined, alert: Car
   if (live.posture !== undefined && live.presence !== 0) {
     const p = live.posture;
     // 只有轨迹、没有心率呼吸的设备，才用姿态判断在床
-    if (!vitalsDevice && (p === 6 || p === 9)) return { text: p === 9 ? "床上坐起" : "在床", tone: "bed", detail: area };
-    if (p === 1) return { text: "走动中", tone: "active", detail: area };
-    if (p === 3) return { text: "坐着", tone: "active", detail: area };
-    return { text: "房间内静止", tone: "active", detail: area };
+    if (!vitalsDevice && (p === 6 || p === 9)) return { text: p === 9 ? "床上坐起" : "在床", tone: "bed" };
+    if (p === 1) return { text: "走动中", tone: "active" };
+    if (p === 3) return { text: "坐着", tone: "active" };
+    return { text: "房间内静止", tone: "active" };
   }
 
   if (vitalsDevice) {
     const m = live.outOfBedMinutes;
     if (m !== undefined && m >= 15) return { text: "离床", tone: "warn", detail: `已 ${durationText(m)}` };
-    if (live.presence === 1) return { text: "离床", tone: "idle", detail: area ?? "在房间内" };
+    if (live.presence === 1) return { text: "离床", tone: "idle", detail: "在房间内" };
     return { text: "离床", tone: "idle", detail: m ? `已 ${durationText(m)}` : undefined };
   }
 
   if (live.presence === 0) return { text: "不在房间", tone: "idle" };
   if (live.presence === 2) return { text: "信号弱", tone: "warn", detail: "请留意" };
-  if (live.presence === 1) return { text: "在房间", tone: "active", detail: area };
+  if (live.presence === 1) return { text: "在房间", tone: "active" };
   return { text: "等待数据", tone: "unknown" };
 }
 

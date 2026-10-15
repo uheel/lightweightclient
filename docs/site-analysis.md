@@ -202,6 +202,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 ```
 
 3. 实时推送的每个目标包含 `{x, y, userIndex, areaName, posture}`，这些字段在 RoomView store 的 `userPositions` 里
+   - 轨迹帧（msgType 5）每个目标是 `[人数, x, y, z, 姿态, 目标序号, 区域名, 区域序号]`。**区域名 / 区域序号是这个人最近一次进入的区域，不是当前所在位置**，进入下一个区域前一直不变；序号 255 表示还没进过任何区域（2026-10-15 实测藕塘 03房07床：从门进房后在房间中间来回走动，一直报"门|1"）。区域来自设备自身的配置，房间平面图的 `ranges` 是空的。事件时间线里的进出房间事件（1 / 2）也带着经过的门
 4. **历史轨迹点 `trajectory-points` / 热力图 `heatmap-points` 的坐标系因设备类型而异**（2026-10-14 实测）。平台自带的轨迹回放和热力图都是直接画原始坐标，**对 FallSense 一类设备是错的**，人会被画到房间外面
    - **AIO Care Terminal（类型 6）**：原始坐标就是房间坐标（cm），直接画即可
    - **FallSense Terminal（类型 13）**：原始坐标是相对雷达的（cm），而且 **y 轴方向和实时数据相反**。先把 y 取反，再用上面的 `toRoom`（单位 cm，不带旋转）换算
