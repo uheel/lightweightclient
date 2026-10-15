@@ -196,7 +196,8 @@ export default function ElderDetail({
 
         <section className="card detail-span3">
           <h2>夜间时间线</h2>
-          {report === undefined ? (
+          {/* 等设备每分钟心率呼吸（含原始记录补齐）到齐再画，避免先用报告自带的残缺序列画出错误的"不在床" */}
+          {report === undefined || (report && vitals === undefined) ? (
             <Skeleton active paragraph={{ rows: 4 }} />
           ) : report && (report.sleepDetails?.length || report.heartRateTrend?.some((v) => v > 0) || report.breathingTrend?.some((v) => v > 0) || vitals?.length) ? (
             <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} postures={postures} />
