@@ -14,6 +14,7 @@ import {
   type PropertySchema,
   type StoredProperty,
 } from "../api/device";
+import { structuredFor } from "./propertyEditors";
 
 /**
  * 设备属性：读取设备上的当前值、修改后下发（与平台"设备配置 › 存储属性"同一套接口）。
@@ -85,13 +86,16 @@ function visibleBy(expr: string | undefined, ctx: Record<string, unknown>) {
   return expr.split("||").some((or) => or.split("&&").every(term));
 }
 
-function format(p: PropertyDef, v: unknown): string {
+function format(p: PropertyDef, v: unknown, typeCode?: number): string {
+  if (SECRET.test(p.propertyName) && v !== undefined && v !== null && v !== "") return "••••••";
+  const st = structuredFor(p, typeCode);
+  if (st) return st.summary(v);
   if (v === undefined || v === null || v === "") return "—";
-  if (SECRET.test(p.propertyName)) return "••••••";
   const fp = p.fieldProps ?? {};
+  if (p.displayType === 7 && fp.multiple && Array.isArray(v))
+    return [...new Set(v)].map((x) => fp.options?.find((o) => String(o.value) === String(x))?.label ?? String(x)).join("、") || "—";
   if (p.displayType === 5) return same(v, fp.openValue ?? 1) ? "开" : same(v, fp.closeValue ?? 0) ? "关" : String(v);
   if (p.displayType === 7) return fp.options?.find((o) => String(o.value) === String(v))?.label ?? String(v);
-  if (p.displayType === 9 && Array.isArray(v)) return v.length ? v.join("，") : "全天";
   if (typeof v === "object") return JSON.stringify(v);
   return String(v) + (p.unit ? ` ${p.unit}` : "");
 }
@@ -161,6 +165,7 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
     return m;
   }, [schema]);
 
+  const typeCode = schema?.deviceTypeCode;
   const base = (name: string) => (name in device ? device[name].value : stored[name]?.value);
   const valueOf = (name: string) => (name in edits ? edits[name] : base(name));
   const isModified = (name: string) => name in edits && !same(edits[name], base(name));
@@ -358,7 +363,7 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   function write() {
     if (!changed.length) return;
     const bad = changed.find((p) => errors[p.propertyName]);
-    if (bad) return message.warning(`「${bad.title}」的内容不是有效的 JSON`);
+    if (bad) return message.warning(`「${bad.title}」：${errors[bad.propertyName]}`);
     const missing = changed.find((p) => p.isRequired && (valueOf(p.propertyName) === undefined || valueOf(p.propertyName) === ""));
     if (missing) return message.warning(`请填写「${missing.title}」`);
     const saveOnly = changed.every((p) => p.isPlatformOnly);
@@ -373,14 +378,25 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
             {saveOnly ? "，只保存在平台，不下发到设备。" : "，平台会保存并立即下发，设备会按新值工作。"}
           </p>
           <ul>
-            {changed.map((p) => (
-              <li key={p.propertyName}>
-                <b>{p.title}</b>
-                <span className="mono muted">{format(p, base(p.propertyName))}</span>
-                <span className="muted">→</span>
-                <span className="mono">{format(p, valueOf(p.propertyName))}</span>
-              </li>
-            ))}
+            {changed.map((p) => {
+              const lines = structuredFor(p, typeCode)?.diff?.(base(p.propertyName), valueOf(p.propertyName));
+              return (
+                <li key={p.propertyName}>
+                  <b>{p.title}</b>
+                  {lines ? (
+                    <span className="prop-diff">
+                      {lines.length ? lines.map((l) => <span key={l}>{l}</span>) : <span className="muted">格式整理（值不变）</span>}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="mono muted">{format(p, base(p.propertyName), typeCode)}</span>
+                      <span className="muted">→</span>
+                      <span className="mono">{format(p, valueOf(p.propertyName), typeCode)}</span>
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ),
@@ -528,6 +544,9 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
             stored={stored[p.propertyName]}
             delivery={delivery[p.propertyName]}
             missing={missing.has(p.propertyName)}
+            typeCode={typeCode}
+            ctx={ctx}
+            sn={sn}
             disabled={busy === "set-property"}
             onChange={(v) => setValue(p.propertyName, v)}
             onError={(err) => setError(p.propertyName, err)}
@@ -557,6 +576,9 @@ function PropertyRow({
   stored,
   delivery,
   missing,
+  typeCode,
+  ctx,
+  sn,
   disabled,
   onChange,
   onError,
@@ -570,10 +592,14 @@ function PropertyRow({
   stored?: StoredProperty;
   delivery?: Delivery;
   missing: boolean;
+  typeCode?: number;
+  ctx: Record<string, unknown>;
+  sn: string;
   disabled: boolean;
   onChange: (v: unknown) => void;
   onError: (err?: string) => void;
 }) {
+  const st = structuredFor(p, typeCode);
   const tags: React.ReactNode[] = [];
   if (modified) tags.push(<span key="m" className="ptag mod">已修改</span>);
   if (delivery?.status === "pending") tags.push(<span key="d" className="ptag pend">等待设备应答</span>);
@@ -602,7 +628,7 @@ function PropertyRow({
     : undefined;
 
   return (
-    <div className={`prop-row${modified ? " modified" : ""}`}>
+    <div className={`prop-row${modified ? " modified" : ""}${st?.wide ? " wide" : ""}`}>
       <div className="prop-name">
         <span>
           {p.title}
@@ -614,14 +640,18 @@ function PropertyRow({
         </small>
       </div>
       <div className="prop-value">
-        <Editor key={`${p.propertyName}:${rev}`} p={p} value={value} disabled={disabled} onChange={onChange} onError={onError} />
-        {error && <small className="prop-err">{error}</small>}
+        {st ? (
+          <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || readOnly(p)} ctx={ctx} sn={sn} />
+        ) : (
+          <Editor key={`${p.propertyName}:${rev}`} p={p} value={value} disabled={disabled} onChange={onChange} onError={onError} />
+        )}
+        {error && !st && <small className="prop-err">{error}</small>}
       </div>
       <div className="prop-state">
         {tags.length > 0 && <div className="ptags">{tags}</div>}
         {differs && (
           <small className="warn-text" title="设备上的值与读取前的平台记录不一致，可能有人在别处改过，或者上次下发没生效">
-            读取前平台记录：{format(p, dev!.before)}
+            读取前平台记录：{format(p, dev!.before, typeCode)}
           </small>
         )}
         {rec && <small className="muted">{rec}</small>}
@@ -671,6 +701,21 @@ function Editor({
       />
     );
   }
+  if (p.displayType === 7 && fp.options?.length && fp.multiple) {
+    const list = Array.isArray(value) ? [...new Set(value as (string | number)[])] : [];
+    return (
+      <Select
+        size="small"
+        mode="multiple"
+        disabled={disabled}
+        value={list}
+        onChange={(v: (string | number)[]) => onChange(v)}
+        options={fp.options.map((o) => ({ label: o.label, value: o.value }))}
+        placeholder="都不选表示不上报"
+        style={{ width: "100%", maxWidth: 360 }}
+      />
+    );
+  }
   if (p.displayType === 7 && fp.options?.length) {
     return (
       <Select
@@ -681,30 +726,6 @@ function Editor({
         options={fp.options.map((o) => ({ label: o.label, value: o.value }))}
         style={{ width: 200 }}
         allowClear={!p.isRequired}
-      />
-    );
-  }
-  if (p.displayType === 9) {
-    const list = Array.isArray(value) ? (value as string[]) : [];
-    const max = fp.timeRangeMaxCount ?? 5;
-    return (
-      <Select
-        size="small"
-        mode="tags"
-        disabled={disabled}
-        value={list}
-        open={false}
-        suffixIcon={null}
-        tokenSeparators={[",", "，", " "]}
-        placeholder="留空表示全天；输入 08:00-20:00 回车添加"
-        onChange={(v: string[]) => {
-          const bad = v.find((x) => !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(x));
-          if (bad) onError(`「${bad}」格式不对，应为 HH:mm-HH:mm`);
-          else if (v.length > max) onError(`最多 ${max} 段`);
-          else onError(undefined);
-          onChange(v);
-        }}
-        style={{ width: "100%" }}
       />
     );
   }

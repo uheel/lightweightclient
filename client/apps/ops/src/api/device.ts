@@ -303,7 +303,11 @@ export interface PropertyDef {
     options?: { label: string; value: string | number }[];
     /** 显示条件，例如 talk_type_sel===1 */
     visibleExpression?: string;
+    /** 时间段的格式："HH:mm-HH:mm"（字符串数组）或 "H,m"（每段 4 个数字的扁平数组） */
+    timeRangeFormat?: string;
     timeRangeMaxCount?: number;
+    /** 下拉可多选（值是数组） */
+    multiple?: boolean;
   };
 }
 
@@ -395,6 +399,18 @@ export async function readDeviceProperties(sn: string, propertyNames: string[]) 
  */
 export async function writeDeviceProperties(sn: string, properties: { propertyName: string; value: unknown }[], saveOnly: boolean) {
   return (await api.post<unknown>("/api/device-property/write", { sn, properties, saveOnly })).data;
+}
+
+/** 机构里的全部设备（所有类型），选蓝牙外设用 */
+export interface AnyDevice {
+  id: string;
+  sn: string;
+  deviceName?: string;
+  deviceType: number;
+}
+
+export async function getAllDevices() {
+  return (await api.get<AnyDevice[]>("/api/device/v4/management-pages", { params: { current: 1, pageSize: 5000 } })).data ?? [];
 }
 
 /** 实时推送 DeviceResponse：设备对读写指令的应答 */

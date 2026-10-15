@@ -398,9 +398,9 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
     - 四个角是探测区域 `container` 的四个角，坐标**以雷达为原点，单位分米**：顶装 600×400、雷达居中时为 `-30,-20 … 30,20`；侧装、雷达在上边中点时为 `-30,0 … 30,40`
     - 最后一位 = `workingType`（3 人员跟踪 / 7 跌倒监测 / 11 呼吸睡眠 / 15 床位监护），距离测试从 `7` 改成 `15`，和平台上工作模式的切换一致
   - `QL_radar_para_area`：`[[序号, 区域类型, 四个角的 8 个坐标], …]`。区域类型与 `ranges[].type` 相同（4 = 门，5 = 监护床…）；坐标同样以雷达为原点、单位分米，取整（例如床 x = -75…75 cm 下发为 `-7…7`）
-  - `QL_radar_para_TH`：呼吸心率参数，例如 `[24,90,8,50]`，新固件多 3 位
-  - `QL_radar_para_sit`：坐地参数 `[2,10]`
-  - `QL_radar_para_fall`：疑似跌倒判定时间
+  - `QL_radar_para_TH`：呼吸心率参数 `[呼吸过高, 心率过高, 呼吸过低, 心率过低, 持续测量开关, 弱检测时间(分钟 1～15), 弱检测灵敏度(1～99)]`，单位次/分钟。老固件只有前 4 位（例如 `[24,90,8,50]`）。过低不能大于过高
+  - `QL_radar_para_sit`：坐地参数 `[开关位, 坐地告警判定时间(×10 秒)]`。开关位 bit0 = 坐地告警、bit1 = 姿态检测；坐地告警开时姿态检测必须开，所以只会是 0 / 2 / 3（例如 `[2,10]` = 只开姿态检测，100 秒）
+  - `QL_radar_para_fall`：疑似跌倒判定时间，单位 10 秒，1～240；0 表示用默认值 6（60 秒）
 - **通话**：`talk_type_sel`、`talk_local_number`、`talk_auth_pass`、`talk_sip_server`、`talk_master_number`、`talk_call_number_bak`、`talk_key1~3_number`、`talk_local_maxtime`、`talk_call_timeout`、`talk_spk_vol`、`talk_mic_vol`、`call_record_EN`、`call_record_url`
 - **离线语音识别**：`offlsr_enable`、`offlsr_keywords`（`[[唤醒词(\uXXXX 去掉反斜杠), 阈值1, 阈值2], …]`）、`offlsr_response_file`、`offlsr_response_volume`、`offlsr_cooldown`
 - **舒适音 / 录音**：`noise_spk_vol`、`noise_on_time_span`、`noise_volume_time_span`、`mic_record_time_span`
@@ -409,6 +409,26 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 - `set-property` 见过的键：`time`（平台约每分钟下发一次对时）、`QL_radar_config`、`QL_radar_area`、`onoff`、`rs_range_min/max`、`rs_area`、`rs_vital_th`、`rs_respiratory_th`、`rs_sleep_en`、`rs_sleep_slot`、`rs_sleep_time`、`rs_report_nobody`、`rs_report_freq`
 - `get-property` 读过的分组：`QL_radar_install / QL_auto_boundary / QL_reporting_mode / QL_health_config / QL_falldown_config`、`ble_*`、`net_rssi / ip / … / wifi_ssid / wifi_pwd`，以及 `mqtt_broke_address / port / user_name / user_password / keepalive`（说明设备连哪个 broker、用什么账号都可以远程读写）
+
+### 数组属性每一位的含义（2026-10-16 从平台网页端"存储属性"的专用组件和属性字典 description 整理）
+
+平台网页端有一张"属性名 → 专用编辑组件"的注册表（common 包里 `matcher: C("属性名")`），运维端的结构化编辑器按它实现，见 `client/apps/ops/src/devices/propertyEditors.tsx`。
+
+| 属性 | 设备类型 | 每一位 |
+|---|---|---|
+| `QL_radar_config` | 6 / 13 | 见上面"雷达算法"一节；四个角按第 3/4/2/1 象限排列（X-Y-, X+Y-, X-Y+, X+Y+），分米，-126～126 |
+| `QL_radar_area` | 6 / 13 | `[[区域编号 0～15, 区域类型, 四个角 8 个坐标], …]`，最多 16 个，坐标顺序同上。类型 2 普通床、3 干扰区、4 门、5 监护床（只能一个）、6 感应区、7 家具。平台网页端只给可视化编辑器（房间户型） |
+| `QL_health_config` | 13 / 15 | `[呼吸过高, 心率过高, 呼吸过低, 心率过低, 弱检测时间(分钟 1～15), 弱检测灵敏度(1～99)]`，阈值 1～255 次/分钟 |
+| `QL_falldown_config` | 13 / 15 | `[疑似跌倒判定时间(×10 秒 1～240), 坐地告警, 姿态检测, 床上坐起, 坐地告警判定时间(×10 秒)]`，开关 0 / 1；坐地告警或床上坐起开时姿态检测必须开。平台里有违反这条的旧记录：李虎机构 ultra-跌倒（01511020BA72CD1D）存的是 `[1,1,0,0,1]` |
+| `QL_reporting_mode` | 13 | 多选 `[1 实时 / 2 跌倒 / 3 呼吸心率]`，空数组表示不上报；见过 `[1,1]` 这种重复值 |
+| `onoff`、`working_times`（`timeRangeFormat: "H,m"`） | 12 / 13 | 扁平数组，每段 4 个数：`[时,分,时,分, …]`，例如 `[0,0,23,59]`，最多 5 段 |
+| `working_times` 等（`"HH:mm-HH:mm"`） | 6 | 字符串数组 `["08:00-20:00"]`，`[]` 表示全天 |
+| `offlsr_keywords` | 6 | `[[唤醒词, 灵敏度, 阈值], …]` 只列启用的词。唤醒词固定 10 个：呼叫护工、呼叫护士、呼叫儿子、呼叫女儿、救命、别打我、救救我、有人抽烟、打死你、操你妈；灵敏度越小越容易触发，阈值越大越难唤醒（0～1） |
+| `slave_config` | 6 | `[{slave_ID: 外设 SN, slave_type: 设备类型编号(字符串)}]`，最多 19 个 |
+| `tz_offset` | 6 | 相对 UTC 的分钟数（中国 480），不会自动切换夏令时 |
+| `rs_area` | 12 | `[X 左, X 右, Y 起, Y 止]` 厘米，X -400～400、Y 0～800。平台有的记录存成 JSON 字符串 `"[-50,50,70,500]"` |
+| `rs_sleep_slot` / `rs_sleep_time` | 12 | 睡眠报告分析时段 `[时,分,秒, 时,分,秒]`（例如 18:00～次日 12:00）/ 报告生成时间 `[时,分,秒]` |
+| `rs_report_freq` | 12 | `[离线时, 在线时]` 上报间隔，秒，0～255（平台网页端就标为"离线 / 在线"） |
 
 ### 设备属性读写接口（2026-10-16 在语音测试 …ef81 上实测）
 
