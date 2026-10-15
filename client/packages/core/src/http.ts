@@ -29,8 +29,28 @@ async function tauriFetch(url: string, init: { method: string; headers: Record<s
 
 const doFetch = isTauri ? tauriFetch : (url: string, init: RequestInit) => window.fetch(url, init);
 
+/**
+ * 让 Rust 层提前建好并保持到服务器的连接（平台只支持 HTTP/1.1，新建连接在丢包网络下握手常卡 3–19 秒，见 rust/api_http.rs）。
+ * 地址没变时 Rust 那边什么都不做，可以随便多次调用。浏览器调试时不需要。
+ */
+export function warmUp(server: string) {
+  if (isTauri) invoke("api_warm", { server }).catch(() => {});
+}
+
 export function apiBase(server: string) {
   return isTauri ? server.replace(/\/+$/, "") : "/__proxy";
+}
+
+/**
+ * 平台返回的图片等资源地址（房间平面图的底图、家具图标等）常是相对路径，网页端在平台域名下能直接用，
+ * 客户端里要补上服务器地址（浏览器调试时走 vite 代理）。完整地址、data: / blob: 原样返回。
+ */
+export function assetUrl(src: string) {
+  if (/^(https?:|data:|blob:)/i.test(src)) return src;
+  if (src.startsWith("//")) return "https:" + src;
+  const server = session.get()?.server;
+  if (!server) return src;
+  return apiBase(server) + (src.startsWith("/") ? src : "/" + src);
 }
 
 type ParamValue = string | number | boolean | undefined | null;
@@ -64,6 +84,7 @@ export async function request<T>(method: string, path: string, o: RequestOptions
   const s = session.get();
   const server = o.server ?? s?.server;
   if (!server) throw new ApiError("未选择服务器");
+  warmUp(server);
   const token = o.token ?? s?.token;
   const org = o.org ?? (s ? { orgId: s.orgId, orgType: s.orgType } : undefined);
 

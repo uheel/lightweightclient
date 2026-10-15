@@ -1,38 +1,4 @@
-* { box-sizing: border-box; }
-html, body, #root, #root > .ant-app { height: 100%; margin: 0; }
-body { background: #F6F7FB; color: #1B1D2E; }
-.mono { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; }
-
-.shell { height: 100%; display: flex; flex-direction: column; }
-.shell-header {
-  height: 48px; flex: none; display: flex; align-items: center; gap: 14px;
-  padding: 0 16px; background: #fff; border-bottom: 1px solid #E8EAF2;
-}
-.shell-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: #111441; }
-.shell-pill {
-  height: 30px; padding: 0 12px; border: 1px solid #E8EAF2; border-radius: 15px;
-  background: #F8F9FC; font-size: 13px; line-height: 28px;
-}
-.shell-live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5B6078; }
-.shell-live i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-.shell-user { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
-.shell-user:hover { background: #F4F5FA; }
-.avatar {
-  width: 28px; height: 28px; border-radius: 50%; background: #E3E7FF; color: #3B4FD8;
-  display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 13px;
-}
-.shell-body { flex: 1; display: flex; min-height: 0; }
-.shell-rail {
-  flex: 0 0 76px; background: #fff; border-right: 1px solid #E8EAF2;
-  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0;
-}
-.rail-item {
-  width: 60px; padding: 8px 0; border: 0; border-radius: 10px; background: transparent; color: #5B6078;
-  display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; cursor: pointer;
-}
-.rail-item .anticon { font-size: 20px; }
-.rail-item.active { background: #EEF1FF; color: #3B4FD8; font-weight: 500; }
-.shell-content { flex: 1; min-width: 0; overflow: auto; }
+/* 外壳和基础样式在 core 的 AppShell.css */
 
 .page { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .card { background: #fff; border: 1px solid #E8EAF2; border-radius: 14px; }
@@ -91,7 +57,6 @@ body { background: #F6F7FB; color: #1B1D2E; }
 .attention-list li > span:last-child { display: flex; flex-direction: column; line-height: 1.35; }
 .attention-list b { font-size: 13px; font-weight: 500; }
 .attention-list small { font-size: 12px; color: #5B6078; }
-.shell-org { width: 240px; }
 .elder-card.clickable { cursor: pointer; }
 .elder-card.clickable:hover { box-shadow: 0 4px 12px rgba(217, 48, 54, 0.15); }
 .alert-item { display: flex; flex-direction: column; gap: 6px; }

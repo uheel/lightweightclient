@@ -10,3 +10,4 @@ export * from "./ui/LoginPage";
 export * from "./ui/SessionGate";
 export * from "./ui/useRealtime";
 export * from "./ui/OrgPicker";
+export * from "./ui/AppShell";

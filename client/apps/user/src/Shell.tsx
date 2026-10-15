@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, Dropdown, Result, type MenuProps } from "antd";
-import { AppstoreOutlined, BellOutlined, DownOutlined, HeartOutlined, LogoutOutlined, SettingOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
-import { hasAnyPermission, OrgPicker, RES, session, signOut, status, stopRealtime, useRealtime, type Session } from "@radar/core";
+import { Button, Result, type MenuProps } from "antd";
+import { AppstoreOutlined, BellOutlined, HeartOutlined, LogoutOutlined, SettingOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
+import { AppShell, hasAnyPermission, OrgPicker, RES, session, signOut, status, stopRealtime, useRealtime, type Session } from "@radar/core";
 import { availableRoles, ROLE_LABEL, type Role } from "./roles";
 import Placeholder from "./pages/Placeholder";
 import CareHome from "./pages/CareHome";
@@ -121,91 +121,59 @@ export default function Shell({ s }: { s: Session }) {
   );
 
   const displayName = s.realName || s.nickName || s.userName;
-  // 家属只关注自己的家人，不需要模块导航
-  const showRail = role !== "family";
   const current = navItems.find((n) => n.key === nav) ?? navItems[0];
   const detailMember = detailId ? care.members.find((m) => m.memberId === detailId) : undefined;
 
   return (
-    <div className="shell">
-      <header className="shell-header">
-        <div className="shell-brand">
-          <img src="/logo.svg" alt="" width={24} height={24} />
-          康养看护
-        </div>
-        {role !== "family" && <OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
-        <span style={{ flex: 1 }} />
-        <span className="shell-live">
-          <i style={{ background: live.color }} />
-          {live.text}
-        </span>
-        <Dropdown menu={{ items: menuItems }}>
-          <span className="shell-user">
-            <span className="avatar">{displayName.charAt(0)}</span>
-            <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.2, fontSize: 13 }}>
-              {displayName}
-              <span style={{ fontSize: 11, color: "#8A8FA8" }}>{ROLE_LABEL[role]}</span>
-            </span>
-            <DownOutlined style={{ fontSize: 10, color: "#8A8FA8" }} />
-          </span>
-        </Dropdown>
-      </header>
-
-      <div className="shell-body">
-        {showRail && (
-          <nav className="shell-rail" aria-label="模块">
-            {navItems.map((n) => (
-              <button
-                key={n.key}
-                className={`rail-item${n.key === current.key ? " active" : ""}`}
-                onClick={() => {
-                  setNav(n.key);
-                  setDetailId(undefined);
-                }}
-              >
-                {n.icon}
-                {n.label}
-              </button>
-            ))}
-          </nav>
-        )}
-        <main className="shell-content">
-          <CareProvider value={ctx}>
-            {detailMember ? (
-              <div className="page">
-                <ElderDetail
-                  orgId={s.orgId}
-                  member={detailMember}
-                  live={care.liveOf(detailMember)}
-                  alert={care.alertByMember[detailMember.memberId]}
-                  now={now}
-                  onBack={() => setDetailId(undefined)}
-                  onProcess={alertCenter.setProcessing}
-                />
-              </div>
-            ) : current.key === "elders" ? (
-              <EldersPage />
-            ) : current.key === "alerts" ? (
-              <AlertsPage />
-            ) : current.key === "health" ? (
-              <HealthPage />
-            ) : current.key === "home" && role === "care" ? (
-              <CareHome />
-            ) : current.key === "home" && role === "manager" ? (
-              <ManagerHome />
-            ) : (
-              <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role] ?? ""} />
-            )}
-            <AttentionRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
-          </CareProvider>
-        </main>
-      </div>
+    <>
+      <AppShell
+        appName="康养看护"
+        org={role !== "family" ? <OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} /> : undefined}
+        live={live}
+        user={{ name: displayName, sub: ROLE_LABEL[role], menu: menuItems }}
+        // 家属只关注自己的家人，不需要模块导航
+        nav={role !== "family" ? navItems : undefined}
+        active={current.key}
+        onNav={(k) => {
+          setNav(k);
+          setDetailId(undefined);
+        }}
+      >
+        <CareProvider value={ctx}>
+          {detailMember ? (
+            <div className="page">
+              <ElderDetail
+                orgId={s.orgId}
+                member={detailMember}
+                live={care.liveOf(detailMember)}
+                alert={care.alertByMember[detailMember.memberId]}
+                now={now}
+                onBack={() => setDetailId(undefined)}
+                onProcess={alertCenter.setProcessing}
+              />
+            </div>
+          ) : current.key === "elders" ? (
+            <EldersPage />
+          ) : current.key === "alerts" ? (
+            <AlertsPage />
+          ) : current.key === "health" ? (
+            <HealthPage />
+          ) : current.key === "home" && role === "care" ? (
+            <CareHome />
+          ) : current.key === "home" && role === "manager" ? (
+            <ManagerHome />
+          ) : (
+            <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role] ?? ""} />
+          )}
+          <AttentionRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
+        </CareProvider>
+      </AppShell>
       <AlertProcessDialog
         alert={alertCenter.processing}
         now={now}
         onClose={alertCenter.closeProcessing}
         onDone={alertCenter.done}
       />
-    </div>
+    </>
   );
 }

@@ -26,7 +26,8 @@ export const baseTheme: ThemeConfig = {
     colorSuccess: status.online.dot,
     colorWarning: status.warning.dot,
     colorError: status.alert.dot,
-    borderRadius: 6,
+    fontSize: 14,
+    borderRadius: 8,
     fontFamily: '"Noto Sans SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif',
   },
 };

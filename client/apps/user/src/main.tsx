@@ -11,10 +11,10 @@ import { baseTheme } from "@radar/core";
 import RootApp from "./App";
 import "./styles.css";
 
-// 用户端：比运维端更宽松的密度、更大的字号和圆角（界面稿"用户端"页）
+// 主题与外壳两端共用（core 的 baseTheme / AppShell）
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <ConfigProvider locale={zhCN} theme={{ ...baseTheme, token: { ...baseTheme.token, fontSize: 14, borderRadius: 8 } }}>
+    <ConfigProvider locale={zhCN} theme={baseTheme}>
       <AntApp>
         <RootApp />
       </AntApp>
