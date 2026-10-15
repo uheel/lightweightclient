@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Badge, Button, Empty, Input, InputNumber, Segmented, Select, Space, Spin, Switch, Tooltip } from "antd";
-import { CloudDownloadOutlined, CloudUploadOutlined, ReloadOutlined, UndoOutlined } from "@ant-design/icons";
+import { App, Button, Input, InputNumber, Select, Space, Spin, Switch, Tooltip } from "antd";
+import { CloudDownloadOutlined, CloudUploadOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { realtime, type RealtimeState } from "@radar/core";
 import {
@@ -14,7 +14,8 @@ import {
   type PropertySchema,
   type StoredProperty,
 } from "../api/device";
-import { structuredFor } from "./propertyEditors";
+import { DebugContext, structuredFor } from "./propertyEditors";
+import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
 
 /**
  * 设备属性：读取设备上的当前值、修改后下发（与平台"设备配置 › 存储属性"同一套接口）。
@@ -25,6 +26,7 @@ import { structuredFor } from "./propertyEditors";
 const TIMEOUT_MS = 30_000;
 const UNGROUPED = "__ungrouped";
 const GROUP_KEY = "ops:prop-group";
+const DEBUG_KEY = "ops:prop-debug";
 const SECRET = /pass|pwd|token/i;
 
 type Command = "get-property" | "set-property";
@@ -53,6 +55,8 @@ type Delivery = { status: "pending" } | { status: "ok"; at: number } | { status:
 const readOnly = (p: PropertyDef) => p.accessMode === 2 || p.displayType === 1 || p.displayType === 8;
 /** 能从设备读：不是平台属性，也不是只写 */
 const readable = (p: PropertyDef) => !p.isPlatformOnly && p.accessMode !== 3;
+const nameOf = (p: PropertyDef) => PROPERTY_TEXT[p.propertyName]?.name ?? p.title;
+const descOf = (p: PropertyDef) => PROPERTY_TEXT[p.propertyName]?.desc;
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /** 平台的显示条件，例如 `talk_type_sel===1`、`offlsr_response_file==="x.wav"`，支持 && 和 || */
@@ -119,6 +123,23 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   const [rev, setRev] = useState(0);
   const [rtState, setRtState] = useState<RealtimeState>(realtime.state);
   const pending = useRef<Pending>(undefined);
+  /** 排障模式：显示字段名和原始值 */
+  const [debug, setDebug] = useState(() => {
+    try {
+      return localStorage.getItem(DEBUG_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleDebug = () =>
+    setDebug((d) => {
+      try {
+        localStorage.setItem(DEBUG_KEY, d ? "0" : "1");
+      } catch {
+        /* 记不住也没关系 */
+      }
+      return !d;
+    });
 
   useEffect(() => realtime.onState((s) => setRtState(s)), []);
 
@@ -363,26 +384,24 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   function write() {
     if (!changed.length) return;
     const bad = changed.find((p) => errors[p.propertyName]);
-    if (bad) return message.warning(`「${bad.title}」：${errors[bad.propertyName]}`);
+    if (bad) return message.warning(`「${nameOf(bad)}」：${errors[bad.propertyName]}`);
     const missing = changed.find((p) => p.isRequired && (valueOf(p.propertyName) === undefined || valueOf(p.propertyName) === ""));
-    if (missing) return message.warning(`请填写「${missing.title}」`);
+    if (missing) return message.warning(`请填写「${nameOf(missing)}」`);
     const saveOnly = changed.every((p) => p.isPlatformOnly);
     modal.confirm({
-      title: saveOnly ? `保存 ${changed.length} 项平台属性？` : `下发 ${changed.length} 项属性到设备？`,
+      title: saveOnly ? `保存这 ${changed.length} 项修改？` : `把这 ${changed.length} 项修改下发到设备？`,
       width: 560,
-      okText: saveOnly ? "保存" : "下发",
+      okText: saveOnly ? "保存" : "下发到设备",
+      cancelText: "再看看",
       content: (
         <div className="prop-confirm">
-          <p className="muted small">
-            SN <span className="mono">{sn}</span>
-            {saveOnly ? "，只保存在平台，不下发到设备。" : "，平台会保存并立即下发，设备会按新值工作。"}
-          </p>
+          <p className="muted small">{saveOnly ? "这些设置只保存在平台，不会发给设备。" : `设备（SN ${sn}）收到后会立即按新设置工作。`}</p>
           <ul>
             {changed.map((p) => {
               const lines = structuredFor(p, typeCode)?.diff?.(base(p.propertyName), valueOf(p.propertyName));
               return (
                 <li key={p.propertyName}>
-                  <b>{p.title}</b>
+                  <b>{nameOf(p)}</b>
                   {lines ? (
                     <span className="prop-diff">
                       {lines.length ? lines.map((l) => <span key={l}>{l}</span>) : <span className="muted">格式整理（值不变）</span>}
@@ -467,94 +486,144 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
 
   if (loadError)
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="读取属性定义失败"
-        description={loadError}
-        action={
-          <Button size="small" onClick={load}>
-            重试
-          </Button>
-        }
-      />
+      <div className="pp-empty">
+        <p>没能读取这台设备的属性：{loadError}</p>
+        <Button size="small" onClick={load}>
+          重新读取
+        </Button>
+      </div>
     );
   if (!schema) return <Spin style={{ display: "block", marginTop: 80 }} />;
-  if (!schema.properties.length) return <Empty style={{ marginTop: 80 }} description="这个设备类型没有可配置的属性" />;
+  if (!schema.properties.length) return <div className="pp-empty">这类设备没有可以配置的属性。</div>;
 
   const changedIn = (code: string) => changed.filter((p) => (code === UNGROUPED ? !p.propertyGroupStringCode : p.propertyGroupStringCode === code)).length;
+  const groupLabel = groups.find((g) => g.value === group)?.label ?? "";
+  const groupText = GROUP_TEXT[groupLabel];
+  const readRows = rows.filter(readable);
+  // 这一组最近一次从设备读到值的时间
+  const lastRead = Math.max(0, ...readRows.map((p) => (device[p.propertyName]?.how === "read" ? device[p.propertyName].at : 0)));
+  const allReadOnly = rows.length > 0 && rows.every(readOnly);
 
   return (
-    <div className="props">
-      <div className="toolbar">
-        <Segmented
-          value={group}
-          onChange={(v) => pickGroup(String(v))}
-          options={groups.map((g) => ({
-            value: g.value,
-            label: (
-              <Badge dot={changedIn(g.value) > 0} offset={[4, 0]}>
-                {g.label}
-              </Badge>
-            ),
-          }))}
-        />
-      </div>
-      <div className="toolbar">
-        <Space.Compact>
-          <Button icon={<CloudDownloadOutlined />} loading={busy === "get-property"} disabled={!!busy} onClick={() => read(false)}>
-            从设备读取本组
-          </Button>
-          <Tooltip title="读取所有分组的属性">
-            <Button disabled={!!busy} onClick={() => read(true)}>
-              全部
+    <DebugContext.Provider value={debug}>
+      <div className="pp">
+        <div className="pp-strip">
+          <span className={`pp-link ${online ? "ok" : "warn"}`}>
+            <i />
+            {online ? "设备在线" : "设备离线，读取和下发会等不到应答"}
+          </span>
+          {rtState !== "connected" && (
+            <span className="pp-link warn">
+              <i />
+              {rtState === "connecting" || rtState === "reconnecting" ? "实时通道正在连接" : "实时通道未连接，收不到设备应答"}
+            </span>
+          )}
+          <span className="pp-source">
+            {busy === "get-property"
+              ? "正在读取设备…"
+              : busy === "set-property"
+                ? "正在等设备确认…"
+                : lastRead
+                  ? `${dayjs(lastRead).format("HH:mm:ss")} 从设备读取`
+                  : readRows.length
+                    ? "现在显示的是平台记录的值"
+                    : ""}
+          </span>
+          <Space.Compact className="pp-read">
+            <Button icon={<CloudDownloadOutlined />} loading={busy === "get-property"} disabled={!!busy || !readRows.length} onClick={() => read(false)}>
+              读取本组
             </Button>
+            <Tooltip title="读取所有分组">
+              <Button disabled={!!busy} onClick={() => read(true)}>
+                全部
+              </Button>
+            </Tooltip>
+          </Space.Compact>
+          <Tooltip title="重新加载平台记录">
+            <Button type="text" icon={<ReloadOutlined />} onClick={load} />
           </Tooltip>
-        </Space.Compact>
-        <Button type="primary" icon={<CloudUploadOutlined />} loading={busy === "set-property"} disabled={!changed.length || !!busy} onClick={write}>
-          下发修改{changed.length ? `（${changed.length}）` : ""}
-        </Button>
-        <Button icon={<UndoOutlined />} disabled={!Object.keys(edits).length || busy === "set-property"} onClick={undo}>
-          撤销修改
-        </Button>
-        <Button type="text" icon={<ReloadOutlined />} title="重新读取平台记录" onClick={load} style={{ marginLeft: "auto" }} />
-      </div>
-      {!online && <Alert type="warning" showIcon message="设备当前离线，读取和下发会等不到应答。" />}
-      {rtState !== "connected" && (
-        <Alert type="warning" showIcon message={`实时通道${rtState === "connecting" || rtState === "reconnecting" ? "正在连接" : "未连接"}，收不到设备应答；结果可以到通信日志里查看。`} />
-      )}
-      {group === "radar_config" && (
-        <Alert type="info" showIcon message="安装设置（探测区域、区域划分）平时由房间布局下发。在这里直接改，房间布局里的配置不会跟着变。" />
-      )}
-      <div className="prop-table">
-        <div className="prop-head">
-          <span>属性</span>
-          <span>值</span>
-          <span>状态</span>
         </div>
-        {rows.map((p) => (
-          <PropertyRow
-            key={p.propertyName}
-            p={p}
-            value={valueOf(p.propertyName)}
-            rev={rev}
-            modified={isModified(p.propertyName)}
-            error={errors[p.propertyName]}
-            dev={device[p.propertyName]}
-            stored={stored[p.propertyName]}
-            delivery={delivery[p.propertyName]}
-            missing={missing.has(p.propertyName)}
-            typeCode={typeCode}
-            ctx={ctx}
-            sn={sn}
-            disabled={busy === "set-property"}
-            onChange={(v) => setValue(p.propertyName, v)}
-            onError={(err) => setError(p.propertyName, err)}
-          />
-        ))}
-        {!rows.length && <p className="muted small prop-empty">这一组没有要显示的属性</p>}
+
+        <div className="pp-body">
+          <nav className="pp-nav" aria-label="属性分组">
+            {groups.map((g) => (
+              <button
+                key={g.value}
+                type="button"
+                className={g.value === group ? "on" : undefined}
+                aria-current={g.value === group ? "true" : undefined}
+                onClick={() => pickGroup(g.value)}
+              >
+                {g.label}
+                {changedIn(g.value) > 0 && <b title={`改了 ${changedIn(g.value)} 项`}>{changedIn(g.value)}</b>}
+              </button>
+            ))}
+          </nav>
+
+          <section className="pp-group">
+            <header>
+              <h2>{groupLabel}</h2>
+              {groupText && <p>{groupText}</p>}
+            </header>
+            {allReadOnly ? (
+              <dl className="pp-kv">
+                {rows.map((p) => (
+                  <div key={p.propertyName}>
+                    <dt>
+                      {nameOf(p)}
+                      {debug && <code className="pp-raw">{p.propertyName}</code>}
+                    </dt>
+                    <dd>{format(p, valueOf(p.propertyName), typeCode)}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <div className="pp-rows">
+                {rows.map((p) => (
+                  <SettingRow
+                    key={p.propertyName}
+                    p={p}
+                    value={valueOf(p.propertyName)}
+                    rev={rev}
+                    modified={isModified(p.propertyName)}
+                    error={errors[p.propertyName]}
+                    dev={device[p.propertyName]}
+                    stored={stored[p.propertyName]}
+                    delivery={delivery[p.propertyName]}
+                    missing={missing.has(p.propertyName)}
+                    typeCode={typeCode}
+                    ctx={ctx}
+                    sn={sn}
+                    debug={debug}
+                    disabled={busy === "set-property"}
+                    onChange={(v) => setValue(p.propertyName, v)}
+                    onError={(err) => setError(p.propertyName, err)}
+                  />
+                ))}
+              </div>
+            )}
+            {!rows.length && <p className="pp-empty">这一组现在没有要显示的设置。</p>}
+            <footer>
+              <button type="button" className="pp-debug" onClick={toggleDebug}>
+                {debug ? "隐藏排障信息" : "显示排障信息（字段名和原始值）"}
+              </button>
+            </footer>
+          </section>
+        </div>
+
+        {(changed.length > 0 || busy === "set-property") && (
+          <div className="pp-bar" role="region" aria-label="未下发的修改">
+            <span>{busy === "set-property" ? "已下发，正在等设备确认…" : `改了 ${changed.length} 项：${changed.map(nameOf).join("、")}`}</span>
+            <Button disabled={busy === "set-property"} onClick={undo}>
+              撤销
+            </Button>
+            <Button type="primary" icon={<CloudUploadOutlined />} loading={busy === "set-property"} disabled={!!busy} onClick={write}>
+              {changed.every((p) => p.isPlatformOnly) ? "保存" : "下发到设备"}
+            </Button>
+          </div>
+        )}
       </div>
-    </div>
+    </DebugContext.Provider>
   );
 }
 
@@ -562,11 +631,27 @@ function groupsOf(s: PropertySchema) {
   const used = new Set(s.properties.map((p) => p.propertyGroupStringCode ?? UNGROUPED));
   const list = s.groups.filter((g) => used.has(g.stringCode)).map((g) => ({ value: g.stringCode, label: g.label }));
   if (used.has(UNGROUPED) || s.properties.some((p) => p.propertyGroupStringCode && !s.groups.some((g) => g.stringCode === p.propertyGroupStringCode)))
-    list.push({ value: UNGROUPED, label: "未分组" });
+    list.push({ value: UNGROUPED, label: "其他" });
   return list;
 }
 
-function PropertyRow({
+/** 每行的一句状态：只说最要紧的那件事，平台记录的下发时间放在悬停提示里 */
+function rowState(o: { modified: boolean; error?: string; dev?: DeviceValue; stored?: StoredProperty; delivery?: Delivery; missing: boolean; differs: string | false }) {
+  const { modified, error, dev, stored, delivery, missing, differs } = o;
+  if (error) return { cls: "err", text: error };
+  if (delivery?.status === "pending") return { cls: "busy", text: "正在等设备确认…" };
+  if (delivery?.status === "error") return { cls: "err", text: `下发失败：${delivery.error ?? ""}` };
+  if (delivery?.status === "timeout") return { cls: "err", text: "设备没有确认，可以到通信日志里查看" };
+  if (delivery?.status === "ok") return { cls: "ok", text: `${dayjs(delivery.at).format("HH:mm")} 已下发到设备` };
+  if (modified) return { cls: "mod", text: "已修改，还没下发" };
+  if (missing) return { cls: "muted", text: "设备没有返回这一项，可能是固件不支持" };
+  if (differs) return { cls: "warn", text: differs };
+  if (dev) return { cls: "ok", text: "设备上的当前值" };
+  if (stored?.deliveryStatus === 3) return { cls: "err", text: `上次下发失败${stored.deliveryError ? `：${stored.deliveryError}` : ""}` };
+  return undefined;
+}
+
+function SettingRow({
   p,
   value,
   rev,
@@ -579,6 +664,7 @@ function PropertyRow({
   typeCode,
   ctx,
   sn,
+  debug,
   disabled,
   onChange,
   onError,
@@ -595,68 +681,56 @@ function PropertyRow({
   typeCode?: number;
   ctx: Record<string, unknown>;
   sn: string;
+  debug: boolean;
   disabled: boolean;
   onChange: (v: unknown) => void;
   onError: (err?: string) => void;
 }) {
   const st = structuredFor(p, typeCode);
-  const tags: React.ReactNode[] = [];
-  if (modified) tags.push(<span key="m" className="ptag mod">已修改</span>);
-  if (delivery?.status === "pending") tags.push(<span key="d" className="ptag pend">等待设备应答</span>);
-  else if (delivery?.status === "ok") tags.push(<span key="d" className="ptag ok">下发成功 {dayjs(delivery.at).format("HH:mm:ss")}</span>);
-  else if (delivery?.status === "error")
-    tags.push(
-      <span key="d" className="ptag err" title={delivery.error}>
-        下发失败
-      </span>,
-    );
-  else if (delivery?.status === "timeout") tags.push(<span key="d" className="ptag err">应答超时</span>);
-  if (dev && !delivery) tags.push(<span key="r" className="ptag dev">设备值 {dayjs(dev.at).format("HH:mm:ss")}</span>);
-  if (missing && !delivery)
-    tags.push(
-      <span key="x" className="ptag pend" title="读取时设备没有返回这一项，可能是固件不支持">
-        设备未返回
-      </span>,
-    );
+  // 设备上的值和读取前的平台记录不一样：有人在别处改过，或者上次下发没生效
+  const differs = dev?.how === "read" && dev.before !== undefined && !same(dev.value, dev.before) && `平台记录是 ${format(p, dev.before, typeCode)}，与设备不一致`;
+  const state = rowState({ modified, error, dev, stored, delivery, missing, differs });
+  const record = stored?.deliveryAt ? `平台记录：${stored.deliveryAt.slice(0, 16)}${stored.deliveryByUserName ? `，${stored.deliveryByUserName}` : ""}` : undefined;
+  const desc = descOf(p);
+  const ro = readOnly(p);
 
-  // 设备上的值和读取前的平台记录不一样：说明有人在别处改过，或者上次下发没生效
-  const differs = dev?.how === "read" && dev.before !== undefined && !same(dev.value, dev.before);
-  const rec = stored?.deliveryAt
-    ? `平台记录 ${stored.deliveryAt.slice(5, 16)}${stored.deliveryByUserName ? ` · ${stored.deliveryByUserName}` : ""}${
-        stored.deliveryStatus === 3 ? " · 下发失败" : stored.deliveryStatus === 1 ? " · 下发中" : ""
-      }`
-    : undefined;
+  const head = (
+    <div className="pp-name">
+      <span>
+        {nameOf(p)}
+        {p.isPlatformOnly && <em>只存在平台</em>}
+      </span>
+      {desc && <small>{desc}</small>}
+      {debug && <code className="pp-raw">{p.propertyName}</code>}
+    </div>
+  );
+  const status = state && (
+    <span className={`pp-state ${state.cls}`} title={record}>
+      {state.text}
+    </span>
+  );
+
+  if (st?.wide)
+    return (
+      <div className={`pp-row wide${modified ? " modified" : ""}`}>
+        <div className="pp-row-head">
+          {head}
+          {status}
+        </div>
+        <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} />
+      </div>
+    );
 
   return (
-    <div className={`prop-row${modified ? " modified" : ""}${st?.wide ? " wide" : ""}`}>
-      <div className="prop-name">
-        <span>
-          {p.title}
-          {p.isRequired && <em className="req">*</em>}
-        </span>
-        <small className="mono muted" title={p.aliasName ? `报文里是 ${p.aliasName}` : undefined}>
-          {p.propertyName}
-          {p.isPlatformOnly ? " · 平台" : p.accessMode === 2 ? " · 只读" : p.accessMode === 3 ? " · 只写" : ""}
-        </small>
-      </div>
-      <div className="prop-value">
+    <div className={`pp-row${modified ? " modified" : ""}`}>
+      {head}
+      <div className="pp-control">
         {st ? (
-          <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || readOnly(p)} ctx={ctx} sn={sn} />
+          <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} />
         ) : (
           <Editor key={`${p.propertyName}:${rev}`} p={p} value={value} disabled={disabled} onChange={onChange} onError={onError} />
         )}
-        {error && !st && <small className="prop-err">{error}</small>}
-      </div>
-      <div className="prop-state">
-        {tags.length > 0 && <div className="ptags">{tags}</div>}
-        {differs && (
-          <small className="warn-text" title="设备上的值与读取前的平台记录不一致，可能有人在别处改过，或者上次下发没生效">
-            读取前平台记录：{format(p, dev!.before, typeCode)}
-          </small>
-        )}
-        {rec && <small className="muted">{rec}</small>}
-        {delivery?.status === "error" && delivery.error && <small className="prop-err">{delivery.error}</small>}
-        {stored?.deliveryStatus === 3 && stored.deliveryError && !delivery && <small className="prop-err">{stored.deliveryError}</small>}
+        {status}
       </div>
     </div>
   );
@@ -695,9 +769,6 @@ function Editor({
         disabled={disabled}
         checked={same(value, on)}
         onChange={(c) => onChange(c ? on : off)}
-        checkedChildren="开"
-        unCheckedChildren="关"
-        style={{ alignSelf: "flex-start" }}
       />
     );
   }
@@ -738,10 +809,10 @@ function Editor({
         min={fp.min}
         max={fp.max}
         precision={p.dataType === 5 || p.dataType === 6 ? undefined : 0}
-        addonAfter={p.unit || undefined}
+        suffix={p.unit || undefined}
         placeholder={fp.min !== undefined && fp.max !== undefined ? `${fp.min}–${fp.max}` : undefined}
         onChange={(v) => onChange(v ?? undefined)}
-        style={{ width: 160 }}
+        style={{ width: 140 }}
       />
     );
   }

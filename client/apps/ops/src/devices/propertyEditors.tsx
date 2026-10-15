@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Button, Checkbox, InputNumber, Select, Switch, TimePicker, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
@@ -99,8 +99,17 @@ interface Field {
   newRow?: boolean;
 }
 
+/** 一行设置：左边是名称和说明，右边是一句话，数字是字段下标（例如 ["低于", 2, "或高于", 0, "次/分钟时告警"]） */
+interface Line {
+  label: string;
+  desc?: string;
+  parts: (number | string)[];
+}
+
 interface TupleSpec {
   fields: Field[];
+  /** 按句子排的布局；不填时每个字段一行 */
+  lines?: Line[];
   /** 显示顺序（数组下标），不填按原顺序 */
   order?: number[];
   /** 允许的数组长度：旧固件位数少时只显示前几位，写回时保持原长度 */
@@ -119,7 +128,7 @@ const seconds10: Pick<Field, "scale" | "unit" | "step" | "precision" | "hint"> =
   unit: "秒",
   step: 10,
   precision: 0,
-  hint: (raw) => (raw * 10 >= 60 ? `= ${duration(raw * 10)}` : undefined),
+  hint: (raw) => (raw * 10 >= 60 ? duration(raw * 10) : undefined),
 };
 
 function fieldText(f: Field, raw: number) {
@@ -168,55 +177,66 @@ function tuple(spec: TupleSpec): Structured {
       const err = spec.check?.(vals);
       const raw = toArray(value);
       const empty = !raw || raw.length === 0;
+      const lines: Line[] = (
+        spec.lines ?? indexes(fields).map((i) => ({ label: fields[i].label, desc: fields[i].help, parts: fields[i].unit ? [i, fields[i].unit!] : [i] }))
+      ).filter((l) => l.parts.every((x) => typeof x === "string" || x < fields.length));
+
+      const control = (i: number) => {
+        const f = fields[i];
+        const v = vals[i];
+        if (f.kind === "switch") {
+          const locked = f.lockedBy?.(vals);
+          return (
+            <Tooltip key={i} title={locked}>
+              <Switch size="small" checked={!!v} disabled={disabled || !!locked} onChange={(c) => set(i, c ? 1 : 0)} />
+            </Tooltip>
+          );
+        }
+        if (f.kind === "select")
+          return <Select key={i} size="small" value={v} disabled={disabled} onChange={(x: number) => set(i, x)} options={withUnknown(f.options ?? [], v)} popupMatchSelectWidth={false} style={{ minWidth: 112 }} />;
+        const k = f.scale ?? 1;
+        return (
+          <span key={i} className="pp-num">
+            <InputNumber
+              size="small"
+              value={+(v / k).toFixed(f.precision ?? (k === 1 ? 0 : 1))}
+              min={f.min !== undefined ? f.min / k : undefined}
+              max={f.max !== undefined ? f.max / k : undefined}
+              step={f.step ?? (k > 1 ? 0.1 : 1)}
+              precision={f.precision ?? (k === 1 ? 0 : 1)}
+              disabled={disabled}
+              controls={false}
+              onChange={(x) => x !== null && set(i, Math.round(Number(x) * k))}
+            />
+          </span>
+        );
+      };
+      // 换算提示（例如 100 秒 = 1 分 40 秒）放在句子最后，不打断"数字 + 单位"
+      const hints = (l: Line) =>
+        l.parts
+          .filter((x): x is number => typeof x === "number" && (fields[x].kind ?? "number") === "number")
+          .map((i) => fields[i].hint?.(vals[i]))
+          .filter(Boolean)
+          .join("，");
+
       return (
-        <div className="st">
-          {empty && <small className="warn-text">没有值（{raw ? "空数组" : "未记录"}），下面显示的是默认值。改动后下发才会写入设备。</small>}
-          <div className={`st-grid${empty ? " empty" : ""}`}>
-            {indexes(fields).map((i) => {
-              const f = fields[i];
-              const locked = f.lockedBy?.(vals);
-              const raw = vals[i];
-              let input: React.ReactNode;
-              if (f.kind === "switch")
-                input = (
-                  <Tooltip title={locked}>
-                    <Switch size="small" checked={!!raw} disabled={disabled || !!locked} onChange={(c) => set(i, c ? 1 : 0)} checkedChildren="开" unCheckedChildren="关" />
-                  </Tooltip>
-                );
-              else if (f.kind === "select")
-                input = <Select size="small" value={raw} disabled={disabled} onChange={(x: number) => set(i, x)} options={withUnknown(f.options ?? [], raw)} style={{ width: "100%" }} />;
-              else {
-                const k = f.scale ?? 1;
-                input = (
-                  <InputNumber
-                    size="small"
-                    value={+(raw / k).toFixed(f.precision ?? (k === 1 ? 0 : 1))}
-                    min={f.min !== undefined ? f.min / k : undefined}
-                    max={f.max !== undefined ? f.max / k : undefined}
-                    step={f.step ?? (k > 1 ? 0.1 : 1)}
-                    precision={f.precision ?? (k === 1 ? 0 : 1)}
-                    disabled={disabled}
-                    addonAfter={f.unit}
-                    onChange={(x) => x !== null && set(i, Math.round(Number(x) * k))}
-                    style={{ width: "100%" }}
-                  />
-                );
-              }
-              const hint = f.kind === "number" || !f.kind ? f.hint?.(raw) : undefined;
-              return (
-                <div key={i} className="st-field" style={f.newRow ? { gridColumnStart: 1 } : undefined}>
-                  <Label text={f.label} help={f.help} />
-                  {input}
-                  {hint && <small className="muted">{hint}</small>}
-                </div>
-              );
-            })}
-          </div>
-          {spec.note && <small className="muted">{spec.note}</small>}
-          {spec.lengths && fields.length < spec.fields.length && (
-            <small className="muted">这台设备的固件只有前 {fields.length} 项，其余几项需要新固件。</small>
-          )}
-          {err && <small className="prop-err">{err}</small>}
+        <div className={`pp-lines${empty ? " empty" : ""}`}>
+          {empty && <p className="pp-note warn">设备上还没有这一项的值，下面是默认值；改过并下发后才会写入设备。</p>}
+          {lines.map((l) => (
+            <div key={l.label} className="pp-line">
+              <div className="pp-line-text">
+                <span>{l.label}</span>
+                {l.desc && <small>{l.desc}</small>}
+              </div>
+              <div className="pp-sentence">
+                {l.parts.map((x, j) => (typeof x === "number" ? control(x) : <span key={j}>{x}</span>))}
+                {hints(l) && <em className="pp-hint">约 {hints(l)}</em>}
+              </div>
+            </div>
+          ))}
+          {spec.note && <p className="pp-note">{spec.note}</p>}
+          {spec.lengths && fields.length < spec.fields.length && <p className="pp-note">这台设备的固件只支持上面几项，其余设置需要升级固件。</p>}
+          {err && <p className="pp-note err">{err}</p>}
           <RawLine value={value} />
         </div>
       );
@@ -228,10 +248,13 @@ function withUnknown(options: { value: number; label: string }[], v: number) {
   return options.some((o) => o.value === v) ? options : [...options, { value: v, label: `未知（${v}）` }];
 }
 
-/** 结构化编辑器下面附上原始值，方便和通信日志对照 */
+/** 排障模式：显示字段名和原始值，方便和通信日志对照 */
+export const DebugContext = createContext(false);
+
 function RawLine({ value }: { value: unknown }) {
-  if (value === undefined || value === null || value === "") return null;
-  return <small className="st-raw mono">原始值 {typeof value === "string" ? value : JSON.stringify(value)}</small>;
+  const debug = useContext(DebugContext);
+  if (!debug || value === undefined || value === null || value === "") return null;
+  return <code className="pp-raw">{typeof value === "string" ? value : JSON.stringify(value)}</code>;
 }
 
 // ---------- 各属性的定义 ----------
@@ -259,6 +282,12 @@ const QL_RADAR_PARA_TH = tuple({
   ],
   order: [2, 0, 3, 1, 4, 5, 6],
   lengths: [4, 7],
+  lines: [
+    { label: "呼吸频率", parts: ["低于", 2, "或高于", 0, "次/分钟时告警"] },
+    { label: "心率", parts: ["低于", 3, "或高于", 1, "次/分钟时告警"] },
+    { label: "持续测量", desc: "开启后一直测量呼吸和心率", parts: [4] },
+    { label: "生命体征偏弱", desc: "灵敏度 1～99，越高越容易提醒，也越容易误报，建议不超过 50", parts: ["持续", 5, "分钟时提醒，灵敏度", 6] },
+  ],
   check: orderCheck,
 });
 
@@ -266,6 +295,11 @@ const QL_RADAR_PARA_TH = tuple({
 const QL_HEALTH_CONFIG = tuple({
   fields: [...breathHeart(1, 255, 255), { ...weakTime, newRow: true }, weakSens],
   order: [2, 0, 3, 1, 4, 5],
+  lines: [
+    { label: "呼吸频率", parts: ["低于", 2, "或高于", 0, "次/分钟时告警"] },
+    { label: "心率", parts: ["低于", 3, "或高于", 1, "次/分钟时告警"] },
+    { label: "生命体征偏弱", desc: "灵敏度 1～99，越高越容易提醒，也越容易误报，建议不超过 50", parts: ["持续", 4, "分钟时提醒，灵敏度", 5] },
+  ],
   check: orderCheck,
 });
 
@@ -281,6 +315,12 @@ const QL_FALLDOWN_CONFIG = tuple({
     { label: "姿态检测", kind: "switch", def: 1, lockedBy: postureLock, help: "检测站、坐、躺等姿态" },
     { label: "床上坐起", kind: "switch", def: 0, help: "开启后输出床上坐起事件，同时会打开姿态检测" },
     { label: "坐地告警判定时间", min: 1, max: 240, def: 6, ...seconds10, help: "坐地持续多久告警，10～2400 秒" },
+  ],
+  lines: [
+    { label: "跌倒", parts: ["倒地超过", 0, "秒判定为跌倒"] },
+    { label: "坐地告警", parts: [1, "坐在地上超过", 4, "秒时告警"] },
+    { label: "床上坐起", desc: "老人在床上坐起时提醒", parts: [3] },
+    { label: "姿态检测", desc: "识别站、坐、躺；坐地告警和床上坐起都要用到", parts: [2] },
   ],
   fix: (v) => (v[1] || v[3] ? Object.assign([...v], { 2: 1 }) : v),
   check: (v) => ((v[1] || v[3]) && !v[2] ? POSTURE_NEEDED : undefined),
@@ -298,6 +338,10 @@ const QL_RADAR_PARA_SIT = tuple({
     return [m & 1, m & 1 || (m & 2) >> 1, num(raw?.[1], 10)];
   },
   encode: (v) => [v[0] ? 3 : v[1] ? 2 : 0, v[2]],
+  lines: [
+    { label: "坐地告警", desc: "顶装时在 3×3 米范围内有效", parts: [0, "坐在地上超过", 2, "秒时告警"] },
+    { label: "姿态检测", desc: "识别坐姿和在床姿态；坐地告警要用到", parts: [1] },
+  ],
   fix: (v) => (v[0] ? Object.assign([...v], { 1: 1 }) : v),
 });
 
@@ -309,8 +353,11 @@ const RS_AREA = tuple({
     { label: "Y 起始（近端）", unit: "米", min: 0, max: 800, scale: 100, precision: 2, def: 50 },
     { label: "Y 结束（远端）", unit: "米", min: 0, max: 800, scale: 100, precision: 2, def: 500 },
   ],
-  check: (v) => (v[0] >= v[1] ? "X 左边界要小于右边界" : v[2] >= v[3] ? "Y 起始要小于结束" : undefined),
-  note: "以雷达为原点：X 为左右（-4～4 米），Y 为离雷达的距离（0～8 米）。",
+  lines: [
+    { label: "左右", desc: "以雷达为中心，左负右正，-4～4 米", parts: ["从", 0, "到", 1, "米"] },
+    { label: "远近", desc: "0～8 米", parts: ["离雷达", 2, "到", 3, "米"] },
+  ],
+  check: (v) => (v[0] >= v[1] ? "左边要小于右边" : v[2] >= v[3] ? "近的一端要小于远的一端" : undefined),
 });
 
 /** slim 设备上报频次 */
@@ -319,6 +366,7 @@ const RS_REPORT_FREQ = tuple({
     { label: "离线时上报间隔", unit: "秒", min: 0, max: 255, def: 30, help: "平台网页端标为\"离线\"，0～255 秒" },
     { label: "在线时上报间隔", unit: "秒", min: 0, max: 255, def: 1, help: "平台网页端标为\"在线\"，0～255 秒" },
   ],
+  lines: [{ label: "上报间隔", desc: "0～255 秒", parts: ["离线时每", 0, "秒，在线时每", 1, "秒一次"] }],
 });
 
 const INSTALL_TYPES = [
@@ -354,6 +402,13 @@ const QL_RADAR_CONFIG = tuple({
     return [r(0, 0), r(1, 28), r(10, 7), Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   },
   encode: ([type, h, mode, x0, x1, y0, y1]) => [type, h, x0, y0, x1, y0, x0, y1, x1, y1, mode],
+  lines: [
+    { label: "安装方式", parts: [0] },
+    { label: "安装高度", desc: "离地面的高度", parts: [1, "米"] },
+    { label: "工作模式", parts: [2] },
+    { label: "左右范围", desc: "以雷达为中心，左负右正", parts: ["从", 3, "到", 4, "米"] },
+    { label: "前后范围", desc: "以雷达为中心，近负远正", parts: ["从", 5, "到", 6, "米"] },
+  ],
   check: (v) => (v[3] >= v[4] ? "X 左要小于 X 右" : v[5] >= v[6] ? "Y 下要小于 Y 上" : undefined),
 });
 
@@ -441,39 +496,43 @@ const QL_RADAR_AREA: Structured = {
     };
     const err = checkAreas(list);
     const numIn = (v: number, set: (x: number) => void) => (
-      <InputNumber size="small" value={+m1(v)} min={-12.6} max={12.6} step={0.1} precision={1} disabled={disabled} onChange={(x) => x !== null && set(Math.round(Number(x) * 10))} style={{ width: 64 }} />
+      <span className="pp-num">
+        <InputNumber size="small" value={+m1(v)} min={-12.6} max={12.6} step={0.1} precision={1} controls={false} disabled={disabled} onChange={(x) => x !== null && set(Math.round(Number(x) * 10))} />
+      </span>
     );
     return (
       <div className="st st-area">
         <RadarPreview config={ctx.QL_radar_config} areas={list} />
         <div className="st-area-list">
-          {list.length > 0 && (
-            <div className="st-area-row head">
-              <span>编号</span>
-              <span>类型</span>
-              <span>X 范围（米）</span>
-              <span>Y 范围（米）</span>
-              <span />
-            </div>
-          )}
           {list.map((a, i) => (
-            <div key={i} className="st-area-row">
-              <InputNumber size="small" value={a.id} min={0} max={15} precision={0} disabled={disabled} onChange={(x) => x !== null && patch(i, { id: Number(x) })} style={{ width: 52 }} />
-              <Select size="small" value={a.type} disabled={disabled} options={withUnknown(AREA_TYPES, a.type)} onChange={(t: number) => patch(i, { type: t })} style={{ width: 90 }} />
-              <span className="st-range">
-                {numIn(a.x0, (x) => patch(i, { x0: x }))}～{numIn(a.x1, (x) => patch(i, { x1: x }))}
-              </span>
-              <span className="st-range">
-                {numIn(a.y0, (y) => patch(i, { y0: y }))}～{numIn(a.y1, (y) => patch(i, { y1: y }))}
-              </span>
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} disabled={disabled} onClick={() => update(list.filter((_, j) => j !== i))} title="删除区域" />
+            <div key={i} className="st-area-item">
+              <div className="st-area-name">
+                <i style={{ background: AREA_COLOR[a.type] ?? "#999" }} />
+                <Select size="small" variant="borderless" value={a.type} disabled={disabled} options={withUnknown(AREA_TYPES, a.type)} onChange={(t: number) => patch(i, { type: t })} popupMatchSelectWidth={false} />
+                <span className="pp-hint">编号</span>
+                <span className="pp-num">
+                  <InputNumber size="small" value={a.id} min={0} max={15} precision={0} controls={false} disabled={disabled} onChange={(x) => x !== null && patch(i, { id: Number(x) })} />
+                </span>
+                <Button size="small" type="text" icon={<DeleteOutlined />} disabled={disabled} onClick={() => update(list.filter((_, j) => j !== i))} title="删除这个区域" className="st-del" />
+              </div>
+              <div className="pp-sentence">
+                <span>左右从</span>
+                {numIn(a.x0, (x) => patch(i, { x0: x }))}
+                <span>到</span>
+                {numIn(a.x1, (x) => patch(i, { x1: x }))}
+                <span>米，前后从</span>
+                {numIn(a.y0, (y) => patch(i, { y0: y }))}
+                <span>到</span>
+                {numIn(a.y1, (y) => patch(i, { y1: y }))}
+                <span>米</span>
+              </div>
             </div>
           ))}
-          {!list.length && <small className="muted">没有配置区域。</small>}
-          <Button size="small" icon={<PlusOutlined />} disabled={disabled || list.length >= 16} onClick={add} style={{ alignSelf: "flex-start" }}>
+          {!list.length && <p className="pp-note">还没有划分区域。</p>}
+          <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={disabled || list.length >= 16} onClick={add} style={{ alignSelf: "flex-start" }}>
             添加区域
           </Button>
-          <small className="muted">坐标以雷达为原点，单位米（设备里按分米存，取 1 位小数）。场景规则里的区域编号就是这里的编号。</small>
+          <p className="pp-note">坐标以雷达为中心，单位米。场景规则里引用区域用的就是这里的编号。</p>
           {err && <small className="prop-err">{err}</small>}
           <RawLine value={value} />
         </div>
@@ -509,7 +568,7 @@ function RadarPreview({ config, areas }: { config: unknown; areas: Area[] }) {
         </g>
       ))}
       <circle cx={X(0)} cy={Y(0)} r={1.2} className="st-pv-radar" />
-      <text x={X(0) + 1.6} y={Y(0) - 1} className="st-pv-text">
+      <text x={X(0)} y={Y(0) + 4.2} textAnchor="middle" className="st-pv-text">
         雷达
       </text>
     </svg>
@@ -947,9 +1006,13 @@ const QL_RADAR_PARA_FALL: Structured = {
   Editor: ({ value, onChange, disabled }) => {
     const n = num(value, 0);
     return (
-      <div className="st">
-        <InputNumber size="small" value={n * 10} min={0} max={2400} step={10} precision={0} disabled={disabled} addonAfter="秒" onChange={(x) => x !== null && onChange(Math.round(Number(x) / 10))} style={{ width: 160 }} />
-        <small className="muted">{n === 0 ? "0 表示用默认值 60 秒" : `= ${duration(n * 10)}，按 10 秒取整`}</small>
+      <div className="pp-sentence">
+        <span>倒地超过</span>
+        <span className="pp-num">
+          <InputNumber size="small" value={n * 10} min={0} max={2400} step={10} precision={0} controls={false} disabled={disabled} onChange={(x) => x !== null && onChange(Math.round(Number(x) / 10))} />
+        </span>
+        <span>秒</span>
+        {n === 0 ? <em className="pp-hint">0 表示用默认的 60 秒</em> : n * 10 >= 60 && <em className="pp-hint">约 {duration(n * 10)}</em>}
       </div>
     );
   },
