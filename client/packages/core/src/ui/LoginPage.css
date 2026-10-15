@@ -1,0 +1,127 @@
+/* 登录页：不分栏。一条呼吸波形横贯窗口，名称在线上，表单在线下 */
+.lp {
+  --lp-fog: #F4F5FA;
+  --lp-ink: #111441;
+  --lp-signal: #3B4FD8;
+  --lp-slate: #5B6078;
+  --lp-muted: #8A8FA8;
+  --lp-hair: #DADDEA;
+  --lp-gutter: clamp(24px, 6vw, 88px);
+  height: 100%;
+  min-height: 560px;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto auto 1fr auto;
+  background: var(--lp-fog);
+  color: var(--lp-ink);
+  overflow: auto;
+}
+
+.lp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px var(--lp-gutter) 0;
+}
+.lp-server {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-right: -10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lp-slate);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lp-server:hover { background: #E9EBF3; }
+.lp-server:focus-visible { outline: 2px solid var(--lp-signal); outline-offset: 2px; }
+.lp-server b { font-weight: 500; color: var(--lp-ink); }
+
+.lp-head { grid-row: 3; padding: 0 var(--lp-gutter); }
+.lp-name {
+  margin: 0;
+  font-family: "DengXian Light", "DengXian", "Microsoft YaHei UI Light", "PingFang SC", "Noto Sans SC", sans-serif;
+  font-weight: 300;
+  font-size: clamp(44px, 5.4vw, 68px);
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+}
+.lp-tagline {
+  margin: 14px 0 0;
+  max-width: 30em;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--lp-slate);
+}
+
+.lp-trace { grid-row: 4; margin: 12px 0 8px; }
+
+.lp-form { grid-row: 5; padding: 0 var(--lp-gutter); }
+.lp-notice { margin: 0 0 14px; font-size: 13px; color: #9A5B00; }
+.lp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+.lp-field { display: flex; flex-direction: column; gap: 6px; width: 240px; }
+.lp-field label { font-size: 13px; color: var(--lp-slate); }
+.lp-field .ant-form-item { margin: 0; }
+.lp .lp-field .ant-input-affix-wrapper,
+.lp .lp-field .ant-form-item-control-input-content > .ant-input {
+  height: 44px;
+  background: #fff;
+  border-color: var(--lp-hair);
+}
+.lp .lp-submit { height: 44px; min-width: 112px; font-size: 15px; }
+.lp-under {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin-top: 26px;
+  min-height: 22px;
+}
+.lp-under .ant-form-item { margin: 0; }
+.lp-under .ant-checkbox-wrapper { color: var(--lp-slate); font-size: 13px; }
+.lp-error { margin: 0; font-size: 13px; color: #B4232A; }
+.lp-field .ant-form-item-explain { position: absolute; top: 100%; font-size: 12px; }
+
+.lp-foot {
+  grid-row: 7;
+  padding: 24px var(--lp-gutter) 20px;
+  font-size: 12px;
+  color: var(--lp-muted);
+}
+.lp-foot p { margin: 0; }
+.lp-foot p + p { margin-top: 4px; }
+
+.lp-pop { width: 300px; display: flex; flex-direction: column; gap: 4px; }
+.lp-pop-opt {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: #1B1D2E;
+  cursor: pointer;
+}
+.lp-pop-opt:hover { background: #F4F5FA; }
+.lp-pop-opt:focus-visible { outline: 2px solid var(--lp-signal); outline-offset: -2px; }
+.lp-pop-opt[aria-checked="true"] { background: #EEF1FF; color: var(--lp-signal); font-weight: 500; }
+.lp-pop-opt span { color: var(--lp-muted); font-weight: 400; }
+.lp-pop-custom { margin-top: 8px; padding-top: 10px; border-top: 1px solid #E8EAF2; }
+.lp-pop-custom label { display: block; font-size: 12px; color: var(--lp-slate); margin-bottom: 6px; }
+
+@media (max-width: 640px) {
+  .lp-field { width: 100%; }
+  .lp .lp-submit { width: 100%; }
+}

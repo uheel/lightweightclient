@@ -1,31 +1,89 @@
 import { useState, type ReactNode } from "react";
-import { Alert, AutoComplete, Button, Checkbox, Form, Input, Typography } from "antd";
-import { CloudServerOutlined, LockOutlined, UserOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Form, Input, Popover } from "antd";
+import { DownOutlined } from "@ant-design/icons";
 import { isTauri } from "../http";
 import { loadPrefs, savePrefs, session } from "../session";
 import { SERVERS, signIn } from "../auth";
 import { brand } from "../theme";
+import { BreathTrace } from "./BreathTrace";
+import "./LoginPage.css";
 
 export interface LoginPageProps {
   /** 客户端名称，例如"雷达运维" / "康养看护" */
   appName: string;
-  /** 左侧品牌区的一句话介绍 */
+  /** 名称下方的一句话介绍 */
   tagline: string;
   logo: ReactNode;
-  /** 顶部提示，例如"登录已失效" */
+  /** 表单上方的提示，例如"登录已失效" */
   notice?: string;
 }
 
 interface FormValues {
-  server: string;
   username: string;
   password: string;
   remember: boolean;
 }
 
-/** 两个客户端共用的登录页：左侧品牌区，右侧表单（对应界面稿"登录"画板） */
+const host = (url: string) => url.replace(/^https?:\/\//, "");
+/** "正式环境 rd.igoodlife.com" → "正式环境" */
+const serverName = (url: string) => SERVERS.find((s) => s.value === url)?.label.split(" ")[0] ?? host(url);
+
+/** 服务器很少切换，收进右上角 */
+function ServerSwitch({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(SERVERS.some((s) => s.value === value) ? "" : value);
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+  };
+
+  const content = (
+    <div className="lp-pop" role="radiogroup" aria-label="服务器">
+      {SERVERS.map((s) => (
+        <button
+          key={s.value}
+          type="button"
+          role="radio"
+          aria-checked={s.value === value}
+          className="lp-pop-opt"
+          onClick={() => pick(s.value)}
+        >
+          {s.label.split(" ")[0]}
+          <span>{host(s.value)}</span>
+        </button>
+      ))}
+      <div className="lp-pop-custom">
+        <label htmlFor="lp-server-custom">其他服务器地址</label>
+        <Input.Search
+          id="lp-server-custom"
+          placeholder="https://"
+          enterButton="使用"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onSearch={(v) => {
+            const url = v.trim().replace(/\/+$/, "");
+            if (url) pick(/^https?:\/\//.test(url) ? url : `https://${url}`);
+          }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover content={content} trigger="click" placement="bottomRight" open={open} onOpenChange={setOpen} arrow={false}>
+      <button type="button" className="lp-server" aria-haspopup="dialog">
+        服务器 <b>{serverName(value)}</b>
+        <DownOutlined style={{ fontSize: 10 }} />
+      </button>
+    </Popover>
+  );
+}
+
+/** 两个客户端共用的登录页：一条呼吸波形横贯窗口，名称在线上，表单在线下 */
 export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
   const prefs = loadPrefs();
+  const [server, setServer] = useState(prefs.server ?? SERVERS[0].value);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -33,7 +91,6 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
     setLoading(true);
     setError(undefined);
     try {
-      const server = v.server.trim().replace(/\/+$/, "");
       const s = await signIn(server, v.username.trim(), v.password);
       savePrefs({ server, username: v.remember ? v.username.trim() : "" });
       session.set(s);
@@ -45,90 +102,60 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
   }
 
   return (
-    <div style={{ height: "100%", display: "flex", flexWrap: "wrap", background: "#fff" }}>
-      <div
-        style={{
-          flex: "1 1 420px",
-          position: "relative",
-          overflow: "hidden",
-          background: brand.navy,
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "40px 48px",
-          minHeight: 320,
-        }}
-      >
-        {[640, 440, 240].map((d, i) => (
-          <div
-            key={d}
-            style={{
-              position: "absolute",
-              right: [-180, -80, 20][i],
-              top: "50%",
-              width: d,
-              height: d,
-              marginTop: -d / 2,
-              borderRadius: "50%",
-              border: `1px solid ${["#262C66", "#2D347A", "#3A4290"][i]}`,
-            }}
-          />
-        ))}
-        <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, maxWidth: 420 }}>
-          {logo}
-          <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.25 }}>{appName}</div>
-          <div style={{ color: "#AEB3D6", fontSize: 15 }}>{tagline}</div>
-        </div>
+    <div className="lp">
+      <div className="lp-top">
+        {logo}
+        <ServerSwitch value={server} onChange={setServer} />
       </div>
 
-      <div style={{ flex: "1 1 420px", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div style={{ width: "100%", maxWidth: 360 }}>
-          <Typography.Title level={3} style={{ marginBottom: 4 }}>
+      <div className="lp-head">
+        <h1 className="lp-name">{appName}</h1>
+        <p className="lp-tagline">{tagline}</p>
+      </div>
+
+      <div className="lp-trace">
+        <BreathTrace color={brand.primary} />
+      </div>
+
+      <Form<FormValues>
+        className="lp-form"
+        requiredMark={false}
+        initialValues={{ username: prefs.username, remember: true }}
+        onFinish={onFinish}
+      >
+        {notice && <p className="lp-notice" role="status">{notice}</p>}
+        <div className="lp-row">
+          <div className="lp-field" style={{ position: "relative" }}>
+            <label htmlFor="lp-username">用户名</label>
+            <Form.Item name="username" rules={[{ required: true, message: "请输入用户名" }]}>
+              <Input id="lp-username" autoComplete="username" autoFocus={!prefs.username} />
+            </Form.Item>
+          </div>
+          <div className="lp-field" style={{ position: "relative" }}>
+            <label htmlFor="lp-password">密码</label>
+            <Form.Item name="password" rules={[{ required: true, message: "请输入密码" }]}>
+              <Input.Password id="lp-password" autoComplete="current-password" autoFocus={!!prefs.username} />
+            </Form.Item>
+          </div>
+          <Button className="lp-submit" type="primary" htmlType="submit" loading={loading}>
             登录
-          </Typography.Title>
-          <Typography.Paragraph type="secondary">使用平台账号，与网页端相同</Typography.Paragraph>
-
-          {notice && <Alert type="warning" showIcon message={notice} style={{ marginBottom: 16 }} />}
-          {!isTauri && (
-            <Alert
-              type="info"
-              showIcon
-              message="浏览器调试模式：请求经 vite 代理转发到 rd.igoodlife.com，服务器选项不生效"
-              style={{ marginBottom: 16 }}
-            />
-          )}
-
-          <Form<FormValues>
-            layout="vertical"
-            size="large"
-            requiredMark={false}
-            initialValues={{ server: prefs.server ?? SERVERS[0].value, username: prefs.username, remember: true }}
-            onFinish={onFinish}
-          >
-            <Form.Item name="server" label="服务器" rules={[{ required: true, message: "请选择或输入服务器地址" }]}>
-              <AutoComplete options={SERVERS}>
-                <Input prefix={<CloudServerOutlined />} placeholder="https://rd.igoodlife.com" />
-              </AutoComplete>
-            </Form.Item>
-            <Form.Item name="username" label="用户名" rules={[{ required: true, message: "请输入用户名" }]}>
-              <Input prefix={<UserOutlined />} autoComplete="username" autoFocus={!prefs.username} />
-            </Form.Item>
-            <Form.Item name="password" label="密码" rules={[{ required: true, message: "请输入密码" }]}>
-              <Input.Password prefix={<LockOutlined />} autoComplete="current-password" autoFocus={!!prefs.username} />
-            </Form.Item>
-            <Form.Item name="remember" valuePropName="checked" style={{ marginBottom: 16 }}>
-              <Checkbox>记住服务器和用户名（密码不保存）</Checkbox>
-            </Form.Item>
-            {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              登录
-            </Button>
-          </Form>
-          <Typography.Paragraph type="secondary" style={{ marginTop: 16, fontSize: 12 }}>
-            登录态只保存在本机内存中，关闭客户端即退出。
-          </Typography.Paragraph>
+          </Button>
         </div>
+        <div className="lp-under">
+          <Form.Item name="remember" valuePropName="checked">
+            <Checkbox>记住服务器和用户名，密码不保存</Checkbox>
+          </Form.Item>
+          {error && (
+            <p className="lp-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </Form>
+
+      <div className="lp-foot">
+        <p>登录用平台账号，与网页端相同。登录状态只保存在本机内存里，关闭客户端即退出。</p>
+        {!isTauri && <p>浏览器调试模式：请求经 vite 代理转发到 rd.igoodlife.com，服务器选择不生效。</p>}
       </div>
     </div>
   );
