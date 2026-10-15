@@ -271,8 +271,11 @@ export interface PresenceRun {
  * 下床走开的 25 分钟里一分钟都没有，回到床上立刻恢复；只有起身的几分钟（坐在床边）仍有读数。
  * vitalTimes 为空（这一晚没有心率呼吸数据，比如设备不支持）时，退回按姿态判断。
  */
-export function presenceRuns(segs: PostureSeg[], start: number, end: number, vitalTimes: number[] = []): PresenceRun[] {
+export function presenceRuns(segs: PostureSeg[], rangeStart: number, end: number, vitalTimes: number[] = []): PresenceRun[] {
   const MIN = 60_000;
+  // 格子对齐到整分钟：设备每分钟记录标在整分钟上（"04:12" 代表 04:12:00–04:12:59），
+  // 如果从带秒数的起点（例如 20:45:13）切格子，04:12 的记录会落到前一格，造成某一分钟误判为不在床
+  const start = Math.floor(rangeStart / MIN) * MIN;
   const n = Math.max(0, Math.ceil((end - start) / MIN));
   const bed = new Uint8Array(n);
   const any = new Uint8Array(n);

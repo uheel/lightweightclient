@@ -142,6 +142,12 @@ export default function NightTimeline({
     let seg: (typeof segs)[number] | undefined;
     for (const s of segs) if (codes[s.status] && t >= s.startTime && t < s.endTime) seg = s;
     const values = series.map((s) => {
+      // 每分钟数据：只取鼠标所在这一分钟的值（与"在床"判断用同一个整分钟格子）
+      if (s.gap <= 5 * 60_000) {
+        const minute = Math.floor(t / 60_000);
+        return s.points.find((p) => Math.floor(p.t / 60_000) === minute)?.v;
+      }
+      // 10 分钟趋势：取最近的点
       let best: Point | undefined;
       for (const p of s.points) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
       return best && Math.abs(best.t - t) <= s.gap / 2 ? best.v : undefined;
