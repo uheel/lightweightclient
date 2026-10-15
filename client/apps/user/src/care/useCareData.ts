@@ -21,6 +21,8 @@ import { buildAttention, useAttentionRules } from "./attention";
  */
 export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
   const [members, setMembers] = useState<Member[]>([]);
+  /** members 属于哪个机构（切换机构后、新列表到达前，members 还是上一个机构的） */
+  const [membersOrg, setMembersOrg] = useState<string>();
   /** 昨夜睡眠报告（按设备来源逐个查询），undefined 表示还在查询 */
   const [sleepReports, setSleepReports] = useState<Map<string, SleepReport>>();
   const [liveBySn, setLiveBySn] = useState<Record<string, LiveData>>({});
@@ -35,7 +37,11 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
     setError(undefined);
     setLiveBySn({});
     getMembers()
-      .then((m) => !cancelled && setMembers(m))
+      .then((m) => {
+        if (cancelled) return;
+        setMembers(m);
+        setMembersOrg(orgId);
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !cancelled && setLoading(false));
     setSleepReports(undefined);
@@ -46,7 +52,12 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
 
   // 昨夜睡眠报告：长者列表加载后按设备来源逐个查询（与健康页共用缓存）
   useEffect(() => {
-    if (!members.length) return;
+    if (membersOrg !== orgId) return;
+    // 机构里没有长者：没有报告要查，直接给空结果（否则"需关注"会一直显示加载中）
+    if (!members.length) {
+      setSleepReports(new Map());
+      return;
+    }
     let cancelled = false;
     getOrgSleepReports(orgId, members, dayjs().format("YYYY-MM-DD")).then(
       (list) => !cancelled && setSleepReports(new Map(list.map((x) => [x.memberId, x]))),
@@ -56,7 +67,7 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, members]);
+  }, [orgId, members, membersOrg]);
 
   // 今日需关注：客户端按设备数据自己判断（规则见 attention.ts）
   const rules = useAttentionRules();

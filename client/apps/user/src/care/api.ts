@@ -111,3 +111,36 @@ export async function getAlertPage(q: { group: number; status?: 1 | 2; range?: [
   });
   return { list: res.data ?? [], total: res.total ?? 0 };
 }
+
+/** 长者的楼栋 / 楼层 / 房间（长者档案；实时监护列表里没有这些字段）。用来按护理区汇总 */
+export interface MemberPlace {
+  id: string;
+  buildingName?: string;
+  floorName?: string;
+  roomName?: string;
+  bedName?: string;
+  /** 入住日期 */
+  checkInAt?: string;
+}
+
+export async function getMemberPlaces() {
+  const res = await api.get<MemberPlace[]>("/api/member/pages", { params: { current: 1, pageSize: 1000 } });
+  return res.data ?? [];
+}
+
+/** 一段时间内用户端可见的全部告警（三个分组合并，按时间倒序；最多各取 5000 条） */
+export async function getAlertsInRange(range: [string, string]) {
+  const PAGE = 1000;
+  const lists = await Promise.all(
+    ALERT_GROUPS.map(async (g) => {
+      const out: AlertRecord[] = [];
+      for (let current = 1; current <= 5; current++) {
+        const r = await getAlertPage({ group: g.value, range, current, pageSize: PAGE });
+        out.push(...r.list);
+        if (out.length >= r.total || r.list.length < PAGE) break;
+      }
+      return out;
+    }),
+  );
+  return lists.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}

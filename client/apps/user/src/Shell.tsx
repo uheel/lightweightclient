@@ -14,13 +14,13 @@ import ElderDetail from "./pages/ElderDetail";
 import EldersPage from "./pages/EldersPage";
 import AlertsPage from "./pages/AlertsPage";
 import HealthPage from "./pages/HealthPage";
+import ManagerHome from "./pages/ManagerHome";
 
 type NavKey = "home" | "elders" | "alerts" | "health";
 
-const HOME_DESC: Record<Role, string> = {
+const HOME_DESC: Partial<Record<Role, string>> = {
   care: "长者卡片墙 · 待处理告警 · 今日需关注（界面稿：护理值守 · 首页）",
   family: "家人现在的状态 · 今天的活动 · 昨晚睡眠（界面稿：家属 · 首页）",
-  manager: "关键指标 · 各护理区对比 · 告警处理情况（界面稿：机构管理者 · 概览）",
 };
 
 /** 开发模式下可以预览所有角色的首页（打包后的安装包里没有这个入口） */
@@ -191,8 +191,10 @@ export default function Shell({ s }: { s: Session }) {
               <HealthPage />
             ) : current.key === "home" && role === "care" ? (
               <CareHome />
+            ) : current.key === "home" && role === "manager" ? (
+              <ManagerHome />
             ) : (
-              <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role]} />
+              <Placeholder title={ROLE_LABEL[role]} desc={HOME_DESC[role] ?? ""} />
             )}
             <AttentionRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
           </CareProvider>
