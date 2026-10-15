@@ -322,6 +322,9 @@ export default function NightTimeline({
                     {s.label} <b className="mono">{info.values[i] ?? "—"}</b> {info.values[i] !== undefined ? s.unit : ""}
                   </div>
                 ))}
+                {hover !== undefined && vitals?.some((p) => p.filled && Math.floor(p.t / 60_000) === Math.floor(hover / 60_000)) && (
+                  <div className="night-tip-note">这一分钟来自设备原始记录（平台汇总里缺失）</div>
+                )}
                 {/* 离床只表示不在床上：人离床后仍在雷达探测范围内活动时，平台照样记录心率呼吸，但活动中的数值不如静卧时准确 */}
                 {info.leave && info.values.some((v) => v !== undefined) && <div className="night-tip-note">离床活动中测得，仅供参考</div>}
               </div>

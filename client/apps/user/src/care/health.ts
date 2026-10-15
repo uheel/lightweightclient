@@ -177,10 +177,12 @@ export function scoreLevel(score?: number) {
 }
 
 export interface VitalPoint {
-  /** 毫秒时间戳 */
+  /** 毫秒时间戳（整分钟） */
   t: number;
   hr?: number;
   rr?: number;
+  /** 这一分钟平台的每分钟汇总里没有，是用设备原始记录补上的 */
+  filled?: boolean;
 }
 
 /** 每分钟心率呼吸（按时间范围查询，已实测 filter[minuteAt]=开始,结束 可用） */
@@ -454,4 +456,72 @@ export function wakeCutByCover(r: SleepReport) {
   const end = reportCoverEnd(r);
   const wake = r.wakeUpTime ? Date.parse(r.wakeUpTime.replace(" ", "T")) : undefined;
   return end !== undefined && wake !== undefined && wake >= end - 60_000;
+}
+
+function fmtSec(t: number) {
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
+ * 设备原始心率呼吸（/api/device/ql-respiratory-rate/pages，约每 2 秒一条），按分钟取平均。
+ * AIO（6）和 UltraFall（13）都在这个接口里。
+ */
+export async function getRawVitalMinutes(sn: string, start: number, end: number): Promise<VitalPoint[]> {
+  const rows: { deviceTime?: string; createdAt?: string; heartRate?: number; respirationRate?: number }[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const r = await api.get<typeof rows>("/api/device/ql-respiratory-rate/pages", {
+      params: { current: page, pageSize: 2000 },
+      filter: { sn, deviceTime: `${fmtSec(start)},${fmtSec(end - 1000)}` },
+    });
+    rows.push(...(r.data ?? []));
+    if (!r.data?.length || rows.length >= (r.total ?? 0)) break;
+  }
+  const byMin = new Map<number, { hr: number[]; rr: number[] }>();
+  for (const x of rows) {
+    const t = Date.parse((x.deviceTime || x.createdAt || "").replace(" ", "T"));
+    if (Number.isNaN(t)) continue;
+    const m = Math.floor(t / 60_000) * 60_000;
+    const b = byMin.get(m) ?? { hr: [], rr: [] };
+    if (x.heartRate && x.heartRate > 0) b.hr.push(x.heartRate);
+    if (x.respirationRate && x.respirationRate > 0) b.rr.push(x.respirationRate);
+    byMin.set(m, b);
+  }
+  const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : undefined);
+  return [...byMin.entries()]
+    .map(([t, b]) => ({ t, hr: avg(b.hr), rr: avg(b.rr), filled: true }))
+    .filter((p) => p.hr || p.rr)
+    .sort((a, b) => a.t - b.t);
+}
+
+/**
+ * 用设备原始记录补上每分钟汇总里缺的分钟。
+ * 平台按分钟汇总时，样本少的分钟会被整分钟丢掉（例如迪立莱 10-15 04:13 原始记录有 12 条心率呼吸，汇总里却没有这一分钟），
+ * 导致这一分钟被误判为不在床。只对缺的时段去查原始记录，每段一次请求。
+ */
+export async function fillVitalGaps(vitals: VitalPoint[], sns: string[], start: number, end: number): Promise<VitalPoint[]> {
+  if (!sns.length) return vitals;
+  const MIN = 60_000;
+  const have = new Set(vitals.filter((p) => p.hr || p.rr).map((p) => Math.floor(p.t / MIN)));
+  const runs: [number, number][] = [];
+  for (let m = Math.floor(start / MIN); m * MIN < end; m++) {
+    if (have.has(m)) continue;
+    const last = runs[runs.length - 1];
+    if (last && last[1] === m * MIN) last[1] = (m + 1) * MIN;
+    else runs.push([m * MIN, (m + 1) * MIN]);
+  }
+  if (!runs.length) return vitals;
+  const filled = (
+    await mapLimit(runs, 4, async ([a, b]) => {
+      const parts = await Promise.all(sns.map((sn) => getRawVitalMinutes(sn, a, b).catch(() => [] as VitalPoint[])));
+      return parts.flat();
+    })
+  ).flat();
+  const merged = new Map<number, VitalPoint>();
+  for (const p of [...vitals, ...filled]) {
+    const k = Math.floor(p.t / MIN);
+    if (!merged.has(k)) merged.set(k, { ...p, t: k * MIN });
+  }
+  return [...merged.values()].sort((a, b) => a.t - b.t);
 }
