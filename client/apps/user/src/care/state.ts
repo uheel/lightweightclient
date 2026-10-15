@@ -16,6 +16,8 @@ export interface CareState {
 
 /** 超过这个时间没有任何数据，就认为状态未知 */
 const STALE_MS = 10 * 60 * 1000;
+/** 最近这么久内测到过心率或呼吸，就算在床（设备约每 2 秒报一次，偶尔会断几十秒） */
+const IN_BED_MS = 60 * 1000;
 
 export function careState(member: Member, live: LiveData | undefined, alert: CareAlert | undefined, now: number): CareState {
   if (alert) return { text: alert.alertTypeName, tone: "alert", detail: sinceText(alert.createdAt, now) };
@@ -37,25 +39,34 @@ export function careState(member: Member, live: LiveData | undefined, alert: Car
   if (live.lifeStatus === 3) return { text: "生命体征弱", tone: "warn", detail: "请留意" };
   if (live.breathStatus === 3) return { text: "呼吸暂停", tone: "alert" };
 
-  // 睡眠状态（床垫类监测）：0 离床，1 浅睡，2 深睡，3 眼动，4 清醒
-  if (live.sleepStatus !== undefined) {
-    if (live.sleepStatus === 1 || live.sleepStatus === 2 || live.sleepStatus === 3) {
-      return { text: "在床睡觉", tone: "bed", detail: live.sleepStatus === 2 ? "深睡" : "浅睡" };
-    }
-    if (live.sleepStatus === 4) return { text: "在床休息", tone: "bed", detail: "醒着" };
-    if (live.sleepStatus === 0) {
-      const m = live.outOfBedMinutes;
-      if (m !== undefined && m >= 15) return { text: "离床", tone: "warn", detail: `已 ${durationText(m)}` };
-      return { text: "离床", tone: "idle", detail: m ? `已 ${durationText(m)}` : undefined };
-    }
-  }
-
-  if (live.posture !== undefined) {
+  // 在床：最近 1 分钟内测到过心率或呼吸（人在床上设备一定测得到，离开后就没有；不看姿态，翻身、坐起时姿态常报成坐 / 静止）
+  const t = Math.max(now, live.updatedAt);
+  const inBed = live.vitalsAt !== undefined && t - live.vitalsAt <= IN_BED_MS;
+  if (inBed) {
+    // 睡着只看设备的睡眠状态（1 浅睡，2 深睡）；醒着再按姿态说清楚在床上做什么
+    if (live.sleepStatus === 1 || live.sleepStatus === 2) return { text: "在床睡觉", tone: "bed", detail: live.sleepStatus === 2 ? "深睡" : "浅睡" };
     const p = live.posture;
-    if (p === 6 || p === 9) return { text: p === 9 ? "在床上坐着" : "在床", tone: "bed", detail: area };
+    const text =
+      p === 9 ? "床上坐起" : p === 3 ? "在床坐着" : p === 0 || p === 4 ? "在床静止" : p === 6 ? "在床躺着" : p === 1 ? "在床活动" : "在床";
+    return { text, tone: "bed", detail: live.sleepStatus === 3 ? "醒着" : undefined };
+  }
+  // 能测心率呼吸的设备、最近没测到：不在床上
+  const vitalsDevice = live.vitalsAt !== undefined || live.sleepStatus !== undefined;
+
+  if (live.posture !== undefined && live.presence !== 0) {
+    const p = live.posture;
+    // 只有轨迹、没有心率呼吸的设备，才用姿态判断在床
+    if (!vitalsDevice && (p === 6 || p === 9)) return { text: p === 9 ? "床上坐起" : "在床", tone: "bed", detail: area };
     if (p === 1) return { text: "走动中", tone: "active", detail: area };
     if (p === 3) return { text: "坐着", tone: "active", detail: area };
     return { text: "房间内静止", tone: "active", detail: area };
+  }
+
+  if (vitalsDevice) {
+    const m = live.outOfBedMinutes;
+    if (m !== undefined && m >= 15) return { text: "离床", tone: "warn", detail: `已 ${durationText(m)}` };
+    if (live.presence === 1) return { text: "离床", tone: "idle", detail: area ?? "在房间内" };
+    return { text: "离床", tone: "idle", detail: m ? `已 ${durationText(m)}` : undefined };
   }
 
   if (live.presence === 0) return { text: "不在房间", tone: "idle" };

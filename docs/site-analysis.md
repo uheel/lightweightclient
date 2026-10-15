@@ -294,7 +294,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 订阅设备：`send("AddToGroupAsync", "sn1,sn1:radar,sn2,…")`（每台设备两个频道，用逗号拼成一个参数），取消订阅用 `RemoveFromGroupAsync`
 - `DeviceData` 的格式是 `{sn, msgType, payload, timestamp, dataType}`：msgType 1 呼吸心率，2 人体存在，3 跌倒，4 青岚呼吸心率（含睡眠状态），5 青岚轨迹（含姿态），6 超宽带呼吸睡眠，7 超宽带存在，11 在线状态。解析见 `client/packages/core/src/liveData.ts`
 - 其他推送：`Alert`、`AlertClose`、`AlertCount`、`Record`、`Person`、`DeviceConfigChange`、`DeviceResponse`
-- 状态枚举：睡眠状态 0 离床 / 1 浅睡 / 2 深睡 / 3 眼动 / 4 清醒；人体存在 0 无人 / 1 有人 / 2 信号弱；生命状态 3 表示生命体征弱；呼吸状态 0 正常 / 1 过低 / 2 过高 / 3 暂停
+- 状态枚举：青岚（msgType 4，原始记录 `sleepStatus` 同）睡眠状态实测为 **1 浅睡 / 2 深睡 / 3 清醒**（2026-10-15：白天在床醒着的长者几乎全是 3，夜里 3 对应报告的清醒 / 离床段；早先按 0 离床 / 3 眼动 / 4 清醒解析是错的，导致醒着在床也显示"在床睡觉"）；人体存在 0 无人 / 1 有人 / 2 信号弱；生命状态 3 表示生命体征弱；呼吸状态 0 正常 / 1 过低 / 2 过高 / 3 暂停
 
 ## 长者健康数据（2026-10-14，已用一条真实样本脱敏核对）
 

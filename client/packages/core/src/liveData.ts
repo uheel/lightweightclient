@@ -7,6 +7,8 @@
  *  2  人体存在
  *  3  跌倒检测
  *  4  青岚呼吸心率 [呼吸率, 心率, 呼吸状态, 心率状态, 生命状态, 睡眠状态]
+ *     睡眠状态实测（2026-10-15，与睡眠报告分段、白天在床数据对照）：1 浅睡，2 深睡，3 清醒。
+ *     白天在床醒着的长者几乎全是 3；夜里 3 对应报告的清醒 / 离床段。不是网页端写的 0 离床 / 3 眼动 / 4 清醒
  *  5  青岚轨迹   [[人数, x, y, z, 姿态, 目标序号, 区域名, 区域序号], ...]
  *  6  超宽带呼吸睡眠 [心率, 呼吸率, 存在状态, 在床时长, 离床时长, 最近距离, 活动状态, 睡眠状态, 生命体征报警]
  *  7  超宽带人体存在
@@ -30,7 +32,7 @@ export interface LiveData {
   posture?: number;
   /** 所在区域名（房间里划的区域，例如"卫生间""监护床"） */
   areaName?: string;
-  /** 0 离床 / 未定义，1 浅睡，2 深睡，3 眼动，4 清醒 */
+  /** 青岚（msgType 4）：1 浅睡，2 深睡，3 清醒；超宽带（msgType 6）的编码未核对 */
   sleepStatus?: number;
   /** 0 正常，3 生命体征弱 */
   lifeStatus?: number;
@@ -42,6 +44,8 @@ export interface LiveData {
   fall?: number;
   inBedMinutes?: number;
   outOfBedMinutes?: number;
+  /** 最近一次测到心率或呼吸（大于 0）的时间（毫秒）。人在床上时设备一定测得到心率呼吸，离开后就没有，用它判断在床 */
+  vitalsAt?: number;
   /** 最近一次数据的时间（毫秒） */
   updatedAt: number;
 }
@@ -66,6 +70,8 @@ export const POSTURE: Record<number, string> = {
 export const ALARM_POSTURES = new Set([2, 5, 7, 8, 10, 11]);
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+/** 测到心率或呼吸时记下时间（合并进 LiveData；没测到时不覆盖上一次的时间） */
+const vitalsSeen = (hr: unknown, rr: unknown, at: number) => ((num(hr) ?? 0) > 0 || (num(rr) ?? 0) > 0 ? { vitalsAt: at } : {});
 
 function ts(t: DeviceDataMessage["timestamp"]) {
   if (typeof t === "number") return t < 1e12 ? t * 1000 : t;
@@ -84,7 +90,7 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
   switch (m.msgType) {
     case 1:
       if (!a || a.length < 8) return null;
-      return { heartRate: num(a[2]), respiratoryRate: num(a[3]), presence: (num(a[0]) ?? 0) > 0 ? 1 : 0, online: true, updatedAt: at };
+      return { heartRate: num(a[2]), respiratoryRate: num(a[3]), presence: (num(a[0]) ?? 0) > 0 ? 1 : 0, ...vitalsSeen(a[2], a[3], at), online: true, updatedAt: at };
     case 2:
     case 7:
       return { presence: num(a ? a[0] : p) ?? (p ? 1 : 0), online: true, updatedAt: at };
@@ -98,6 +104,7 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
         breathStatus: num(a[2]),
         lifeStatus: num(a[4]),
         sleepStatus: num(a[5]),
+        ...vitalsSeen(a[1], a[0], at),
         online: true,
         updatedAt: at,
       };
@@ -124,6 +131,7 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
         inBedMinutes: num(a[3]),
         outOfBedMinutes: num(a[4]),
         sleepStatus: num(a[7]),
+        ...vitalsSeen(a[0], a[1], at),
         online: true,
         updatedAt: at,
       };
