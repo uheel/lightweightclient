@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         雷达平台 - 安装角度检查
 // @namespace    goodlife-ops
-// @version      0.2.2
+// @version      0.2.3
 // @description  在「房间详情」页增加"安装角度"按钮：根据设备心跳上报的 [angle_x, angle_y, angle_z] 实时判断安装角度是否在标准范围内
 // @match        https://rd.igoodlife.com/*
 // @run-at       document-idle
@@ -18,7 +18,7 @@
 
   // 安装标准（installType：0 = 顶装，1 = 侧装）。angle_* 为加速度计各轴与水平面的夹角
   const STANDARDS = {
-    0: { name: '顶装', tol: 3, axes: { x: 0, y: 0, z: 90 } },
+    0: { name: '顶装', tol: 2, axes: { x: 0, y: 0, z: 90 } },
     // 侧装只绕 x 轴下倾，angle_y + angle_z = 90°；angle_y 标准 68°，俯角 = 90° - angle_y = 22°
     1: { name: '侧装', tol: 2, axes: { x: 0, y: 68, z: 22 } },
   };
