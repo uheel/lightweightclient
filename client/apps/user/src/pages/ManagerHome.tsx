@@ -9,7 +9,9 @@ import { durationText } from "../care/state";
 /**
  * 机构管理者 · 概览（界面稿：机构管理者 · 概览）。
  * 全部数字由客户端用基础数据算出（长者档案、设备在线、按来源查的昨夜睡眠报告、告警记录），不用平台驾驶舱的汇总。
- * 护理区 = 楼栋 + 楼层（平台没有单独的护理区）。界面稿里的"当班"和"到场时间"平台没有数据，改为"平均处理用时"。
+ * 护理区 = 楼栋 + 楼层（平台没有单独的护理区）。界面稿里的"当班"和"到场时间"平台没有数据。
+ * 不用"平均处理用时"：护理员多是先去现场、过后才在平台上批量点处理（藕塘 10 月 216 条里 40% 隔天才处理，中位数约 9 小时），
+ * 平均值反映的是补记录的速度，会误导。改为"及时处理率" = N 分钟内处理完的比例，另附处理用时中位数。
  */
 type Period = "today" | "week" | "month";
 
@@ -30,10 +32,32 @@ function handleMinutes(a: AlertRecord) {
   return a.alertStatus === 2 && Number.isFinite(m) && m >= 0 ? m : undefined;
 }
 
-function avgText(minutes: number[]) {
-  if (!minutes.length) return "—";
-  const m = minutes.reduce((a, b) => a + b, 0) / minutes.length;
+/** 及时处理：告警发生后这么多分钟内处理完 */
+const TIMELY_MIN = 5;
+
+function minText(m: number) {
   return m < 1 ? `${Math.round(m * 60)} 秒` : durationText(m);
+}
+
+/**
+ * 及时处理率：分母 = 已处理的 + 已超过时限仍未处理的（刚发生、还在时限内的未处理告警不计入）；
+ * 分子 = 时限内处理完的。另给出已处理告警的用时中位数
+ */
+function timeliness(alerts: AlertRecord[], now: number) {
+  let due = 0;
+  let ok = 0;
+  const used: number[] = [];
+  for (const a of alerts) {
+    const h = handleMinutes(a);
+    if (h !== undefined) {
+      due++;
+      used.push(h);
+      if (h <= TIMELY_MIN) ok++;
+    } else if ((now - parse(a.createdAt)) / 60_000 > TIMELY_MIN) due++;
+  }
+  used.sort((a, b) => a - b);
+  const median = used.length ? used[Math.floor((used.length - 1) / 2)] : undefined;
+  return { due, ok, rate: due ? Math.round((ok / due) * 100) : undefined, median };
 }
 
 const areaOf = (x?: { buildingName?: string; floorName?: string }) =>
@@ -46,12 +70,12 @@ interface AreaRow {
   attention: number;
   alerts: number;
   pending: number;
-  handle: number[];
+  items: AlertRecord[];
   scores: number[];
 }
 
 export default function ManagerHome() {
-  const { s, members, attention, sleepReports, alerts: pendingAlerts, liveOf, openElder, process } = useCare();
+  const { s, members, attention, sleepReports, alerts: pendingAlerts, liveOf, openElder, process, now } = useCare();
   const [period, setPeriod] = useState<Period>("today");
   const [places, setPlaces] = useState<MemberPlace[]>();
   const [records, setRecords] = useState<AlertRecord[]>();
@@ -95,7 +119,7 @@ export default function ManagerHome() {
 
   const list = records ?? [];
   const processed = list.filter((a) => a.alertStatus === 2);
-  const handleAll = list.map(handleMinutes).filter((x): x is number => x !== undefined);
+  const timelyAll = timeliness(list, now);
   const monthStart = dayjs().startOf("month").valueOf();
   // 只算在床位上的长者（与"在院长者"同一口径；档案里还有没分配床位的人）
   const memberIds = new Set(members.map((m) => m.memberId));
@@ -107,7 +131,7 @@ export default function ManagerHome() {
     const map = new Map<string, AreaRow>();
     const row = (key: string) => {
       let r = map.get(key);
-      if (!r) map.set(key, (r = { key, elders: 0, watching: 0, attention: 0, alerts: 0, pending: 0, handle: [], scores: [] }));
+      if (!r) map.set(key, (r = { key, elders: 0, watching: 0, attention: 0, alerts: 0, pending: 0, items: [], scores: [] }));
       return r;
     };
     for (const m of members) {
@@ -122,8 +146,7 @@ export default function ManagerHome() {
       const r = row(areaOf(a));
       r.alerts++;
       if (a.alertStatus !== 2) r.pending++;
-      const h = handleMinutes(a);
-      if (h !== undefined) r.handle.push(h);
+      r.items.push(a);
     }
     return [...map.values()].sort((a, b) => a.key.localeCompare(b.key, "zh", { numeric: true }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,7 +198,22 @@ export default function ManagerHome() {
         </span>
       ),
     },
-    { title: "平均处理用时", key: "handle", width: 110, render: (_, r) => <span className="mono">{records ? avgText(r.handle) : "…"}</span> },
+    {
+      title: `${TIMELY_MIN} 分钟内处理`,
+      key: "timely",
+      width: 120,
+      render: (_, r) => {
+        if (!records) return "…";
+        const t = timeliness(r.items, now);
+        return t.rate === undefined ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className="mono" style={{ color: t.rate < 50 ? "#9A5B00" : undefined }} title={`${t.ok} / ${t.due} 条`}>
+            {t.rate}%
+          </span>
+        );
+      },
+    },
     {
       title: "昨夜平均睡眠分",
       key: "sleep",
@@ -245,9 +283,12 @@ export default function ManagerHome() {
           </small>
         </div>
         <div className="card kpi">
-          <span>平均处理用时</span>
-          <b className="mono">{records ? avgText(handleAll) : "…"}</b>
-          <small>从告警发生到处理完成</small>
+          <span>及时处理率</span>
+          <b className="mono">{!records ? "…" : timelyAll.rate === undefined ? "—" : `${timelyAll.rate}%`}</b>
+          <small>
+            {TIMELY_MIN} 分钟内处理 {timelyAll.ok}/{timelyAll.due} 条
+            {timelyAll.median !== undefined && ` · 用时中位数 ${minText(timelyAll.median)}`}
+          </small>
         </div>
       </div>
 
@@ -287,7 +328,7 @@ export default function ManagerHome() {
         <section className="card mgr-span3">
           <div className="side-head">
             <h2 style={{ margin: 0, fontSize: 16 }}>{PERIOD_LABEL[period]}告警处理</h2>
-            <span className="muted">处理用时 = 告警发生到在平台上处理完成</span>
+            <span className="muted">用时 = 告警发生到在平台上点"处理"；及时 = {TIMELY_MIN} 分钟内</span>
           </div>
           {byType.length > 0 && (
             <div className="chips" style={{ marginBottom: 12 }}>
@@ -318,7 +359,7 @@ export default function ManagerHome() {
                       {h !== undefined && (
                         <>
                           {" "}
-                          · 用时 <span className="mono">{avgText([h])}</span>
+                          · 用时 <span className="mono">{minText(h)}</span>
                         </>
                       )}
                     </span>
