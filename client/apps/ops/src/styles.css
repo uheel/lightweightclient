@@ -259,3 +259,36 @@
 .mem-row-err td { background: #FFF8F8 !important; }
 .mem-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #5B6078; }
 .mem-progress .ant-progress { width: 160px; margin: 0; }
+
+/* 设备属性 */
+.props { display: flex; flex-direction: column; gap: 10px; }
+.props .toolbar { margin-bottom: 0; }
+.props .ant-segmented { max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
+.prop-table { background: #fff; border: 1px solid #E8EAF2; border-radius: 14px; padding: 4px 16px; }
+.prop-head, .prop-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr) minmax(150px, 1fr); gap: 14px; align-items: start; }
+.prop-head { font-size: 12px; color: #8A8FA8; padding: 8px 0; border-bottom: 1px solid #EEF0F5; }
+.prop-row { padding: 9px 0; border-bottom: 1px solid #F4F5F9; font-size: 13px; }
+.prop-row:last-child { border-bottom: 0; }
+.prop-row.modified { background: linear-gradient(90deg, #FFF8EC, transparent 60%); margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.prop-name { display: flex; flex-direction: column; min-width: 0; }
+.prop-name small { overflow-wrap: anywhere; }
+.prop-name .req { color: #D93036; font-style: normal; margin-left: 2px; }
+.prop-value { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.prop-readonly { color: #1B1D2E; overflow-wrap: anywhere; padding-top: 1px; }
+.prop-state { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.prop-state small { overflow-wrap: anywhere; }
+.prop-err { color: #B4232A; font-size: 12px; }
+.warn-text { color: #9A5B00; }
+.ptags { display: flex; flex-wrap: wrap; gap: 4px; }
+.ptag { font-size: 12px; padding: 0 6px; border-radius: 4px; line-height: 20px; }
+.ptag.mod { background: #FFF4E0; color: #9A5B00; }
+.ptag.dev { background: #EAF0FF; color: #2F4FB5; }
+.ptag.ok { background: #E8F6EE; color: #17794A; }
+.ptag.err { background: #FDECEC; color: #B4232A; }
+.ptag.pend { background: #F1F2F7; color: #5B6078; }
+.prop-empty { padding: 16px 0; margin: 0; }
+.prop-confirm ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 320px; overflow: auto; }
+.prop-confirm li { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #F4F5F9; font-size: 13px; }
+.prop-confirm li b { font-weight: 500; min-width: 120px; }
+.prop-confirm li .mono { overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .prop-head, .prop-row { grid-template-columns: minmax(130px, 1fr) minmax(180px, 1.4fr); } .prop-head span:last-child { display: none; } .prop-state { grid-column: 2; } }

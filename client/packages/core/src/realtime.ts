@@ -15,6 +15,7 @@ import { session } from "./session";
  * - Alert / AlertClose / AlertCount：告警产生、关闭、未处理数变化
  * - Record / Person：实时报警记录、人员报警
  * - AntNotice / AntNoticeClose / AntNotification / AntNotificationClose：平台下发的提示
+ * - DeviceResponse：设备对属性读写指令的应答 {sn, command:"get-property"|"set-property", seq, code, message, data}
  */
 
 export type RealtimeState = "disconnected" | "connecting" | "connected" | "reconnecting";
@@ -36,6 +37,7 @@ const KNOWN_METHODS = [
   "AntNoticeClose",
   "AntNotification",
   "AntNotificationClose",
+  "DeviceResponse",
 ];
 
 /** 已订阅的频道（引用计数）。连接 / 重连成功后会整体重新订阅 */

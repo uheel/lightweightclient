@@ -410,6 +410,23 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `set-property` 见过的键：`time`（平台约每分钟下发一次对时）、`QL_radar_config`、`QL_radar_area`、`onoff`、`rs_range_min/max`、`rs_area`、`rs_vital_th`、`rs_respiratory_th`、`rs_sleep_en`、`rs_sleep_slot`、`rs_sleep_time`、`rs_report_nobody`、`rs_report_freq`
 - `get-property` 读过的分组：`QL_radar_install / QL_auto_boundary / QL_reporting_mode / QL_health_config / QL_falldown_config`、`ble_*`、`net_rssi / ip / … / wifi_ssid / wifi_pwd`，以及 `mqtt_broke_address / port / user_name / user_password / keepalive`（说明设备连哪个 broker、用什么账号都可以远程读写）
 
+### 设备属性读写接口（2026-10-16 在语音测试 …ef81 上实测）
+
+平台"设备配置 › 存储属性"和运维端"设备属性"页用的都是这一套：
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/device-property/property-schema-values?sn=` | `{deviceTypeCode, deviceTypeId, groups[], properties[], values{属性名: {value, deliveryStatus, deliveryAt, deliveryError, deliveryByUserName, updatedAt, updatedBy}}}`。已去掉隐藏属性。**标题、分组名是英文**（换语言请求头也一样），中文要从 `/api/device-type-property/list?deviceTypeCode=` 和 `/api/device-type-property/property-groups?deviceTypeCode=` 取 |
+| `POST /api/device-property/read` `{sn, propertyNames}` | 下发 `IOT.readproperty`，`data` = seq。属性名用字典名，平台转成报文键（别名）下发 |
+| `POST /api/device-property/write` `{sn, properties:[{propertyName, value}], saveOnly}` | 先存平台记录，`saveOnly:false` 时再下发 `IOT.setproperty`，`data` = seq；只保存、或全是平台属性时返回 `-1` |
+| SignalR 推送 `DeviceResponse` | 设备应答：`{sn, command:"get-property"|"set-property", seq, code, message, data}`，`code` 0/200/201 为成功。按 sn + command + seq 匹配，网页端等 30 秒算超时 |
+
+- 设备应答很快：读取约 0.1 秒、写入约 0.6 秒。应答可能比接口返回 seq 还早，要先缓存
+- **读取结果也会被平台存成平台记录**（`deliveryAt`、`deliveryByUserName` 变成读取的时间和人），所以"平台记录"并不只是最近一次下发的值
+- 设备不支持的属性不回值：AIO V1.3.46 读 `tz_offset`、`snoring_record_url` 时应答里没有这两项
+- 属性定义里：`dataType` 1 String、2 Short、3 Int、4 Long、5 Float、6 Double、7 Bool、8 Array、9 Json；`displayType` 0 自定义、1 文本、2 输入框、3 多行、4 数字、5 开关、6 时间、7 下拉、8 音频、9 时间段；`accessMode` 1 读写、2 只读、3 只写；`deliveryStatus` 1 下发中、2 成功、3 失败。`fieldProps` 里有 `openValue/closeValue`、`min/max`、`options`、`visibleExpression`（例如 `talk_type_sel===1`）
+- 写入实测：`talk_spk_vol` 50 → 51 → 50，报文 `IOT.setproperty {talk_spk_vol: 51}`，设备应答 `code 200`
+
 ### 注意
 
 - 日志 rawData 里有**明文**的 SIP 密码（`talk_auth_pass`）、远程调试 token，以及 slim 设备的 Wi‑Fi 和 MQTT 密码。展示或导出日志时必须打码

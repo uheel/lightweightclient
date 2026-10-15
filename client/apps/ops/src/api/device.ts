@@ -270,3 +270,142 @@ export async function getAlertPage(q: { group: number; status?: 1 | 2; sn?: stri
   });
   return { list: res.data ?? [], total: res.total ?? 0 };
 }
+
+// ---------- 设备属性（读取 / 下发） ----------
+
+/** 1 String，2 Short，3 Int，4 Long，5 Float，6 Double，7 Bool，8 Array，9 Json */
+export type PropertyDataType = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+export interface PropertyDef {
+  propertyName: string;
+  /** 报文里实际用的键（例如 net_ip 在报文里是 net_local_IP），没有时与 propertyName 相同 */
+  aliasName?: string;
+  title: string;
+  propertyGroupStringCode?: string;
+  dataType: PropertyDataType;
+  /** 0 自定义，1 文本，2 输入框，3 多行，4 数字，5 开关，6 时间，7 下拉，8 音频，9 时间段 */
+  displayType: number;
+  /** 1 读写，2 只读，3 只写；没有时按读写 */
+  accessMode?: number;
+  /** 只存在平台、不下发到设备（例如提示音文件） */
+  isPlatformOnly?: boolean;
+  isBuiltIn?: boolean;
+  isRequired?: boolean;
+  unit?: string;
+  description?: string;
+  sortOrder?: number;
+  fieldProps?: {
+    openValue?: unknown;
+    closeValue?: unknown;
+    min?: number;
+    max?: number;
+    maxLength?: number;
+    options?: { label: string; value: string | number }[];
+    /** 显示条件，例如 talk_type_sel===1 */
+    visibleExpression?: string;
+    timeRangeMaxCount?: number;
+  };
+}
+
+export interface PropertyGroup {
+  stringCode: string;
+  label: string;
+}
+
+/** 平台记录的属性值：最近一次下发（或读取保存）的值和下发状态 */
+export interface StoredProperty {
+  value: unknown;
+  /** 1 下发中，2 成功，3 失败 */
+  deliveryStatus?: number;
+  deliveryAt?: string;
+  deliveryError?: string;
+  deliveryByUserName?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface PropertySchema {
+  deviceTypeCode?: number;
+  groups: PropertyGroup[];
+  properties: PropertyDef[];
+  values: Record<string, StoredProperty>;
+}
+
+interface RawSchema {
+  deviceTypeCode?: number;
+  groups?: { stringCode?: string; code?: number; label: string }[];
+  properties?: PropertyDef[];
+  values?: Record<string, StoredProperty>;
+}
+
+/** 属性字典的中文标题、分组名（按设备类型缓存） */
+const dictCache = new Map<number, Promise<{ titles: Map<string, string>; groups: Map<string, string> }>>();
+
+function getPropertyDict(deviceTypeCode: number) {
+  let p = dictCache.get(deviceTypeCode);
+  if (!p) {
+    p = Promise.all([
+      api.get<{ propertyName: string; title: string }[]>("/api/device-type-property/list", { params: { deviceTypeCode } }),
+      api.get<{ stringCode?: string; code?: number; label: string }[]>("/api/device-type-property/property-groups", { params: { deviceTypeCode } }),
+    ]).then(([l, g]) => ({
+      titles: new Map((l.data ?? []).map((x) => [x.propertyName, x.title])),
+      groups: new Map((g.data ?? []).map((x) => [x.stringCode ?? String(x.code), x.label])),
+    }));
+    p.catch(() => dictCache.delete(deviceTypeCode));
+    dictCache.set(deviceTypeCode, p);
+  }
+  return p;
+}
+
+/**
+ * 设备的属性定义 + 平台记录的值（GET /api/device-property/property-schema-values）。
+ * 这个接口返回的标题、分组名是英文（2026-10-16 换了几种语言请求头都一样），中文从属性字典 /api/device-type-property/list 取。
+ * 平台已经去掉了隐藏的属性。
+ */
+export async function getPropertySchema(sn: string): Promise<PropertySchema> {
+  const d = (await api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } })).data ?? {};
+  const dict = d.deviceTypeCode !== undefined ? await getPropertyDict(d.deviceTypeCode).catch(() => undefined) : undefined;
+  return {
+    deviceTypeCode: d.deviceTypeCode,
+    groups: (d.groups ?? []).map((g) => {
+      const code = g.stringCode ?? String(g.code);
+      return { stringCode: code, label: dict?.groups.get(code) ?? g.label };
+    }),
+    properties: (d.properties ?? []).map((p) => ({ ...p, title: dict?.titles.get(p.propertyName) ?? p.title })),
+    values: d.values ?? {},
+  };
+}
+
+/** 只取平台记录的值（下发后刷新状态用） */
+export async function getStoredProperties(sn: string) {
+  return (await api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } })).data?.values ?? {};
+}
+
+/**
+ * 下发读取指令（IOT.readproperty）。返回 seq，设备的应答从实时推送 DeviceResponse 回来（command = "get-property"）。
+ * 平台网页端也兼容直接返回 {属性名: 值} 的情况，这里原样返回给调用方判断。
+ */
+export async function readDeviceProperties(sn: string, propertyNames: string[]) {
+  return (await api.post<unknown>("/api/device-property/read", { sn, propertyNames })).data;
+}
+
+/**
+ * 写属性（IOT.setproperty）。平台先保存为平台记录，saveOnly = false 时再下发到设备，返回 seq，
+ * 设备应答从 DeviceResponse 回来（command = "set-property"）。只保存不下发、或全是平台属性时返回 -1。
+ */
+export async function writeDeviceProperties(sn: string, properties: { propertyName: string; value: unknown }[], saveOnly: boolean) {
+  return (await api.post<unknown>("/api/device-property/write", { sn, properties, saveOnly })).data;
+}
+
+/** 实时推送 DeviceResponse：设备对读写指令的应答 */
+export interface DeviceResponse {
+  sn: string;
+  command: "get-property" | "set-property" | string;
+  seq?: string | number;
+  /** 0 / 200 / 201 表示成功 */
+  code?: number;
+  message?: string;
+  data?: Record<string, unknown>;
+}
+
+export const isResponseOk = (code?: number) => code === 0 || code === 200 || code === 201;
