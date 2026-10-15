@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         雷达平台 - 房间姿态回放
+// @name         雷达平台 - 房间时间回溯
 // @namespace    goodlife-ops
-// @version      0.1.3
-// @description  在「房间详情」页增加"姿态回放"按钮：任选时间段（可跨天）复现人员轨迹与姿态，时间轴可缩放
+// @version      0.1.4
+// @description  在「房间详情」页增加"时间回溯"按钮：任选时间段（可跨天）复现人员轨迹与姿态，时间轴可缩放
 // @match        https://rd.igoodlife.com/*
 // @run-at       document-idle
 // @grant        none
@@ -168,6 +168,29 @@
       }
     }
 
+    // 坐标系：AIO 等设备的历史点已是房间坐标；FallSense 等设备是相对雷达的坐标，需要按安装配置换算。
+    // 每台设备分别试两种解释，落在房间内的点多的那种即为正确的坐标系。
+    const qcBySn = {};
+    for (const el of detail.elements || []) if (el.sn && el.qingLanConfig && el.qingLanConfig.container) qcBySn[el.sn] = el.qingLanConfig;
+    const bg = detail.background || {};
+    const inRoom = (x, y) => x >= -30 && y >= -30 && x <= (bg.width || 0) + 30 && y <= (bg.height || 0) + 30;
+    const converted = [];
+    for (const sn of sns) {
+      const qc = qcBySn[sn];
+      const pts = [...trackMap.values()].filter((tr) => tr.sn === sn).flatMap((tr) => tr.points);
+      if (!qc || !pts.length) continue;
+      let rawIn = 0, xfIn = 0;
+      for (let i = 0; i < pts.length; i += Math.max(1, Math.floor(pts.length / 2000))) {
+        if (inRoom(pts[i].x, pts[i].y)) rawIn++;
+        const [X, Y] = radarToRoom(qc, pts[i].x, pts[i].y);
+        if (inRoom(X, Y)) xfIn++;
+      }
+      if (xfIn > rawIn) {
+        for (const p of pts) [p.x, p.y] = radarToRoom(qc, p.x, p.y);
+        converted.push(nameOf[sn] || sn);
+      }
+    }
+
     const multiDevice = sns.length > 1;
     const tracks = [...trackMap.values()]
       .sort((a, b) => (a.sn === b.sn ? a.uid - b.uid : a.sn < b.sn ? -1 : 1))
@@ -205,7 +228,24 @@
     for (const tr of tracks) for (const p of tr.points) allTs.push(p.t);
     allTs.sort((a, b) => a - b);
 
-    return { tracks, events, marks, allTs, warnings: errors.map((e) => e.message) };
+    return { tracks, events, marks, allTs, converted, warnings: errors.map((e) => e.message) };
+  }
+
+  // 雷达坐标（cm）→ 房间坐标。与平台实时页面的换算一致（RoomViewPage 模块 1922 的 e0），
+  // 但历史接口的 y 轴与实时数据方向相反，需先取反。已用实时显示位置逐点核对过（侧装 / 方向右）。
+  function radarToRoom(qc, x, y) {
+    const cx = ((qc.radar && qc.radar.x) || 0) + qc.container.x;
+    const cy = ((qc.radar && qc.radar.y) || 0) + qc.container.y;
+    const yr = -y, dir = qc.installDirection;
+    let X = cx, Y = cy;
+    if (qc.installType === 0) { // 顶装
+      if (dir === 1) { X = cx + x; Y = cy - yr; } else if (dir === 3) { X = cx - x; Y = cy + yr; }
+      else if (dir === 2) { X = cx + yr; Y = cy + x; } else if (dir === 4) { X = cx - yr; Y = cy - x; }
+    } else { // 侧装
+      if (dir === 1) { X = cx - x; Y = cy + yr; } else if (dir === 3) { X = cx + x; Y = cy - yr; }
+      else if (dir === 2) { X = cx - yr; Y = cy - x; } else if (dir === 4) { X = cx + yr; Y = cy + x; }
+    }
+    return [X, Y];
   }
 
   function postureAt(tr, t) {
@@ -348,7 +388,7 @@
     root.innerHTML = `
 <div class="glr-modal" role="dialog">
   <div class="glr-header">
-    <span class="glr-title">姿态回放<small class="glr-room">加载房间…</small></span>
+    <span class="glr-title">时间回溯<small class="glr-room">加载房间…</small></span>
     <span class="glr-close" title="关闭 (Esc)">×</span>
   </div>
   <div class="glr-toolbar">
@@ -1169,7 +1209,7 @@
         st.data = data;
         st.q0 = start; st.q1 = end;
         const pts = data.allTs.length;
-        setMsg(`${data.tracks.length} 个目标 · ${pts} 个轨迹点 · ${data.events.length} 个事件${data.warnings.length ? ` · ${data.warnings.length} 个请求失败：${data.warnings[0]}` : ''}`, data.warnings.length > 0);
+        setMsg(`${data.tracks.length} 个目标 · ${pts} 个轨迹点 · ${data.events.length} 个事件${data.converted.length ? ` · 已按安装方向换算坐标：${data.converted.join('、')}` : ''}${data.warnings.length ? ` · ${data.warnings.length} 个请求失败：${data.warnings[0]}` : ''}`, data.warnings.length > 0);
         els.empty.style.display = pts || data.tracks.length ? 'none' : 'flex';
         els.empty.textContent = '该时间段没有轨迹数据';
         renderMarks();
@@ -1256,7 +1296,7 @@
     ensureStyle();
     const btn = document.createElement('span');
     btn.className = 'sdb-button sdb-button__icon glr-entry';
-    btn.title = '姿态回放（可跨天、带姿态、时间轴可缩放）';
+    btn.title = '时间回溯（可跨天、带姿态、时间轴可缩放）';
     btn.innerHTML = document.getElementById('icon-walk')
       ? '<svg class="icon" aria-hidden="true"><use xlink:href="#icon-walk"></use></svg>'
       : ICONS.walk;
