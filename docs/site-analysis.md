@@ -406,3 +406,46 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 - 日志 rawData 里有**明文**的 SIP 密码（`talk_auth_pass`）、远程调试 token，以及 slim 设备的 Wi‑Fi 和 MQTT 密码。展示或导出日志时必须打码
 - 只要能往 `/iot` topic 发消息，就能改设备配置、重启设备、推 OTA、开远程调试。所以 broker 一侧的 ACL 是关键安全边界，不能让第三方客户端拿到写权限
+
+## 场景模板与设备场景（2026-10-15 整理）
+
+### 接口
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/scene-template/pages?includePlatfrom=true` | 场景模板列表：`id, templateName, deviceType, sceneGroupName, isDisabled`。**按机构存**：平台建的 63 个模板在账号所属机构（`rawOrgId`，"平台"）下，请求头 orgid 切到子机构（如李虎）后查不到，`includePlatfrom`（平台原拼写）也不管用，要用所属机构再查一次 |
+| `GET /api/scene-template/config?templateId=` | 单个模板的场景定义 `data.sceneConfig` |
+| `GET /api/scene-template/configs?templateId=a,b` | 批量取模板场景定义（平台"从模板导入"用的就是这个） |
+| `GET /api/device-scene/scene?deviceId=` | 设备当前场景（平台库里的，不是设备上读回的） |
+| `POST /api/device-scene/read` `{sn}` | 下发读取指令，结果从推送回来 |
+| `POST /api/device-scene/scene` | 保存并下发设备场景，见下方"保存场景" |
+| `GET /api/device-config/scene-status?deviceId=` | 最近一次下发：`sceneIssueStatus, sceneIssueAt, sceneIssueError` |
+| `POST /api/device/test-{类型}-scene-alert` `{sn, sceneId}` | 测试场景上报 |
+| `PUT /api/device-scene/device/{deviceId}/disable` `{disable}` | 路径里是**设备 id**（传场景 id 报"设备不存在"），作用于整台设备，不是单个场景 |
+
+平台场景对象（camelCase）：`{id, sceneName, isDisabled, conditionType:"conditions"|"timeout", conditionName, relation, maskTime, conditions:[{property, aggregation, range(秒), operator, target, countOperator, countTarget}], actions:[{type, name, alertTypeId, audioFileName…}], interExpression, exitExpression, timeout}`，下发给设备时转成 `scene_config`（snake_case）。
+
+### 保存场景（2026-10-15 在坐起测试 …627d 上实测）
+
+- 请求：`POST /api/device-scene/scene`，`{sn, scenes:[完整列表], saveOnly:false, clear:true}`，返回 `data` = 下发的 seq
+- **整体覆盖**：列表里没有的场景会被删掉（不是标记停用）。所以"禁用"某个场景 = 不带它重新保存；"启用" = 加进列表
+- 已有场景原样带回（带 `id`）；从模板来的新场景去掉场景、条件、动作上的 `id`，平台会分配新 id。平台自己的编辑页只加载 `isDisabled !== true` 的场景、保存时全部置 `isDisabled:false`
+- 平台转成 `IOT.settact` 下发，`range` 秒数转成 `start:0, end:range-1`；设备应答 `code 201`，随后 `scene-status` 的 `sceneIssueStatus` 为 2（成功）
+- 实测把模板"离床告警"的 `{{area}}` 换成 `"0"`（监护床 index）后正常下发和应答
+
+### 模板按设备类型分开
+
+63 个模板：6（AIO）35 个、13（Ultra Fall）13 个、15（Ultra Plus）5 个、12（SleepSense）1 个、2 有 9 个。**同名场景在不同类型上属性名不同**：跌倒在 6 上是 `QL_fall_state`、区域是 `QL_event_area_ID`；在 13/15 上是 `QL_target_posture`、`QL_event_area`、`QL_target_event`。场景名在各类型间基本一致。
+
+### 区域编号
+
+- 条件里的区域值 = 户型里区域的 `index`（从 0 开始）。坐起测试（…627d）实测下发 `QL_radar_para_area: [[0,5,…],[1,4,…]]`，监护床是 0
+- 模板里三种情况：用占位符 `{{area}}`（6 离床告警 / 马桶久坐 / 久坐提醒，13 久坐提醒），平台**不会自动替换**；直接写死编号（6 过度睡眠 / 入床提醒 / 淋浴过久 / 呼吸暂停 / 延迟离床报警，13 离床告警 / 离床延迟报警，15 离床告警 / 马桶久坐）；不涉及区域
+- 已见可疑配置：藕塘社区 13 型设备监护床 index 是 0、门是 1，离床告警却写 `QL_event_area == 1`（13 型编号规则是否同样从 0 开始未核实）
+
+### 户型区域字典（`ranges[]`）
+
+- `type`：2 普通床，3 干扰区，4 门，5 监护床（只能有一个），6 感应区（自定义），7 家具。前端枚举里家具写成 6，但"区域type检测"户型实际保存为 7，以数据为准
+- `spaceType`（空间区域类型，干扰区和门没有）、`spaceTypeOut`（门的"出区域类型"）：字典 `GET /sapi/code/options?codeType=ROOM_SPACE_TYPE`，51 床、52 沙发、53 过道、54 会客、55 餐厅、56 马桶、57 淋浴、58 洗漱、59 更衣、60 阅读
+- 雷达元素的 `rangeType`（安装区域）：字典 `RADAR_INSTALL_AREA`，1 卧室、2 客厅、3 卫生间、4 厨房、5 其他
+- 下发给设备的 `QL_radar_para_area` 只带 `[index, type, 坐标]`，`spaceType` 不下发，只在平台侧使用

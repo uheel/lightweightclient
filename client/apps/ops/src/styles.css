@@ -213,3 +213,27 @@
 .attitude-stage.dragging { cursor: grabbing; }
 .attitude-stage canvas { position: absolute; left: 0; top: 0; }
 .attitude-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* 批量场景 */
+.grow { flex: 1; }
+.err-text { color: #B4232A; }
+.warn-text { color: #9A5B00; }
+.scene-page { height: 100%; min-height: 0; }
+.scene-page .page-head { justify-content: space-between; }
+.scene-dev { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.scene-dev > span { display: flex; flex-direction: column; line-height: 1.4; min-width: 0; }
+.scene-dev b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scene-dev small { font-size: 11px; color: #8A8FA8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scene-name { font-weight: 500; }
+.scene-support { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.scene-row-enable td { background: #F1FAF4 !important; }
+.scene-row-disable td { background: #FDF3F3 !important; }
+.scene-ops { display: flex; flex-direction: column; gap: 4px; }
+.scene-op { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.scene-op .ant-tag { margin: 0; }
+.scene-op small { color: #8A8FA8; font-size: 12px; }
+.scene-op.skip small { color: #9A5B00; }
+.scene-op.same, .scene-op.absent { color: #8A8FA8; }
+.scene-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #5B6078; }
+.scene-progress .ant-progress { width: 160px; margin: 0; }
+.scene-fail { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
