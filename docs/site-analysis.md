@@ -171,7 +171,8 @@
 - `radar {x, y}`：雷达在 container 里的位置
 - `installType`：0 = 顶装（Top），1 = 侧装（Side）
 - `installDirection`：1 = 上，2 = 右，3 = 下，4 = 左
-- `installHeight`、`workingType`（界面显示名称）：3 = 人员跟踪，7 = 跌倒监测，11 = 呼吸睡眠，15 = 床位监护（代码里的枚举名是 CriticalCare，不要按英文意译成"重症监护"）
+- `installHeight`：安装高度，单位是**米**（例如 3 = 3 m；房间里其他坐标、尺寸都是厘米）
+- `workingType`（界面显示名称）：3 = 人员跟踪，7 = 跌倒监测，11 = 呼吸睡眠，15 = 床位监护（代码里的枚举名是 CriticalCare，不要按英文意译成"重症监护"）
 - `ranges[]`：雷达坐标系里划的区域，`{type, text, x, y, width, height, fill}`。type：4 = 门，5 = 监护床，6 = 自定义，7 = 家具…
 - `supervision`
 
@@ -388,8 +389,12 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - **网络 / 蓝牙（只读）**：`net_local_*`、`net_DHCP_EN`、`ccid`、`ble_ver`、`ble_mac`、`ble_name`
 - **外设**：`slave_config`，例如 `[{slave_ID:"FHKS_…", slave_type:"1001"}]`
 - **雷达算法**
-  - `QL_radar_para_config`：`[安装方式(0侧装/1顶装), 安装高度dm?, x1,y1, x2,y2, x3,y3, x4,y4, 参数]`，即安装方式加房间边界四个角
-  - `QL_radar_para_area`：`[[区域号, 区域类型, 四个角的 8 个坐标], …]`
+  - `QL_radar_para_config`：`[安装方式, 安装高度, x1,y1, x2,y2, x3,y3, x4,y4, 工作模式]`。2026-10-15 和房间配置 `qingLanConfig` 逐项核对过：
+    - 安装方式与 `installType` 相同：**0 = 顶装，1 = 侧装**
+    - 安装高度 = `installHeight`（米）× 10，即单位是 **0.1 m（分米）**：坐起测试 3 m → `30`，距离测试 1.5 m → `15`
+    - 四个角是探测区域 `container` 的四个角，坐标**以雷达为原点，单位分米**：顶装 600×400、雷达居中时为 `-30,-20 … 30,20`；侧装、雷达在上边中点时为 `-30,0 … 30,40`
+    - 最后一位 = `workingType`（3 人员跟踪 / 7 跌倒监测 / 11 呼吸睡眠 / 15 床位监护），距离测试从 `7` 改成 `15`，和平台上工作模式的切换一致
+  - `QL_radar_para_area`：`[[序号, 区域类型, 四个角的 8 个坐标], …]`。区域类型与 `ranges[].type` 相同（4 = 门，5 = 监护床…）；坐标同样以雷达为原点、单位分米，取整（例如床 x = -75…75 cm 下发为 `-7…7`）
   - `QL_radar_para_TH`：呼吸心率参数，例如 `[24,90,8,50]`，新固件多 3 位
   - `QL_radar_para_sit`：坐地参数 `[2,10]`
   - `QL_radar_para_fall`：疑似跌倒判定时间
