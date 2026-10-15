@@ -331,3 +331,78 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - **平台每分钟心率呼吸汇总不是平均**（2026-10-15 用迪立莱 10-14 夜 538 分钟核对）：\`radar-vital-minute-pages\` 每分钟 \`heartRateSampleCount\` 恒为 1。它不是这一分钟约 30 条原始记录的平均，而是定时抓取的 1 条读数，抓取秒数在整分钟里漂移（\`firstDeviceTime\` = \`lastDeviceTime\`）。抓取时刻正好没有记录时，整分钟就丢掉了。例如 04:13 原始记录只在 :01–:11 和 :48–:58 有数据，汇总里没有这一分钟。和我们按分钟求的平均相比，538 分钟里有 345 分钟相差超过 1，最大差 8.6 次/分
 - **设备原始心率呼吸** \`/api/device/ql-respiratory-rate/pages\`：约每 2 秒一条，字段 \`deviceTime, heartRate, respirationRate, sleepStatus, deviceType, type, createdAt\`，按 \`filter[sn]\` 和 \`filter[deviceTime]=开始,结束\` 查询。AIO（6）和 UltraFall（13）都在这里，Ultra 和 UltraPlus 未核对。单页可取 20000 条，每条约 0.15 KB（未压缩）。一晚 12 小时约 16000 条：单页 0.5 秒，按 2000 条一页逐页取 0.8 秒，并行取 0.4 秒。客户端整晚取原始记录，自己按分钟算平均、最低、最高和有效读数条数（getDeviceVitals）；已结束的夜晚缓存在本机
 - **连接复用**：本机到平台的新连接经常在 TLS 握手时卡 1、3、7、15 秒（30 次里有 13 次），复用连接就没有这个问题。plugin-http 的 fetch 每个请求新建一个 reqwest Client，不复用连接，所以客户端改用自己的 Rust 命令 \`api_request\`（共用一个 Client，见 \`client/packages/core/rust/api_http.rs\`）；vite 代理也加了 keep-alive
+
+## 设备下行指令（MQTT，2026-10-15 从通信日志整理）
+
+数据来源：测试机构"李虎"下 9 台设备的 `/api/device-log/pages?filter[direction]=2` 全部记录。日志**最早只到 2026-09-17**，平台大约只保留一个月。`filter[command]` 是**模糊匹配**（例如传 `IOT` 能匹配到所有 `IOT.*`）。
+
+### 链路与报文格式
+
+- **雷达（deviceType 6 / 13，topic 前缀 `sdb/radar/<SN>/`）**
+  - 平台 → 设备：`sdb/radar/<SN>/iot`（日志 `direction=2`）
+  - 设备 → 平台：`sdb/radar/<SN>/ak`（日志 `direction=1`）
+  - 下行报文：`{cmd, DID: SN, seq, params}`；设备应答：`{cmd, DID, seq（与请求相同）, protocol_ver:"V1.0", code, params?}`
+  - `code`：`200` 表示成功（读取类指令会带 `params`）；`201` 出现在 `callservice` / `settact` 的应答里，推测表示"已接收、异步执行"
+  - 设备主动上报的 `Device.heartbeat` / `Device.register` / `Device.postevent`，平台都会在 `/iot` 回一条 `{cmd, DID, seq, protocol_ver, time（秒）, code:200}` 作为确认。一台在线设备每天约 1400 条这类确认，占了下行记录的 99%
+- **slim 设备（deviceType 12，topic 为 `sdb/slim/<SN>/<指令>/s2d`）**：指令名放在 topic 里，报文只有 `{seq, params}`。目前见到 `set-property`、`get-property`、`get-tact` 三种，回包推测走 `.../d2s`（未核实）
+
+### 雷达指令一览
+
+| cmd | params | 用途 |
+|---|---|---|
+| `IOT.readproperty` | 属性名数组 `["talk_spk_vol", …]` | 读属性，应答的 `params` 是 `{属性名: 值}` |
+| `IOT.setproperty` | `{属性名: 值, …}`，可以一次写多个 | 写属性（平台"设备配置"里的各项设置最终都走这条） |
+| `IOT.gettact` | 无 | 读场景联动，应答 `params.scene_config[]` |
+| `IOT.settact` | `{scene_config: [...]}` | 整体覆盖场景联动规则 |
+| `IOT.callservice` | `{service_name, service_params}` | 调用设备服务，见下表 |
+| `IOT.SYS` | 同 `callservice` | 见过一次 `Service_simulation_scene`，可能是旧版指令名 |
+
+**callservice 服务**
+
+| service_name | service_params | 说明 |
+|---|---|---|
+| `Service_sys_reset` | `"NULL"` | 重启设备 |
+| `Service_get_OTA` | `{APP_ota_server:{url, MD5, size}, image_ota_server, exp_ota_server}` | 固件升级，url 指向 `fs.igoodlife.com` 上的升级包 |
+| `Service_call_master` | `{call_ID}` | 让设备拨打指定号码 |
+| `Service_call_handup` | `{}` | 挂断通话 |
+| `Service_simulation_scene` | `{scene_id}` | 模拟触发某个场景（测试联动规则用） |
+| `Service_start_remote` | `{name, token, remote_addr, timeout}` | 开启远程调试通道（token 属于敏感信息） |
+
+**场景规则（`scene_config` 的元素）**：`{id, name, type:"conditions", relation:"&", mask_time, conditions:[{property, start, end, aggregation:"REAL", operator:"==", target, event}], actions:[{type:"trigger", name:"Event_auto_trig", alert_type_id}], expression:[]}`。`conditions.property` 见过：`QL_fall_state`、`QL_event_type`、`bt`（蓝牙按钮）、`Event_sr_data`（语音识别）。
+
+### 雷达属性（readproperty / setproperty 的键）
+
+平台的属性字典是 `/api/device-type-property/list?deviceTypeCode=6`，字段为 `propertyName, title, propertyGroupStringCode, dataType, isPlatformOnly…`。**部分字典名和报文里的键不一致**，以报文为准：
+
+| 报文里的键 | 字典名 |
+|---|---|
+| `net_local_IP` / `net_local_mask` / `net_local_gateway` / `net_local_DNS` / `net_DHCP_EN` | `net_ip` / `net_mask` / `net_gateway` / `net_dns` / `net_dhcp` |
+| `ccid` | `iccid` |
+| `talk_local_number` / `talk_auth_pass` / `talk_sip_server` | `sip_account` / `sip_password` / `sip_server` |
+| `device_on_time_span` | `working_times`（工作时间段） |
+| `QL_radar_para_config` / `QL_radar_para_area` | `QL_radar_config` / `QL_radar_area` |
+
+报文里实际出现过的键，按用途分组：
+
+- **基础**：`device_onoff`（设备开关）、`device_on_time_span`（工作时段，如 `["00:00-23:59"]`，`[]` 表示全天）、`led_enable`、`radar_databuff_num`、`tz_offset`、`cpuid`、`logfile_post_server`、`snoring_record_url`、`QL_radar_para_ver`（只读）
+- **网络 / 蓝牙（只读）**：`net_local_*`、`net_DHCP_EN`、`ccid`、`ble_ver`、`ble_mac`、`ble_name`
+- **外设**：`slave_config`，例如 `[{slave_ID:"FHKS_…", slave_type:"1001"}]`
+- **雷达算法**
+  - `QL_radar_para_config`：`[安装方式(0侧装/1顶装), 安装高度dm?, x1,y1, x2,y2, x3,y3, x4,y4, 参数]`，即安装方式加房间边界四个角
+  - `QL_radar_para_area`：`[[区域号, 区域类型, 四个角的 8 个坐标], …]`
+  - `QL_radar_para_TH`：呼吸心率参数，例如 `[24,90,8,50]`，新固件多 3 位
+  - `QL_radar_para_sit`：坐地参数 `[2,10]`
+  - `QL_radar_para_fall`：疑似跌倒判定时间
+- **通话**：`talk_type_sel`、`talk_local_number`、`talk_auth_pass`、`talk_sip_server`、`talk_master_number`、`talk_call_number_bak`、`talk_key1~3_number`、`talk_local_maxtime`、`talk_call_timeout`、`talk_spk_vol`、`talk_mic_vol`、`call_record_EN`、`call_record_url`
+- **离线语音识别**：`offlsr_enable`、`offlsr_keywords`（`[[唤醒词(\uXXXX 去掉反斜杠), 阈值1, 阈值2], …]`）、`offlsr_response_file`、`offlsr_response_volume`、`offlsr_cooldown`
+- **舒适音 / 录音**：`noise_spk_vol`、`noise_on_time_span`、`noise_volume_time_span`、`mic_record_time_span`
+
+### slim 设备（deviceType 12）的属性
+
+- `set-property` 见过的键：`time`（平台约每分钟下发一次对时）、`QL_radar_config`、`QL_radar_area`、`onoff`、`rs_range_min/max`、`rs_area`、`rs_vital_th`、`rs_respiratory_th`、`rs_sleep_en`、`rs_sleep_slot`、`rs_sleep_time`、`rs_report_nobody`、`rs_report_freq`
+- `get-property` 读过的分组：`QL_radar_install / QL_auto_boundary / QL_reporting_mode / QL_health_config / QL_falldown_config`、`ble_*`、`net_rssi / ip / … / wifi_ssid / wifi_pwd`，以及 `mqtt_broke_address / port / user_name / user_password / keepalive`（说明设备连哪个 broker、用什么账号都可以远程读写）
+
+### 注意
+
+- 日志 rawData 里有**明文**的 SIP 密码（`talk_auth_pass`）、远程调试 token，以及 slim 设备的 Wi‑Fi 和 MQTT 密码。展示或导出日志时必须打码
+- 只要能往 `/iot` topic 发消息，就能改设备配置、重启设备、推 OTA、开远程调试。所以 broker 一侧的 ACL 是关键安全边界，不能让第三方客户端拿到写权限
