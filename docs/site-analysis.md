@@ -131,6 +131,9 @@
 | `GET /api/device-type/types` | 设备类型字典：`deviceType` 编号 → 名称、`groupCode` |
 | `GET /api/device-upgrade/pages` | 升级包：`deviceType, version, fileName, fileMd5, fileSize, upgradeName, upgradeType, createdAt/By` |
 | `POST /api/device/sync-online-status` | 同步在线状态 |
+| `POST /api/device/v3` | 新增设备（雷达设备页"新增"）：`{deviceName（≤32）, sn（≤64，全平台唯一）, deviceType, sortOrder, description（≤200）, properties:{buildingId, floorId, roomId}}`，安装位置可不填。修改是 `PUT /api/device/v3`（多 `id`）。雷达类型 = `/api/device-type/types` 里 `groupCode` 为 `RADAR` 的 |
+| `POST /api/device/v4/unknown-devices/create` `{sn}` | 从未入库设备一键创建，返回 `data.created`（false 表示已存在） |
+| `GET /api/room/options?floorId=` | 某楼层的房间 `[{label, value}]`（楼栋 `/api/building/options`，楼层 `/api/floor/options?buildingId=`） |
 | `/api/device-config/*` | 读写设备配置：`basic`、`network`、`audio`、`call`、`switch`、`working-time`、`scene`、`restart`、`status` 等（带 `/read` 的是读取） |
 | `/api/device-property/read`、`write`、`raw-values` | 读写设备属性 |
 | `/api/device/v4/organization-transfer` | 设备转移到其他机构 |

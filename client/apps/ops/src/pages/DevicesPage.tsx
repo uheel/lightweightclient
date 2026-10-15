@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin } from "antd";
-import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, type DeviceLink } from "@radar/core";
 import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
+import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
 import { useLiveMap } from "../devices/useLiveMap";
 
@@ -18,6 +19,19 @@ const FILTERS: { key: Filter; label: string; test: (d: Radar, l: DeviceLink) => 
 
 /** 设备不多时订阅全部设备的实时推送，在线状态全部以设备数据为准；太多时只订阅选中的那台，其余先用平台记录 */
 const SUBSCRIBE_ALL_MAX = 300;
+
+/** 左侧列表宽度可拖动调整，记在本机 */
+const LIST_W_KEY = "ops:dev-list-width";
+const LIST_W_DEFAULT = 340;
+const clampListW = (w: number) => Math.round(Math.min(560, Math.max(280, w)));
+function savedListW() {
+  try {
+    const v = Number(localStorage.getItem(LIST_W_KEY));
+    return v ? clampListW(v) : LIST_W_DEFAULT;
+  } catch {
+    return LIST_W_DEFAULT;
+  }
+}
 
 export function lastSeen(t?: string | number) {
   if (!t) return "—";
@@ -36,12 +50,17 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
   const [selId, setSelId] = useState<string>();
   /** 收起左侧列表，给详情（尤其是姿态回放）更多空间 */
   const [listHidden, setListHidden] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [listW, setListW] = useState(savedListW);
+  const [dragging, setDragging] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setList(await getRadars());
+      const l = await getRadars();
+      setList(l);
+      return l;
     } catch (e) {
       message.error(`加载设备失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -93,6 +112,54 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
     if (!selId && shown.length) setSelId(shown[0].id);
   }, [selId, shown]);
 
+  /** 添加成功后刷新列表，清掉筛选并选中新设备 */
+  async function onCreated(sn: string) {
+    setAdding(false);
+    const l = await load();
+    const d = l?.find((x) => x.sn === sn);
+    if (d) {
+      setFilter("all");
+      setQ("");
+      setSelId(d.id);
+      setListHidden(false);
+      requestAnimationFrame(() => listRef.current?.querySelector(`[data-id="${d.id}"]`)?.scrollIntoView({ block: "nearest" }));
+    }
+  }
+
+  function saveListW(w: number) {
+    setListW(w);
+    try {
+      localStorage.setItem(LIST_W_KEY, String(w));
+    } catch {
+      /* 存不了就只在本次生效 */
+    }
+  }
+
+  /** 拖动分隔条调整列表宽度 */
+  function onSplitDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const el = e.currentTarget;
+    const x0 = e.clientX;
+    const w0 = listW;
+    let w = w0;
+    el.setPointerCapture(e.pointerId);
+    setDragging(true);
+    const move = (ev: PointerEvent) => {
+      w = clampListW(w0 + ev.clientX - x0);
+      setListW(w);
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      setDragging(false);
+      saveListW(w);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  }
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
@@ -106,14 +173,15 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
 
   return (
     <div className="workbench">
-      <section className="dev-list" onKeyDown={onKeyDown} hidden={listHidden}>
+      <section className="dev-list" style={{ width: listW }} onKeyDown={onKeyDown} hidden={listHidden}>
         <div className="dev-list-head">
           <div className="dev-list-title">
             <h1>雷达设备</h1>
             <span className="muted">
               {list.length} 台 · {counts.online} 在线
             </span>
-            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="刷新" style={{ marginLeft: "auto" }} />
+            <Button type="text" icon={<PlusOutlined />} onClick={() => setAdding(true)} title="添加设备" style={{ marginLeft: "auto" }} />
+            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="刷新" />
           </div>
           <Input
             allowClear
@@ -170,9 +238,18 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
         </div>
         <div className="dev-list-foot muted">
           显示 {shown.length} / {list.length} · ↑↓ 切换
-          {!subscribeAll && <div>设备超过 {SUBSCRIBE_ALL_MAX} 台，只有选中的设备按实时数据判断在线，其余为平台记录（斜体）</div>}
+          {!subscribeAll && <div>超过 {SUBSCRIBE_ALL_MAX} 台：只有选中的设备按实时数据判断在线，斜体为平台记录</div>}
         </div>
       </section>
+      <div
+        className={`dev-split${dragging ? " dragging" : ""}`}
+        hidden={listHidden}
+        role="separator"
+        aria-orientation="vertical"
+        title="拖动调整列表宽度，双击恢复默认"
+        onPointerDown={onSplitDown}
+        onDoubleClick={() => saveListW(LIST_W_DEFAULT)}
+      />
       <section className="dev-detail">
         {sel ? (
           <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} onOpenLogs={onOpenLogs} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
@@ -180,6 +257,7 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
       </section>
+      <AddDeviceDialog open={adding} existing={list} onClose={() => setAdding(false)} onCreated={onCreated} />
     </div>
   );
 }

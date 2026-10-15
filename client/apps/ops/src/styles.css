@@ -26,7 +26,8 @@
 
 /* 设备工作台：列表 + 详情 */
 .workbench { height: 100%; display: flex; min-height: 0; }
-.dev-list { flex: 0 0 340px; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #E8EAF2; min-height: 0; }
+/* 宽度由页面设置（可拖动）；min-width: 0 防止很长的设备名把列表撑宽 */
+.dev-list { flex: none; width: 340px; min-width: 0; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #E8EAF2; min-height: 0; }
 .dev-list-head { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #EEF0F5; }
 .dev-list-title { display: flex; align-items: baseline; gap: 10px; }
 .dev-list-title h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -54,6 +55,10 @@
 .dev-list-foot { padding: 6px 14px; font-size: 11px; border-top: 1px solid #EEF0F5; }
 
 .dev-detail { flex: 1; min-width: 0; overflow: auto; }
+.dev-split { flex: none; width: 7px; margin: 0 -4px 0 -3px; position: relative; z-index: 2; cursor: col-resize; touch-action: none; }
+.dev-split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; background: transparent; transition: background 0.15s; }
+.dev-split:hover::after, .dev-split.dragging::after { background: #3B4FD8; }
+.dev-split[hidden] { display: none; }
 .detail { padding: 20px 24px; }
 .detail-head { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; }
 .detail-title { display: flex; align-items: center; gap: 10px; }

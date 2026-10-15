@@ -49,6 +49,54 @@ export async function getDeviceTypeMap() {
   return map;
 }
 
+// ---------- 添加设备 ----------
+
+/** 雷达类的设备类型（groupCode = RADAR），用于添加设备时选择 */
+export async function getRadarTypes() {
+  const list = (await api.get<DeviceType[]>("/api/device-type/types")).data ?? [];
+  return list
+    .filter((t) => t.groupCode === "RADAR" && t.deviceType !== undefined)
+    .map((t) => ({ value: t.deviceType!, label: t.deviceTypeName ?? t.name ?? String(t.deviceType) }));
+}
+
+export interface NewRadar {
+  deviceName: string;
+  sn: string;
+  deviceType: number;
+  description?: string;
+  /** 安装位置，可以不填（之后在平台的房间平面图里再装） */
+  buildingId?: string;
+  floorId?: string;
+  roomId?: string;
+}
+
+/** 新增设备，和平台雷达设备页的"新增"一样（POST /api/device/v3）。SN 全平台唯一，重复时平台报错 */
+export async function createRadar(d: NewRadar) {
+  const res = await api.post<string>("/api/device/v3", {
+    deviceName: d.deviceName,
+    sn: d.sn,
+    deviceType: d.deviceType,
+    description: d.description,
+    properties: { buildingId: d.buildingId, floorId: d.floorId, roomId: d.roomId },
+  });
+  return res.data;
+}
+
+export interface Option {
+  label: string;
+  value: string;
+}
+
+export async function getBuildingOptions() {
+  return (await api.get<Option[]>("/api/building/options")).data ?? [];
+}
+export async function getFloorOptions(buildingId: string) {
+  return (await api.get<Option[]>("/api/floor/options", { params: { buildingId } })).data ?? [];
+}
+export async function getRoomOptions(floorId: string) {
+  return (await api.get<Option[]>("/api/room/options", { params: { floorId } })).data ?? [];
+}
+
 // ---------- 房间布局里的雷达安装配置 ----------
 
 export interface QingLanConfig {
