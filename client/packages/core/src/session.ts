@@ -1,6 +1,9 @@
 /**
  * 登录会话。token 只保存在内存里，关闭应用即失效；
  * 服务器地址和用户名记在 localStorage，方便下次登录。
+ *
+ * 例外：在浏览器里调试（vite 开发服务器、localhost，不在 Tauri 里）时，会话另存一份在 sessionStorage，
+ * 改代码触发页面整体刷新时不用重新登录。只在当前标签页有效，关掉标签页就没了。客户端（Tauri）里不存。
  */
 export interface Session {
   server: string;
@@ -23,10 +26,34 @@ export interface Session {
 
 type Listener = (s: Session | null, reason?: "expired") => void;
 
-let current: Session | null = null;
+const DEV_KEY = "RC_DEV_SESSION";
+const devPersist = !("__TAURI_INTERNALS__" in window) && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+
+function loadDev(): Session | null {
+  if (!devPersist) return null;
+  try {
+    const s = sessionStorage.getItem(DEV_KEY);
+    return s ? (JSON.parse(s) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDev(s: Session | null) {
+  if (!devPersist) return;
+  try {
+    if (s) sessionStorage.setItem(DEV_KEY, JSON.stringify(s));
+    else sessionStorage.removeItem(DEV_KEY);
+  } catch {
+    /* 存不了就和客户端一样，刷新后重新登录 */
+  }
+}
+
+let current: Session | null = loadDev();
 const listeners = new Set<Listener>();
 
 function emit(reason?: "expired") {
+  saveDev(current);
   for (const l of listeners) l(current, reason);
 }
 
