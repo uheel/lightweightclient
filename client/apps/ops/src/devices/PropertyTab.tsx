@@ -14,7 +14,7 @@ import {
   type PropertySchema,
   type StoredProperty,
 } from "../api/device";
-import { DebugContext, structuredFor } from "./propertyEditors";
+import { structuredFor } from "./propertyEditors";
 import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
 
 /**
@@ -26,7 +26,6 @@ import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
 const TIMEOUT_MS = 30_000;
 const UNGROUPED = "__ungrouped";
 const GROUP_KEY = "ops:prop-group";
-const DEBUG_KEY = "ops:prop-debug";
 const SECRET = /pass|pwd|token/i;
 
 type Command = "get-property" | "set-property";
@@ -123,23 +122,6 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   const [rev, setRev] = useState(0);
   const [rtState, setRtState] = useState<RealtimeState>(realtime.state);
   const pending = useRef<Pending>(undefined);
-  /** 排障模式：显示字段名和原始值 */
-  const [debug, setDebug] = useState(() => {
-    try {
-      return localStorage.getItem(DEBUG_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleDebug = () =>
-    setDebug((d) => {
-      try {
-        localStorage.setItem(DEBUG_KEY, d ? "0" : "1");
-      } catch {
-        /* 记不住也没关系 */
-      }
-      return !d;
-    });
 
   useEffect(() => realtime.onState((s) => setRtState(s)), []);
 
@@ -505,7 +487,6 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   const allReadOnly = rows.length > 0 && rows.every(readOnly);
 
   return (
-    <DebugContext.Provider value={debug}>
       <div className="pp">
         <div className="pp-strip">
           <span className={`pp-link ${online ? "ok" : "warn"}`}>
@@ -569,10 +550,7 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
               <dl className="pp-kv">
                 {rows.map((p) => (
                   <div key={p.propertyName}>
-                    <dt>
-                      {nameOf(p)}
-                      {debug && <code className="pp-raw">{p.propertyName}</code>}
-                    </dt>
+                    <dt>{nameOf(p)}</dt>
                     <dd>{format(p, valueOf(p.propertyName), typeCode)}</dd>
                   </div>
                 ))}
@@ -594,7 +572,6 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
                     typeCode={typeCode}
                     ctx={ctx}
                     sn={sn}
-                    debug={debug}
                     disabled={busy === "set-property"}
                     onChange={(v) => setValue(p.propertyName, v)}
                     onError={(err) => setError(p.propertyName, err)}
@@ -603,11 +580,6 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
               </div>
             )}
             {!rows.length && <p className="pp-empty">这一组现在没有要显示的设置。</p>}
-            <footer>
-              <button type="button" className="pp-debug" onClick={toggleDebug}>
-                {debug ? "隐藏排障信息" : "显示排障信息（字段名和原始值）"}
-              </button>
-            </footer>
           </section>
         </div>
 
@@ -623,7 +595,6 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
           </div>
         )}
       </div>
-    </DebugContext.Provider>
   );
 }
 
@@ -664,7 +635,6 @@ function SettingRow({
   typeCode,
   ctx,
   sn,
-  debug,
   disabled,
   onChange,
   onError,
@@ -681,7 +651,6 @@ function SettingRow({
   typeCode?: number;
   ctx: Record<string, unknown>;
   sn: string;
-  debug: boolean;
   disabled: boolean;
   onChange: (v: unknown) => void;
   onError: (err?: string) => void;
@@ -701,7 +670,6 @@ function SettingRow({
         {p.isPlatformOnly && <em>只存在平台</em>}
       </span>
       {desc && <small>{desc}</small>}
-      {debug && <code className="pp-raw">{p.propertyName}</code>}
     </div>
   );
   const status = state && (

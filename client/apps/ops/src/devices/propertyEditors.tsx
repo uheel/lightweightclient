@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Checkbox, InputNumber, Select, Switch, TimePicker, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
@@ -237,7 +237,6 @@ function tuple(spec: TupleSpec): Structured {
           {spec.note && <p className="pp-note">{spec.note}</p>}
           {spec.lengths && fields.length < spec.fields.length && <p className="pp-note">这台设备的固件只支持上面几项，其余设置需要升级固件。</p>}
           {err && <p className="pp-note err">{err}</p>}
-          <RawLine value={value} />
         </div>
       );
     },
@@ -248,14 +247,7 @@ function withUnknown(options: { value: number; label: string }[], v: number) {
   return options.some((o) => o.value === v) ? options : [...options, { value: v, label: `未知（${v}）` }];
 }
 
-/** 排障模式：显示字段名和原始值，方便和通信日志对照 */
-export const DebugContext = createContext(false);
 
-function RawLine({ value }: { value: unknown }) {
-  const debug = useContext(DebugContext);
-  if (!debug || value === undefined || value === null || value === "") return null;
-  return <code className="pp-raw">{typeof value === "string" ? value : JSON.stringify(value)}</code>;
-}
 
 // ---------- 各属性的定义 ----------
 
@@ -534,7 +526,6 @@ const QL_RADAR_AREA: Structured = {
           </Button>
           <p className="pp-note">坐标以雷达为中心，单位米。场景规则里引用区域用的就是这里的编号。</p>
           {err && <small className="prop-err">{err}</small>}
-          <RawLine value={value} />
         </div>
       </div>
     );
@@ -672,7 +663,6 @@ const OFFLSR_KEYWORDS: Structured = {
           ))}
         </div>
         <small className="muted">唤醒词是设备固定的 10 个，只能选择启用哪些（至少 1 个）。</small>
-        <RawLine value={value} />
       </div>
     );
   },
@@ -778,7 +768,6 @@ function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice)
               style={{ width: "100%", maxWidth: 520 }}
             />
           )}
-          <RawLine value={value} />
         </div>
       );
     },
