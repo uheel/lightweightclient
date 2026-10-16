@@ -71,6 +71,7 @@ export class ReplayEngine {
   private raf = 0;
   private lastFrame = 0;
   private lastNotify = 0;
+  private lastSpan = "";
   private room = { scale: 1, ox: 0, oy: 0 };
   private images = new Map<string, HTMLImageElement>();
   private hover: { x: number; y: number } | null = null;
@@ -87,9 +88,19 @@ export class ReplayEngine {
     this.v0 = this.q0;
     this.v1 = this.q1;
     this.t = this.q0;
+    // 只在尺寸真的变了时才重设画布：重设会清空画布（闪一下），房间视图也会被重置成自适应
+    let stageSize = "";
+    let tlWidth = -1;
     this.ro = new ResizeObserver(() => {
-      this.resizeRoom();
-      this.resizeTimeline();
+      const ss = `${els.stage.clientWidth}x${els.stage.clientHeight}`;
+      if (ss !== stageSize) {
+        stageSize = ss;
+        this.resizeRoom();
+      }
+      if (els.tlWrap.clientWidth !== tlWidth) {
+        tlWidth = els.tlWrap.clientWidth;
+        this.resizeTimeline();
+      }
     });
     this.ro.observe(els.stage);
     this.ro.observe(els.tlWrap);
@@ -542,7 +553,11 @@ export class ReplayEngine {
     const pw = this.plotW();
     ctx.setTransform(r, 0, 0, r, 0, 0);
     ctx.clearRect(0, 0, W, L.height);
-    this.cb.onView(fmtSpan(this.v1 - this.v0));
+    const spanText = fmtSpan(this.v1 - this.v0);
+    if (spanText !== this.lastSpan) {
+      this.lastSpan = spanText;
+      this.cb.onView(spanText);
+    }
     ctx.font = FONT;
     ctx.textBaseline = "middle";
     const d = this.data;

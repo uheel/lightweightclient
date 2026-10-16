@@ -54,12 +54,15 @@ function loadOpts(): ReplayOptions {
   }
 }
 
+/** 设备页每秒随实时推送重渲染一次，回放面板的 props 不变就不跟着重渲染 */
+export default memo(ReplayView);
+
 /**
  * 姿态回放（移植自油猴脚本 room-posture-replay.user.js）：
  * 任选时间段（可跨天，最多 7 天）复现房间里的人员轨迹与姿态，时间轴可缩放，事件 / 告警可逐个跳转。
  * 回放以房间为单位，默认只选当前设备，同房间的其他雷达可以勾选一起看。
  */
-export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
+function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
   const stage = useRef<HTMLDivElement>(null);
   const roomBase = useRef<HTMLCanvasElement>(null);
   const roomDyn = useRef<HTMLCanvasElement>(null);
