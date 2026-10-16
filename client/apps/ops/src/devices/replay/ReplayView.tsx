@@ -388,7 +388,8 @@ function StatusList({ clock, data }: { clock: Clock; data: ReplayData | null }) 
 /** 事件列表很长：只有当前事件变化时才更新，而且只重渲染前后两行 */
 function MarkList({ clock, data, multiDay, onGoto }: { clock: Clock; data: ReplayData | null; multiDay: boolean; onGoto: (t: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const markIndex = useSyncExternalStore(clock.subscribe, () => (data ? lowerBound(data.marks, clock.get() + 1, (m) => m.t) - 1 : -1));
+  // 跳到事件时落在事件前 2 秒（见 engine.jumpMark），所以把 2 秒内即将发生的那条算作当前
+  const markIndex = useSyncExternalStore(clock.subscribe, () => (data ? lowerBound(data.marks, clock.get() + 2001, (m) => m.t) - 1 : -1));
   const goto = useRef(onGoto);
   goto.current = onGoto;
   const onClick = useCallback((t: number) => goto.current(t), []);
