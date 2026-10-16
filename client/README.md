@@ -47,6 +47,8 @@ client/
 
 ## 常用命令（在 client/ 下执行）
 
+完整的运行、调试、打包说明见 [运行与调试.md](运行与调试.md)。
+
 ```bash
 npm install
 npm run user          # 启动用户端桌面客户端
