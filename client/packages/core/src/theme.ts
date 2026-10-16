@@ -20,6 +20,9 @@ export const status = {
   offline: { dot: "#B3B7C9", bg: "#F1F2F7", fg: "#5B6078" },
 };
 
+export const SYSTEM_FONT =
+  '"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, "PingFang SC", sans-serif';
+
 export const baseTheme: ThemeConfig = {
   token: {
     colorPrimary: brand.primary,
@@ -27,7 +30,15 @@ export const baseTheme: ThemeConfig = {
     colorWarning: status.warning.dot,
     colorError: status.alert.dot,
     fontSize: 14,
-    borderRadius: 8,
-    fontFamily: '"Noto Sans SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif',
+    borderRadius: 6,
+    // 桌面应用的控件比网页紧凑：输入框、按钮 30px（antd 默认 32px）
+    controlHeight: 30,
+    // Windows 系统字体：英文数字用 Segoe UI，中文用微软雅黑 UI。不用 Noto Sans SC，大多数用户电脑上没装，看到的和开发机不一样
+    fontFamily: SYSTEM_FONT,
+  },
+  components: {
+    // 页内 Tab 矮一些、字小一些，不抢页面标题
+    Tabs: { titleFontSize: 13, horizontalItemPadding: "8px 0", horizontalItemGutter: 24, horizontalMargin: "0 0 12px 0" },
+    Table: { cellPaddingBlock: 10, cellPaddingInline: 12, headerBg: "#F8F9FC" },
   },
 };

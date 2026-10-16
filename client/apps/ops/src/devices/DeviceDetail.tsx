@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Tabs } from "antd";
+import { Button, Tabs, Tooltip } from "antd";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, POSTURE, type LiveData } from "@radar/core";
@@ -168,6 +168,15 @@ export default function DeviceDetail({
     <div className="detail">
       <div className="detail-head">
         <div className="detail-title">
+          <Tooltip title={listHidden ? "显示设备列表" : "收起设备列表"}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={listHidden ? "显示设备列表" : "收起设备列表"}
+              icon={listHidden ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={onToggleList}
+            />
+          </Tooltip>
           <h1>{d.deviceName || d.sn}</h1>
           <span className={`status-tag ${statusCls}`}>{statusText}</span>
         </div>
@@ -177,11 +186,6 @@ export default function DeviceDetail({
           </span>
           <span>{d.roomName || "未绑定房间"}</span>
           <span>{[typeName, install[0], cfg?.workingType !== undefined ? WORKING_TYPE[cfg.workingType] : undefined].filter(Boolean).join(" · ") || "雷达"}</span>
-        </div>
-        <div className="detail-actions">
-          <Button icon={listHidden ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={onToggleList}>
-            {listHidden ? "显示设备列表" : "收起设备列表"}
-          </Button>
         </div>
       </div>
       <Tabs

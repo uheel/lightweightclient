@@ -36,7 +36,7 @@ export interface ReplayCallbacks {
 const TICK_STEPS = [1e3, 2e3, 5e3, 1e4, 15e3, 3e4, 6e4, 12e4, 3e5, 6e5, 9e5, 18e5, 36e5, 72e5, 108e5, 216e5, 432e5, 864e5];
 const TL = { GUTTER: 112, RIGHT: 12, OV_Y: 4, OV_H: 10, AXIS_Y: 18, AXIS_H: 30, DENS_H: 18, LANE_H: 16, LANE_GAP: 4, EV_H: 14 };
 const MIN_VIEW_SPAN = 5000;
-const FONT = '12px "Noto Sans SC", "Microsoft YaHei", sans-serif';
+const FONT = '12px "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
 const C = {
   text: "#1B1D2E",
   muted: "#8A8FA8",

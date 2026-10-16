@@ -1,14 +1,14 @@
 /* 外壳和基础样式在 core 的 AppShell.css */
 
-.page { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
-.card { background: #fff; border: 1px solid #E8EAF2; border-radius: 14px; }
+.page { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.card { background: #fff; border: 1px solid #E8EAF2; border-radius: 8px; }
 
 /* 护理值守首页（界面稿：护理值守 · 首页） */
 .muted { color: #8A8FA8; font-size: 13px; }
 .care { display: flex; flex-wrap: wrap; min-height: 100%; }
-.care-main { flex: 999 1 640px; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.care-main { flex: 999 1 640px; min-width: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
 .care-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.care-head h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.care-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .care-head p { margin: 2px 0 0; color: #5B6078; font-size: 13px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
@@ -18,7 +18,7 @@
 .chip.on { background: #111441; border-color: #111441; color: #fff; }
 .elder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
 .elder-card {
-  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 8px;
   background: #fff; border: 1px solid #E8EAF2; box-shadow: 0 1px 2px rgba(17, 20, 65, 0.04);
 }
 .elder-who { display: flex; align-items: center; gap: 10px; }
@@ -41,13 +41,13 @@
   align-self: flex-start; font-size: 12px; padding: 2px 9px; border-radius: 12px; background: #FFF4E0; color: #9A5B00;
 }
 .care-side {
-  flex: 1 1 300px; max-width: 340px; background: #fff; border-left: 1px solid #E8EAF2; padding: 20px;
+  flex: 1 1 300px; max-width: 340px; background: #fff; border-left: 1px solid #E8EAF2; padding: 16px;
   display: flex; flex-direction: column; gap: 22px;
 }
 .side-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-.side-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.side-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .alert-list { display: flex; flex-direction: column; gap: 8px; }
-.alert-item { padding: 10px 12px; border-radius: 10px; background: #FDECEC; }
+.alert-item { padding: 10px 12px; border-radius: 6px; background: #FDECEC; }
 .alert-top { display: flex; justify-content: space-between; gap: 8px; }
 .alert-top b { color: #B4232A; }
 .alert-top span { font-size: 12px; color: #B4232A; white-space: nowrap; }
@@ -77,7 +77,7 @@
 .process-label { margin: 14px 0 8px; font-size: 13px; color: #5B6078; }
 .process-types { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .process-types .ant-radio-button-wrapper {
-  height: 44px; line-height: 42px; border-radius: 10px !important; border-inline-start-width: 1px; text-align: center; font-size: 14px;
+  height: 44px; line-height: 42px; border-radius: 6px !important; border-inline-start-width: 1px; text-align: center; font-size: 14px;
 }
 .process-types .ant-radio-button-wrapper::before { display: none; }
 .process-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
@@ -87,14 +87,14 @@
 .detail-back { align-self: flex-start; color: #5B6078; padding-left: 4px; }
 .detail-alert {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 10px 16px; border-radius: 12px; background: #FDECEC; color: #B4232A;
+  padding: 10px 16px; border-radius: 8px; background: #FDECEC; color: #B4232A;
 }
-.card h2 { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
-.card { padding: 18px 20px; }
+.card h2 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.card { padding: 14px 16px; }
 .detail-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .elder-avatar.big { width: 56px; height: 56px; font-size: 22px; }
 .detail-who { display: flex; flex-direction: column; min-width: 160px; }
-.detail-who h1 { margin: 0; font-size: 22px; }
+.detail-who h1 { margin: 0; font-size: 18px; }
 .detail-who span { color: #5B6078; font-size: 13px; }
 .detail-who small { color: #8A8FA8; font-size: 12px; }
 .detail-now { margin-left: auto; display: flex; gap: 28px; flex-wrap: wrap; }
@@ -175,12 +175,12 @@
 .cell-who .focus-tag { margin-left: 6px; }
 .alert-result { font-size: 12px; color: #5B6078; margin-top: 2px; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.stat { padding: 14px 16px; display: flex; flex-direction: column; }
+.stat { padding: 12px 14px; display: flex; flex-direction: column; }
 .stat small { font-size: 12px; color: #8A8FA8; }
-.stat b { font-size: 26px; font-weight: 500; }
+.stat b { font-size: 22px; font-weight: 500; }
 .stat.warn { background: #FFF9EE; border-color: #F0D29A; }
 .stat.warn b { color: #9A5B00; }
-.page .care-head h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.page .care-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .page .care-head p { margin: 2px 0 0; color: #5B6078; font-size: 13px; }
 .source-tag { margin-left: 8px; font-size: 12px; font-weight: 400; padding: 1px 8px; border-radius: 10px; background: #EEF1FF; color: #3B4FD8; vertical-align: middle; }
 
@@ -216,7 +216,7 @@
 .mgr-bar i { display: block; height: 6px; }
 .mgr-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .mgr-alerts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.mgr-alert { padding: 12px; border-radius: 10px; background: #F6F7FB; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #3A3F5C; }
+.mgr-alert { padding: 12px; border-radius: 6px; background: #F6F7FB; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #3A3F5C; }
 .mgr-alert.pending { background: #FDECEC; }
 .mgr-alert b { font-size: 14px; }
 .attention-list li.clickable { cursor: pointer; border-radius: 8px; }

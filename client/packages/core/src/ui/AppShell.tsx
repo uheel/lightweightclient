@@ -12,7 +12,7 @@ export interface ShellNavItem<K extends string> {
 }
 
 /**
- * 两个客户端共用的外壳：40px 白色标题栏（兼作窗口标题栏，可拖动；关掉系统标题栏时右侧带窗口按钮） + 76px 白色模块栏 + 内容区。
+ * 两个客户端共用的外壳：40px 白色标题栏（兼作窗口标题栏，可拖动；关掉系统标题栏时右侧带窗口按钮） + 60px 白色模块栏 + 内容区。
  * 外观只在这里改，保证用户端和运维端一致。
  */
 export function AppShell<K extends string>({
