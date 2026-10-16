@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, Checkbox, DatePicker, Empty, Select, Tooltip } from "antd";
 import {
   CaretRightOutlined,
@@ -11,7 +11,7 @@ import {
   VerticalRightOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { fmt, fmtDate, fmtTime, getRoomDetail, lowerBound, MAX_RANGE_DAYS, POSTURES, trackStateAt, loadReplayData, type ReplayData, type RoomDetail } from "./data";
+import { fmt, fmtDate, fmtTime, getRoomDetail, lowerBound, MAX_RANGE_DAYS, POSTURES, trackStateAt, loadReplayData, type Mark, type ReplayData, type RoomDetail } from "./data";
 import { ReplayEngine, type ReplayOptions } from "./engine";
 
 const OPTS_KEY = "ops:replay-options";
@@ -25,6 +25,25 @@ const QUICK: { key: string; label: string; range: () => [number, number] }[] = [
   { key: "yesterday", label: "昨天", range: () => [dayjs().subtract(1, "day").startOf("day").valueOf(), dayjs().startOf("day").valueOf()] },
   { key: "7d", label: "近 7 天", range: () => [Date.now() - 7 * 864e5, Date.now()] },
 ];
+
+/** 播放时间：只让依赖时间的小组件订阅，播放时不必整页重渲染 */
+function createClock() {
+  let t = 0;
+  const subs = new Set<() => void>();
+  return {
+    get: () => t,
+    set(v: number) {
+      t = v;
+      for (const f of subs) f();
+    },
+    subscribe(f: () => void) {
+      subs.add(f);
+      return () => void subs.delete(f);
+    },
+  };
+}
+type Clock = ReturnType<typeof createClock>;
+const useClock = (clock: Clock) => useSyncExternalStore(clock.subscribe, clock.get);
 
 function loadOpts(): ReplayOptions {
   const def: ReplayOptions = { speed: 1, trail: 10, skip: true, follow: true };
@@ -48,7 +67,6 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
   const tlBase = useRef<HTMLCanvasElement>(null);
   const tlOver = useRef<HTMLCanvasElement>(null);
   const tip = useRef<HTMLDivElement>(null);
-  const marksRef = useRef<HTMLDivElement>(null);
   const engine = useRef<ReplayEngine | null>(null);
 
   const [opts, setOpts] = useState<ReplayOptions>(loadOpts);
@@ -61,7 +79,7 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
   const [data, setData] = useState<ReplayData | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; err?: boolean }>();
-  const [t, setT] = useState(0);
+  const [clock] = useState(createClock);
   const [playing, setPlaying] = useState(false);
   const [span, setSpan] = useState("");
   const [q, setQ] = useState<[number, number]>([0, 0]);
@@ -71,7 +89,7 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
     const e = new ReplayEngine(
       { stage: stage.current!, roomBase: roomBase.current!, roomDyn: roomDyn.current!, tlWrap: tlWrap.current!, tlBase: tlBase.current!, tlOver: tlOver.current!, tip: tip.current! },
       () => optsRef.current,
-      { onTime: setT, onPlaying: setPlaying, onView: setSpan },
+      { onTime: clock.set, onPlaying: setPlaying, onView: setSpan },
       [dayjs().startOf("day").valueOf(), Date.now()],
     );
     engine.current = e;
@@ -151,20 +169,6 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-
-  const markIndex = data ? lowerBound(data.marks, t + 1, (m) => m.t) - 1 : -1;
-  useEffect(() => {
-    marksRef.current?.querySelector(".rp-mark.current")?.scrollIntoView({ block: "nearest" });
-  }, [markIndex]);
-
-  const status = useMemo(
-    () =>
-      data?.tracks.map((tr) => {
-        const s = trackStateAt(tr, t);
-        return { tr, s, pdef: s?.posture != null ? POSTURES[s.posture] : undefined };
-      }) ?? [],
-    [data, t],
-  );
 
   const legend = useMemo(() => {
     const used = new Set<number>();
@@ -255,32 +259,7 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
         </div>
         <aside className="rp-side">
           <h3>当前状态</h3>
-          <div className="rp-status">
-            {status.length ? (
-              status.map(({ tr, s, pdef }) => (
-                <div key={tr.key} className="rp-st">
-                  <i className="rp-dot" style={{ background: tr.color }} />
-                  <span className="name" title={tr.label}>
-                    {tr.label}
-                    {s && s.x != null && s.y != null && (
-                      <small className="mono">
-                        {(s.x / 100).toFixed(2)}, {(s.y / 100).toFixed(2)} m{s.stale ? "（最近）" : ""}
-                      </small>
-                    )}
-                  </span>
-                  {pdef ? (
-                    <span className="rp-tag" style={{ background: pdef.color, opacity: s?.stale ? 0.6 : 1 }}>
-                      {pdef.text}
-                    </span>
-                  ) : (
-                    <span className={`rp-tag ${s ? "unknown" : "absent"}`}>{s ? "未知姿态" : "不在场"}</span>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div className="muted small">无目标</div>
-            )}
-          </div>
+          <StatusList clock={clock} data={data} />
           <h3>
             事件 / 告警
             {data && data.marks.length > 0 && (
@@ -289,19 +268,7 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
               </span>
             )}
           </h3>
-          <div className="rp-marks" ref={marksRef}>
-            {data?.marks.length ? (
-              data.marks.map((m, i) => (
-                <button key={i} className={`rp-mark${m.alarm ? " alarm" : ""}${i === markIndex ? " current" : ""}`} onClick={() => en?.gotoMark(m.t)}>
-                  <i className="rp-dot" style={{ background: m.color }} />
-                  <span className="mono">{multiDay ? fmt(m.t).slice(5) : fmtTime(new Date(m.t))}</span>
-                  <span className="txt">{m.text}</span>
-                </button>
-              ))
-            ) : (
-              <div className="muted small">无事件</div>
-            )}
-          </div>
+          <MarkList clock={clock} data={data} multiDay={multiDay} onGoto={(t) => en?.gotoMark(t)} />
         </aside>
       </div>
 
@@ -367,8 +334,81 @@ export default function ReplayView({ roomId, sn }: { roomId?: string; sn: string
         <Checkbox checked={opts.skip} onChange={(e) => setOpts((o) => ({ ...o, skip: e.target.checked }))}>
           <Tooltip title="播放时自动跳过没有轨迹点的时段">跳过无人时段</Tooltip>
         </Checkbox>
-        <span className="rp-now mono">{data ? `${fmt(t)}.${Math.floor((t % 1000) / 100)}` : "--"}</span>
+        <Now clock={clock} data={data} />
       </div>
     </div>
   );
 }
+
+function Now({ clock, data }: { clock: Clock; data: ReplayData | null }) {
+  const t = useClock(clock);
+  return <span className="rp-now mono">{data ? `${fmt(t)}.${Math.floor((t % 1000) / 100)}` : "--"}</span>;
+}
+
+function StatusList({ clock, data }: { clock: Clock; data: ReplayData | null }) {
+  const t = useClock(clock);
+  const status =
+    data?.tracks.map((tr) => {
+      const s = trackStateAt(tr, t);
+      return { tr, s, pdef: s?.posture != null ? POSTURES[s.posture] : undefined };
+    }) ?? [];
+  return (
+    <div className="rp-status">
+      {status.length ? (
+        status.map(({ tr, s, pdef }) => (
+          <div key={tr.key} className="rp-st">
+            <i className="rp-dot" style={{ background: tr.color }} />
+            <span className="name" title={tr.label}>
+              {tr.label}
+              {s && s.x != null && s.y != null && (
+                <small className="mono">
+                  {(s.x / 100).toFixed(2)}, {(s.y / 100).toFixed(2)} m{s.stale ? "（最近）" : ""}
+                </small>
+              )}
+            </span>
+            {pdef ? (
+              <span className="rp-tag" style={{ background: pdef.color, opacity: s?.stale ? 0.6 : 1 }}>
+                {pdef.text}
+              </span>
+            ) : (
+              <span className={`rp-tag ${s ? "unknown" : "absent"}`}>{s ? "未知姿态" : "不在场"}</span>
+            )}
+          </div>
+        ))
+      ) : (
+        <div className="muted small">无目标</div>
+      )}
+    </div>
+  );
+}
+
+/** 事件列表很长：只有当前事件变化时才更新，而且只重渲染前后两行 */
+function MarkList({ clock, data, multiDay, onGoto }: { clock: Clock; data: ReplayData | null; multiDay: boolean; onGoto: (t: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const markIndex = useSyncExternalStore(clock.subscribe, () => (data ? lowerBound(data.marks, clock.get() + 1, (m) => m.t) - 1 : -1));
+  const goto = useRef(onGoto);
+  goto.current = onGoto;
+  const onClick = useCallback((t: number) => goto.current(t), []);
+  useEffect(() => {
+    ref.current?.querySelector(".rp-mark.current")?.scrollIntoView({ block: "nearest" });
+  }, [markIndex]);
+  return (
+    <div className="rp-marks" ref={ref}>
+      {data?.marks.length ? (
+        data.marks.map((m, i) => <MarkItem key={i} m={m} current={i === markIndex} multiDay={multiDay} onClick={onClick} />)
+      ) : (
+        <div className="muted small">无事件</div>
+      )}
+    </div>
+  );
+}
+
+const MarkItem = memo(function MarkItem({ m, current, multiDay, onClick }: { m: Mark; current: boolean; multiDay: boolean; onClick: (t: number) => void }) {
+  return (
+    <button className={`rp-mark${m.alarm ? " alarm" : ""}${current ? " current" : ""}`} onClick={() => onClick(m.t)}>
+      <i className="rp-dot" style={{ background: m.color }} />
+      <span className="mono">{multiDay ? fmt(m.t).slice(5) : fmtTime(new Date(m.t))}</span>
+      <span className="txt">{m.text}</span>
+    </button>
+  );
+});

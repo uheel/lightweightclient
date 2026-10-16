@@ -1,5 +1,5 @@
 import { assetUrl } from "@radar/core";
-import { clamp, EVENTS, fmt, fmtTime, GAP_MS, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
+import { clamp, EVENTS, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
 
 /**
  * 姿态回放的画布部分（移植自油猴脚本 room-posture-replay.user.js）：房间平面图 + 可缩放时间轴 + 播放。
@@ -325,28 +325,36 @@ export class ReplayEngine {
     const toScreen = (x: number, y: number) => [v.ox + x * v.scale, v.oy + y * v.scale] as const;
 
     for (const tr of this.data.tracks) {
-      // 尾迹
+      // 尾迹：沿插值曲线画到当前位置，越旧越淡越细
       if (trailMs > 0 && tr.points.length) {
         const pts = tr.points;
-        const i0 = lowerBound(pts, t - trailMs, (p) => p.t);
+        const t0 = t - trailMs;
+        const i0 = Math.max(0, lowerBound(pts, t0, (p) => p.t) - 1);
         const i1 = lowerBound(pts, t + 1, (p) => p.t);
         ctx.setTransform(r, 0, 0, r, 0, 0);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.strokeStyle = tr.color;
-        for (let i = i0 + 1; i < i1; i++) {
-          const a = pts[i - 1];
-          const b = pts[i];
-          if (b.t - a.t >= GAP_MS) continue;
-          const k = 1 - (t - b.t) / trailMs;
-          ctx.globalAlpha = 0.1 + 0.8 * k;
-          ctx.lineWidth = 1 + 3 * k;
-          const [ax, ay] = toScreen(a.x, a.y);
-          const [bx, by] = toScreen(b.x, b.y);
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
-          ctx.stroke();
+        for (let i = i0; i < i1; i++) {
+          if (!linked(pts[i], pts[i + 1])) continue;
+          const ta = Math.max(pts[i].t, t0);
+          const tb = Math.min(pts[i + 1].t, t);
+          if (tb <= ta) continue;
+          const n = clamp(Math.ceil((tb - ta) / 250), 1, 8);
+          let [px, py] = toScreen(...interpAt(pts, i, ta));
+          for (let k = 1; k <= n; k++) {
+            const tk = ta + ((tb - ta) * k) / n;
+            const [x, y] = toScreen(...interpAt(pts, i, tk));
+            const f = 1 - (t - tk) / trailMs;
+            ctx.globalAlpha = 0.1 + 0.8 * f;
+            ctx.lineWidth = 1 + 3 * f;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            px = x;
+            py = y;
+          }
         }
         ctx.globalAlpha = 1;
       }
@@ -357,15 +365,16 @@ export class ReplayEngine {
       const pdef = s.posture != null ? POSTURES[s.posture] : undefined;
       const fill = pdef ? pdef.color : tr.color;
       ctx.setTransform(r, 0, 0, r, 0, 0);
-      ctx.globalAlpha = s.stale ? 0.55 : 1;
+      const alpha = (s.stale ? 0.55 : 1) * s.alpha;
+      ctx.globalAlpha = alpha;
       if (pdef?.alarm) {
         const pulse = 14 + 6 * Math.abs(Math.sin(performance.now() / 250));
         ctx.beginPath();
         ctx.arc(sx, sy, pulse, 0, Math.PI * 2);
         ctx.fillStyle = fill;
-        ctx.globalAlpha = 0.25;
+        ctx.globalAlpha = 0.25 * alpha;
         ctx.fill();
-        ctx.globalAlpha = s.stale ? 0.55 : 1;
+        ctx.globalAlpha = alpha;
       }
       ctx.beginPath();
       ctx.arc(sx, sy, 9, 0, Math.PI * 2);
@@ -387,13 +396,13 @@ export class ReplayEngine {
       const w = ctx.measureText(label).width + 12;
       const lx = sx - w / 2;
       const ly = sy - 34;
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 0.92 * s.alpha;
       ctx.fillStyle = pdef ? pdef.color : "#5B6078";
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(lx, ly, w, 20, 4);
       else ctx.rect(lx, ly, w, 20);
       ctx.fill();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = s.alpha;
       ctx.fillStyle = "#fff";
       ctx.textBaseline = "middle";
       ctx.fillText(label, lx + 6, ly + 10);
@@ -863,15 +872,13 @@ export class ReplayEngine {
     const o = this.opts();
     let t = this.t + dt * (o.speed || 1);
     const d = this.data;
-    if (o.skip && d.allTs.length) {
-      const i = lowerBound(d.allTs, t);
-      const prev = i > 0 ? d.allTs[i - 1] : -Infinity;
-      const next = i < d.allTs.length ? d.allTs[i] : Infinity;
-      const anyPosture = d.tracks.some((tr) => postureAt(tr, t) != null);
-      if (!anyPosture && t - prev > GAP_MS && next - t > 3000) {
+    // 跳过无人时段：画面上一个目标都没有、下一个点还在 3 秒以后，就直接跳到它前面
+    if (o.skip && d.allTs.length && !d.tracks.some((tr) => trackStateAt(tr, t))) {
+      const next = d.allTs[lowerBound(d.allTs, t)] ?? Infinity;
+      if (next - t > 3000) {
         const nextMark = d.marks[lowerBound(d.marks, t, (m) => m.t)];
         const target = Math.min(next, nextMark ? nextMark.t : Infinity);
-        if (isFinite(target)) t = target - 500;
+        if (isFinite(target)) t = Math.max(t, target - 500);
       }
     }
     if (t >= this.q1) {
@@ -883,11 +890,12 @@ export class ReplayEngine {
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  /** 跳到上一个 / 下一个事件或告警（提前 2 秒） */
+  /** 跳到上一个 / 下一个事件或告警（提前 2 秒）；刚跳到的那个事件在 t + 2 秒处，找下一个要越过它 */
   jumpMark(dir: 1 | -1) {
     const marks = this.data?.marks ?? [];
     if (!marks.length) return;
-    const m = dir > 0 ? marks[lowerBound(marks, this.t + 1500, (x) => x.t)] : marks[lowerBound(marks, this.t - 1500, (x) => x.t) - 1];
+    const at = this.t + 2000;
+    const m = dir > 0 ? marks[lowerBound(marks, at + 100, (x) => x.t)] : marks[lowerBound(marks, at - 100, (x) => x.t) - 1];
     if (m) this.seek(m.t - 2000);
   }
 

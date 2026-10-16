@@ -5,7 +5,13 @@ import { api } from "@radar/core";
  * 任选时间段（可跨天，最多 7 天），合并轨迹点、姿态时间段和进出事件，按目标（设备 + userId）分组。
  */
 
-export const GAP_MS = 2000; // 与平台轨迹回放一致：相邻点超过 2 秒视为断开
+/**
+ * 相邻两点间隔在这个时长内视为同一段连续轨迹，回放时在两点之间按时间插值移动。
+ * 平台轨迹回放按 2 秒断开；历史轨迹点约 1 秒一个，但常有几秒的缺口，按 2 秒断开时目标会在实心 / 半透明之间闪，缺口后一下跳过去。
+ */
+export const LINK_MS = 10_000;
+/** 一段轨迹最后一个点之后，位置再保留这么久（淡出），超过且没有姿态就视为不在场 */
+export const HOLD_MS = 3000;
 export const STALE_MS = 10 * 60 * 1000; // 无轨迹但仍有姿态时，最多沿用 10 分钟内的最后位置
 export const MAX_RANGE_DAYS = 7;
 
@@ -273,7 +279,7 @@ export async function loadReplayData(
       const runs: [number, number][] = [];
       for (const p of tr.points) {
         const last = runs[runs.length - 1];
-        if (last && p.t - last[1] < GAP_MS) last[1] = p.t;
+        if (last && p.t - last[1] <= LINK_MS) last[1] = p.t;
         else runs.push([p.t, p.t]);
       }
       return {
@@ -344,27 +350,60 @@ export interface TrackState {
   x: number | null;
   y: number | null;
   stale: boolean;
+  /** 不透明度：段末保留期间逐渐淡出 */
+  alpha: number;
 }
 
-/** 某时刻的位置：2 秒内的点做线性插值；超出则沿用最近位置（标记为 stale） */
+type Pt = Track["points"][number];
+/** 两点是否属于同一段连续轨迹（之间可以插值） */
+export const linked = (a: Pt | undefined, b: Pt | undefined) => !!a && !!b && b.t > a.t && b.t - a.t <= LINK_MS;
+
+/** 点 i 处的速度（cm/ms），只用与它相连的邻点 */
+function velocity(pts: Pt[], i: number): [number, number] {
+  const p = pts[i - 1];
+  const c = pts[i];
+  const n = pts[i + 1];
+  const lp = linked(p, c);
+  const ln = linked(c, n);
+  const a = lp ? p : c;
+  const b = ln ? n : c;
+  if (a === b) return [0, 0];
+  return [(b.x - a.x) / (b.t - a.t), (b.y - a.y) / (b.t - a.t)];
+}
+
+/** 相连的两点 i、i+1 之间按时间插值（三次 Hermite，经过每个点且速度连续，转弯不会一顿一顿） */
+export function interpAt(pts: Pt[], i: number, t: number): [number, number] {
+  const a = pts[i];
+  const b = pts[i + 1];
+  const h = b.t - a.t;
+  const s = clamp((t - a.t) / h, 0, 1);
+  const s2 = s * s;
+  const s3 = s2 * s;
+  const h00 = 2 * s3 - 3 * s2 + 1;
+  const h10 = s3 - 2 * s2 + s;
+  const h01 = -2 * s3 + 3 * s2;
+  const h11 = s3 - s2;
+  const [vax, vay] = velocity(pts, i);
+  const [vbx, vby] = velocity(pts, i + 1);
+  return [h00 * a.x + h10 * h * vax + h01 * b.x + h11 * h * vbx, h00 * a.y + h10 * h * vay + h01 * b.y + h11 * h * vby];
+}
+
+/**
+ * 某时刻的位置：相邻两点间隔在 LINK_MS 以内时按时间插值；
+ * 段末最后一个点之后保留 HOLD_MS 并淡出；再往后有姿态时沿用最近位置（标记为 stale），否则视为不在场。
+ */
 export function trackStateAt(tr: Track, t: number): TrackState | null {
   const pts = tr.points;
   const posture = postureAt(tr, t);
   const i = lowerBound(pts, t + 1, (p) => p.t) - 1;
-  if (i < 0) return posture ? { posture, x: null, y: null, stale: true } : null;
+  if (i < 0) return posture ? { posture, x: null, y: null, stale: true, alpha: 1 } : null;
   const a = pts[i];
+  if (linked(a, pts[i + 1])) {
+    const [x, y] = interpAt(pts, i, t);
+    return { posture, x, y, stale: false, alpha: 1 };
+  }
   const age = t - a.t;
-  if (age > GAP_MS) {
-    if (posture && age < STALE_MS) return { posture, x: a.x, y: a.y, stale: true };
-    return posture ? { posture, x: null, y: null, stale: true } : null;
-  }
-  let x = a.x;
-  let y = a.y;
-  const b = pts[i + 1];
-  if (b && b.t > a.t && b.t - a.t < GAP_MS) {
-    const k = (t - a.t) / (b.t - a.t);
-    x = a.x + (b.x - a.x) * k;
-    y = a.y + (b.y - a.y) * k;
-  }
-  return { posture, x, y, stale: false };
+  if (age <= HOLD_MS) return { posture, x: a.x, y: a.y, stale: false, alpha: posture ? 1 : 1 - (0.8 * age) / HOLD_MS };
+  if (posture && age < STALE_MS) return { posture, x: a.x, y: a.y, stale: true, alpha: 1 };
+  return posture ? { posture, x: null, y: null, stale: true, alpha: 1 } : null;
 }
