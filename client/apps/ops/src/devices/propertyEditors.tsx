@@ -3,6 +3,8 @@ import { Button, Checkbox, InputNumber, Select, Switch, TimePicker, Tooltip } fr
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
+import ZoneCanvas, { limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
+import { switchMount } from "./mountSwitch";
 
 /**
  * 数组 / JSON 类属性的结构化编辑器：把 [24,90,8,50] 这类数组拆成运维看得懂的一项项设置。
@@ -14,9 +16,25 @@ export interface StructuredProps {
   onChange: (v: unknown) => void;
   onError: (err?: string) => void;
   disabled: boolean;
-  /** 当前所有属性的值（区域预览要用安装配置） */
+  /** 当前所有属性的值（区域画布要用安装配置） */
   ctx: Record<string, unknown>;
   sn: string;
+  /** 改另一项属性（区域画布上拖监测范围时改安装配置） */
+  setOther?: (name: string, v: unknown) => void;
+  /** 改房间布置里的朝向 / 雷达位置（顶装、侧装互换时用），下发成功后写回房间布置 */
+  setPlan?: (p: Partial<PlanCtx>) => void;
+}
+
+/** ctx 里放房间布置信息的键（不是设备属性），见 PropertyTab 的 plan */
+export const PLAN_CTX = "__plan";
+export interface PlanCtx {
+  /** 房间布置里这台雷达的朝向（1 上 2 右 3 下 4 左） */
+  facing?: number;
+  /** 房间外框（cm）和雷达在房间里的位置 */
+  room?: { width: number; height: number; radar: { x: number; y: number } };
+  deviceType?: number;
+  /** 这次改了顶装 / 侧装：给用户的提示 */
+  mountNotes?: string[];
 }
 
 export interface Structured {
@@ -398,11 +416,44 @@ const QL_RADAR_CONFIG = tuple({
     { label: "安装方式", parts: [0] },
     { label: "安装高度", desc: "离地面的高度", parts: [1, "米"] },
     { label: "工作模式", parts: [2] },
-    { label: "左右范围", desc: "以雷达为中心，左负右正", parts: ["从", 3, "到", 4, "米"] },
-    { label: "前后范围", desc: "以雷达为中心，近负远正", parts: ["从", 5, "到", 6, "米"] },
   ],
-  check: (v) => (v[3] >= v[4] ? "X 左要小于 X 右" : v[5] >= v[6] ? "Y 下要小于 Y 上" : undefined),
+  check: (v) => (v[3] >= v[4] || v[5] >= v[6] ? "监测范围不对，请在下面的区域画布里重新拖一下" : undefined),
+  note: "监测范围在下面的区域画布里拖虚线框调整。",
 });
+
+/** 确认框里的改动说明：监测范围只说大小，不出现坐标 */
+const QL_RADAR_CONFIG_FRIENDLY: Structured = {
+  ...QL_RADAR_CONFIG,
+  // 改安装方式（顶装 / 侧装）时，区域在房间里的位置不变，雷达挪到合适的位置，见 mountSwitch
+  Editor: (props) => {
+    const { value, onChange, ctx, setOther, setPlan } = props;
+    const Base = QL_RADAR_CONFIG.Editor;
+    const change = (v: unknown) => {
+      const before = toArray(value)?.map((x) => num(x, 0));
+      const after = toArray(v)?.map((x) => num(x, 0));
+      if (before && after && before.length >= 11 && after.length >= 11 && after[0] !== before[0] && setOther && setPlan) {
+        const plan = (ctx[PLAN_CTX] ?? {}) as PlanCtx;
+        const res = switchMount({ config: before, area: writeAreas(readAreas(ctx.QL_radar_area)), facing: plan.facing ?? 1, room: plan.room, to: after[0]! });
+        onChange(res.config);
+        setOther("QL_radar_area", res.area);
+        setPlan({ facing: res.facing, room: plan.room && res.radar ? { ...plan.room, radar: res.radar } : plan.room, mountNotes: res.notes });
+        return;
+      }
+      onChange(v);
+    };
+    return <Base {...props} onChange={change} />;
+  },
+  diff: (a, b) => {
+    const base = QL_RADAR_CONFIG.diff?.(a, b).filter((l) => !l.startsWith("探测范围")) ?? [];
+    const ra = toArray(a);
+    const rb = toArray(b);
+    const x = ra && ra.length >= 10 ? QL_RADAR_CONFIG_DECODE(ra) : undefined;
+    const y = rb && rb.length >= 10 ? QL_RADAR_CONFIG_DECODE(rb) : undefined;
+    const size = (r: { x0: number; x1: number; y0: number; y1: number }) => `${m1(r.x1 - r.x0)} × ${m1(r.y1 - r.y0)} 米`;
+    if (y && (!x || JSON.stringify(x) !== JSON.stringify(y))) base.push(`监测范围：${x ? size(x) : "—"} → ${size(y)}${x && size(x) === size(y) ? "（位置变了）" : ""}`);
+    return base;
+  },
+};
 
 // ---------- 雷达区域 ----------
 
@@ -455,6 +506,19 @@ function checkAreas(list: Area[]) {
 
 const m1 = (d: number) => (d / 10).toFixed(1);
 
+/** 区域画布上能加的区域：颜色和新加时的大小（平面图上 宽 × 高，分米） */
+const CANVAS_TYPES: ZoneType[] = [
+  { value: 5, label: "监护床", color: AREA_COLOR[5]!, size: [9, 20] },
+  { value: 4, label: "门", color: AREA_COLOR[4]!, size: [9, 1] },
+  { value: 6, label: "感应区", color: AREA_COLOR[6]!, size: [10, 10] },
+  { value: 2, label: "普通床", color: AREA_COLOR[2]!, size: [9, 20] },
+  { value: 7, label: "家具", color: AREA_COLOR[7]!, size: [8, 5] },
+  { value: 3, label: "干扰区", color: AREA_COLOR[3]!, size: [10, 10] },
+];
+
+const sizeText = (a: Area) => `${m1(a.x1 - a.x0)} × ${m1(a.y1 - a.y0)} 米`;
+const inside = (a: Area, b: DmRect) => a.x0 >= b.x0 && a.x1 <= b.x1 && a.y0 >= b.y0 && a.y1 <= b.y1;
+
 const QL_RADAR_AREA: Structured = {
   wide: true,
   summary: (v) => {
@@ -464,107 +528,62 @@ const QL_RADAR_AREA: Structured = {
   diff: (a, b) => {
     const x = readAreas(a);
     const y = readAreas(b);
-    const key = (r: Area) => `${areaName(r.type)} X ${m1(r.x0)}～${m1(r.x1)} Y ${m1(r.y0)}～${m1(r.y1)} 米`;
     const out: string[] = [];
     for (const r of y) {
       const o = x.find((q) => q.id === r.id);
-      if (!o) out.push(`新增区域 ${r.id}：${key(r)}`);
-      else if (key(o) !== key(r)) out.push(`区域 ${r.id}：${key(o)} → ${key(r)}`);
+      if (!o) out.push(`新增 ${r.id} ${areaName(r.type)}（${sizeText(r)}）`);
+      else if (o.type !== r.type) out.push(`${r.id}：${areaName(o.type)} → ${areaName(r.type)}`);
+      else if (JSON.stringify(o) !== JSON.stringify(r)) out.push(`${r.id} ${areaName(r.type)}：${sizeText(o) === sizeText(r) ? "相对雷达的位置变了" : `${sizeText(o)} → ${sizeText(r)}`}`);
     }
-    for (const o of x) if (!y.some((r) => r.id === o.id)) out.push(`删除区域 ${o.id}（${areaName(o.type)}）`);
+    for (const o of x) if (!y.some((r) => r.id === o.id)) out.push(`删除 ${o.id} ${areaName(o.type)}`);
     return out;
   },
-  Editor: ({ value, onChange, onError, disabled, ctx }) => {
+  Editor: ({ value, onChange, onError, disabled, ctx, setOther }) => {
     const list = readAreas(value);
+    const plan = (ctx[PLAN_CTX] ?? {}) as PlanCtx;
+    const cfgRaw = toArray(ctx.QL_radar_config);
+    const cfg = cfgRaw && cfgRaw.length >= 11 ? cfgRaw.map((x) => num(x, 0)) : undefined;
+    const installType = cfg?.[0] ?? 0;
+    const mode = cfg?.[10] ?? 15;
+    const facing = plan.facing && plan.facing >= 1 && plan.facing <= 4 ? plan.facing : 1;
+    const bound = cfg ? QL_RADAR_CONFIG_DECODE(cfg) : undefined;
     const update = (next: Area[]) => {
       onError(checkAreas(next));
       onChange(writeAreas(next));
     };
-    const patch = (i: number, p: Partial<Area>) => update(list.map((a, j) => (j === i ? { ...a, ...p } : a)));
-    const add = () => {
-      let id = 0;
-      while (list.some((a) => a.id === id)) id++;
-      update([...list, { id, type: 6, x0: -5, x1: 5, y0: -5, y1: 5 }]);
+    const setBound = (b: DmRect) => {
+      if (!cfg || !setOther) return;
+      const n = [...cfg];
+      [n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9]] = [b.x0, b.y0, b.x1, b.y0, b.x0, b.y1, b.x1, b.y1];
+      setOther("QL_radar_config", n);
     };
-    const err = checkAreas(list);
-    const numIn = (v: number, set: (x: number) => void) => (
-      <span className="pp-num">
-        <InputNumber size="small" value={+m1(v)} min={-12.6} max={12.6} step={0.1} precision={1} controls={false} disabled={disabled} onChange={(x) => x !== null && set(Math.round(Number(x) * 10))} />
-      </span>
-    );
+    const outside = bound ? list.filter((a) => a.type !== 3 && !inside(a, bound)) : [];
+    const err = checkAreas(list) ?? (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
     return (
       <div className="st st-area">
-        <RadarPreview config={ctx.QL_radar_config} areas={list} />
-        <div className="st-area-list">
-          {list.map((a, i) => (
-            <div key={i} className="st-area-item">
-              <div className="st-area-name">
-                <i style={{ background: AREA_COLOR[a.type] ?? "#999" }} />
-                <Select size="small" variant="borderless" value={a.type} disabled={disabled} options={withUnknown(AREA_TYPES, a.type)} onChange={(t: number) => patch(i, { type: t })} popupMatchSelectWidth={false} />
-                <span className="pp-hint">编号</span>
-                <span className="pp-num">
-                  <InputNumber size="small" value={a.id} min={0} max={15} precision={0} controls={false} disabled={disabled} onChange={(x) => x !== null && patch(i, { id: Number(x) })} />
-                </span>
-                <Button size="small" type="text" icon={<DeleteOutlined />} disabled={disabled} onClick={() => update(list.filter((_, j) => j !== i))} title="删除这个区域" className="st-del" />
-              </div>
-              <div className="pp-sentence">
-                <span>左右从</span>
-                {numIn(a.x0, (x) => patch(i, { x0: x }))}
-                <span>到</span>
-                {numIn(a.x1, (x) => patch(i, { x1: x }))}
-                <span>米，前后从</span>
-                {numIn(a.y0, (y) => patch(i, { y0: y }))}
-                <span>到</span>
-                {numIn(a.y1, (y) => patch(i, { y1: y }))}
-                <span>米</span>
-              </div>
-            </div>
-          ))}
-          {!list.length && <p className="pp-note">还没有划分区域。</p>}
-          <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={disabled || list.length >= 16} onClick={add} style={{ alignSelf: "flex-start" }}>
-            添加区域
-          </Button>
-          <p className="pp-note">坐标以雷达为中心，单位米。场景规则里引用区域用的就是这里的编号。</p>
-          {err && <small className="prop-err">{err}</small>}
-        </div>
+        <ZoneCanvas
+          installType={installType}
+          facing={facing}
+          bound={bound}
+          limit={limitOf(installType, mode)}
+          zones={list}
+          room={plan.room}
+          types={CANVAS_TYPES}
+          disabled={disabled}
+          onZones={update}
+          onBound={setOther ? setBound : undefined}
+        />
+        {plan.mountNotes && plan.mountNotes.length > 0 && (
+          <p className="pp-note warn">改了安装方式：区域在房间里的位置不变，{plan.mountNotes.join("；")}。请确认高度和监测范围后再下发。</p>
+        )}
+        <p className="pp-note">
+          {plan.facing ? "按房间平面图的方向画，粗框是房间的墙。" : "这台雷达不在房间布置里，按默认朝向画。"}区域的编号就是场景规则里引用的区域 ID。
+        </p>
+        {err && <small className="prop-err">{err}</small>}
       </div>
     );
   },
 };
-
-/** 俯视示意：探测范围 + 区域，雷达在原点 */
-function RadarPreview({ config, areas }: { config: unknown; areas: Area[] }) {
-  const raw = toArray(config);
-  const cfg = raw && raw.length >= 10 ? QL_RADAR_CONFIG_DECODE(raw) : undefined;
-  const boxes = [...areas.map((a) => [a.x0, a.x1, a.y0, a.y1]), ...(cfg ? [[cfg.x0, cfg.x1, cfg.y0, cfg.y1]] : [])];
-  if (!boxes.length) return null;
-  const minX = Math.min(0, ...boxes.map((b) => b[0])) - 3;
-  const maxX = Math.max(0, ...boxes.map((b) => b[1])) + 3;
-  const minY = Math.min(0, ...boxes.map((b) => b[2])) - 3;
-  const maxY = Math.max(0, ...boxes.map((b) => b[3])) + 3;
-  const w = maxX - minX;
-  const h = maxY - minY;
-  // SVG 的 y 向下，这里翻转成 Y 向上
-  const X = (x: number) => x - minX;
-  const Y = (y: number) => maxY - y;
-  return (
-    <svg className="st-preview" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="区域示意图">
-      {cfg && <rect x={X(cfg.x0)} y={Y(cfg.y1)} width={cfg.x1 - cfg.x0} height={cfg.y1 - cfg.y0} className="st-pv-bound" />}
-      {areas.map((a, i) => (
-        <g key={i}>
-          <rect x={X(a.x0)} y={Y(a.y1)} width={a.x1 - a.x0} height={a.y1 - a.y0} fill={AREA_COLOR[a.type] ?? "#999"} fillOpacity={0.25} stroke={AREA_COLOR[a.type] ?? "#999"} strokeWidth={0.4} />
-          <text x={X(a.x0) + 0.8} y={Y(a.y1) + 2.6} className="st-pv-text">
-            {a.id} {areaName(a.type)}
-          </text>
-        </g>
-      ))}
-      <circle cx={X(0)} cy={Y(0)} r={1.2} className="st-pv-radar" />
-      <text x={X(0)} y={Y(0) + 4.2} textAnchor="middle" className="st-pv-text">
-        雷达
-      </text>
-    </svg>
-  );
-}
 
 function QL_RADAR_CONFIG_DECODE(raw: unknown[]) {
   const n = raw.map((x) => num(x, 0));
@@ -1022,7 +1041,7 @@ export function structuredFor(p: PropertyDef, deviceTypeCode?: number): Structur
     case "QL_radar_para_fall":
       return QL_RADAR_PARA_FALL;
     case "QL_radar_config":
-      return QL_RADAR_CONFIG;
+      return QL_RADAR_CONFIG_FRIENDLY;
     case "QL_radar_area":
       return QL_RADAR_AREA;
     case "offlsr_keywords":

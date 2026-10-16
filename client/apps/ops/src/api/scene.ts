@@ -7,7 +7,7 @@ export interface SceneCondition {
   property?: string;
   /** REAL 直接比较 target；COUNT 时 countOperator/countTarget 是取值比较，operator/target 是次数门槛 */
   aggregation?: string;
-  /** 时间窗口，秒 */
+  /** 统计最近几条记录 */
   range?: string;
   operator?: string;
   target?: string;

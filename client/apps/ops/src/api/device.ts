@@ -121,6 +121,8 @@ interface RoomElement {
 interface RoomDetail {
   roomId: string;
   roomName: string;
+  /** 房间外框，cm */
+  background?: { width?: number; height?: number };
   buildingName?: string;
   floorName?: string;
   elements?: RoomElement[];
@@ -129,6 +131,8 @@ interface RoomDetail {
 export interface RoomInfo {
   roomName: string;
   place: string;
+  /** 房间外框尺寸，cm */
+  size?: { width: number; height: number };
   /** sn → 安装配置 */
   configs: Map<string, QingLanConfig>;
 }
@@ -147,6 +151,7 @@ export async function getRoomInfo(roomId: string): Promise<RoomInfo> {
   return {
     roomName: d?.roomName ?? "",
     place: [d?.buildingName, d?.floorName, d?.roomName].filter(Boolean).join(" / "),
+    size: d?.background?.width && d.background.height ? { width: d.background.width, height: d.background.height } : undefined,
     configs,
   };
 }

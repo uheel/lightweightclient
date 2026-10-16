@@ -14,7 +14,8 @@ import {
   type PropertySchema,
   type StoredProperty,
 } from "../api/device";
-import { structuredFor } from "./propertyEditors";
+import { structuredFor, PLAN_CTX, type PlanCtx } from "./propertyEditors";
+import { syncLayoutFromDevice } from "../rooms/syncLayout";
 import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
 
 /**
@@ -24,6 +25,9 @@ import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
  */
 
 const TIMEOUT_MS = 30_000;
+/** 设备应答"正忙"：刚应用完上一条设置时会拒绝新的设置 */
+const BUSY = 103;
+const BUSY_RETRY_MS = 10_000;
 const UNGROUPED = "__ungrouped";
 const GROUP_KEY = "ops:prop-group";
 const SECRET = /pass|pwd|token/i;
@@ -103,7 +107,22 @@ function format(p: PropertyDef, v: unknown, typeCode?: number): string {
   return String(v) + (p.unit ? ` ${p.unit}` : "");
 }
 
-export default function PropertyTab({ sn, online }: { sn: string; online: boolean }) {
+export default function PropertyTab({
+  sn,
+  online,
+  plan,
+  roomId,
+  onLayoutSynced,
+}: {
+  sn: string;
+  online: boolean;
+  /** 设备所在房间：下发安装配置 / 区域后写回这个房间的布置 */
+  roomId?: string;
+  /** 房间布置里这台雷达的朝向和房间外框，区域画布按房间平面图的方向画 */
+  plan?: Omit<PlanCtx, "deviceType">;
+  /** 写回房间布置之后（让外面重新取房间信息） */
+  onLayoutSynced?: () => void;
+}) {
   const { message, modal, notification } = App.useApp();
   const [schema, setSchema] = useState<PropertySchema>();
   const [loadError, setLoadError] = useState<string>();
@@ -122,6 +141,13 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   const [rev, setRev] = useState(0);
   const [rtState, setRtState] = useState<RealtimeState>(realtime.state);
   const pending = useRef<Pending>(undefined);
+  /** 这次下发已经因为设备忙（code 103）自动重发过一次 */
+  const retried = useRef(false);
+  /** 还没下发的房间布置改动（顶装 / 侧装互换后的朝向、雷达位置） */
+  const [planEdit, setPlanEdit] = useState<Partial<PlanCtx>>();
+  const planEditRef = useRef(planEdit);
+  planEditRef.current = planEdit;
+  const setPlan = (x: Partial<PlanCtx>) => setPlanEdit((cur) => ({ ...cur, ...x }));
 
   useEffect(() => realtime.onState((s) => setRtState(s)), []);
 
@@ -176,9 +202,10 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
   const ctx = useMemo(() => {
     const c: Record<string, unknown> = {};
     for (const p of schema?.properties ?? []) c[p.propertyName] = p.propertyName in edits ? edits[p.propertyName] : base(p.propertyName);
+    c[PLAN_CTX] = { ...plan, ...planEdit, deviceType: schema?.deviceTypeCode } satisfies PlanCtx;
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, stored, device, edits]);
+  }, [schema, stored, device, edits, plan, planEdit]);
 
   const visible = (p: PropertyDef) => visibleBy(p.fieldProps?.visibleExpression, ctx);
   const changed = (schema?.properties ?? []).filter((p) => !readOnly(p) && !p.isBuiltIn && visible(p) && isModified(p.propertyName));
@@ -271,9 +298,32 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
       for (const n of p.names) written[n] = editsRef.current[n];
       applyDevice(written, "write");
       message.success("设备已接收下发的属性");
+      const pe = planEditRef.current;
+      setPlanEdit(undefined);
+      if (roomId && ("QL_radar_area" in written || "QL_radar_config" in written)) {
+        const mount = pe?.facing !== undefined ? { facing: pe.facing, radar: pe.room?.radar } : undefined;
+        syncLayoutFromDevice(roomId, sn, { config: written.QL_radar_config, area: written.QL_radar_area }, mount).then(
+          (res) => {
+            if (res.changed) {
+              message.success("已同步到房间布置，平台的房间图也会跟着变");
+              onLayoutSynced?.();
+            } else if (res.note) notification.warning({ message: "房间布置没有同步", description: res.note, duration: 10 });
+          },
+          (e) => notification.error({ message: "同步房间布置失败", description: e instanceof Error ? e.message : String(e), duration: 10 }),
+        );
+      }
+    } else if (r.code === BUSY && !retried.current) {
+      // 设备刚应用完上一条设置的几秒内会拒绝新的设置（2026-10-17 在 13 型上实测），隔一会儿重发就行
+      retried.current = true;
+      markDelivery(p.names, { status: "pending" });
+      message.info(`设备还在应用上一条设置，${BUSY_RETRY_MS / 1000} 秒后自动重发`);
+      const defs = (schema?.properties ?? []).filter((d) => p.names.includes(d.propertyName));
+      window.setTimeout(() => doWriteRef.current(defs, false, true), BUSY_RETRY_MS);
+      return;
     } else {
-      markDelivery(p.names, { status: "error", at: now, error: `${r.message ?? "下发失败"}（code ${r.code}）` });
-      notification.error({ message: "下发设备属性失败", description: `${r.message ?? ""}（code ${r.code}）`, duration: 10 });
+      const busy = r.code === BUSY;
+      markDelivery(p.names, { status: "error", at: now, error: busy ? "设备一直在忙，没有接受（code 103），请过一会儿再下发" : `${r.message ?? "下发失败"}（code ${r.code}）` });
+      notification.error({ message: "下发设备属性失败", description: busy ? "设备一直在忙，没有接受这次设置（code 103）。请过一会儿再下发。" : `${r.message ?? ""}（code ${r.code}）`, duration: 10 });
     }
     refreshStored();
   }
@@ -405,7 +455,8 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
     });
   }
 
-  async function doWrite(list: PropertyDef[], saveOnly: boolean) {
+  async function doWrite(list: PropertyDef[], saveOnly: boolean, isRetry = false) {
+    if (!isRetry) retried.current = false;
     const names = list.map((p) => p.propertyName);
     const props = names.map((n) => ({ propertyName: n, value: valueOf(n) }));
     const p = saveOnly ? undefined : begin("set-property", names);
@@ -449,7 +500,11 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
     }
   }
 
+  const doWriteRef = useRef(doWrite);
+  doWriteRef.current = doWrite;
+
   function undo() {
+    setPlanEdit(undefined);
     setEdits({});
     setErrors({});
     setRev((r) => r + 1);
@@ -574,6 +629,8 @@ export default function PropertyTab({ sn, online }: { sn: string; online: boolea
                     sn={sn}
                     disabled={busy === "set-property"}
                     onChange={(v) => setValue(p.propertyName, v)}
+                    setOther={setValue}
+                    setPlan={setPlan}
                     onError={(err) => setError(p.propertyName, err)}
                   />
                 ))}
@@ -638,6 +695,8 @@ function SettingRow({
   disabled,
   onChange,
   onError,
+  setOther,
+  setPlan,
 }: {
   p: PropertyDef;
   value: unknown;
@@ -654,6 +713,8 @@ function SettingRow({
   disabled: boolean;
   onChange: (v: unknown) => void;
   onError: (err?: string) => void;
+  setOther?: (name: string, v: unknown) => void;
+  setPlan?: (p: Partial<PlanCtx>) => void;
 }) {
   const st = structuredFor(p, typeCode);
   // 设备上的值和读取前的平台记录不一样：有人在别处改过，或者上次下发没生效
@@ -685,7 +746,7 @@ function SettingRow({
           {head}
           {status}
         </div>
-        <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} />
+        <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} setOther={setOther} setPlan={setPlan} />
       </div>
     );
 
@@ -694,7 +755,7 @@ function SettingRow({
       {head}
       <div className="pp-control">
         {st ? (
-          <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} />
+          <st.Editor key={rev} value={value} onChange={onChange} onError={onError} disabled={disabled || ro} ctx={ctx} sn={sn} setOther={setOther} setPlan={setPlan} />
         ) : (
           <Editor key={`${p.propertyName}:${rev}`} p={p} value={value} disabled={disabled} onChange={onChange} onError={onError} />
         )}

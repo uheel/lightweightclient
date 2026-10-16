@@ -468,7 +468,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `POST /api/device/test-{类型}-scene-alert` `{sn, sceneId}` | 测试场景上报 |
 | `PUT /api/device-scene/device/{deviceId}/disable` `{disable}` | 路径里是**设备 id**（传场景 id 报"设备不存在"），作用于整台设备，不是单个场景 |
 
-平台场景对象（camelCase）：`{id, sceneName, isDisabled, conditionType:"conditions"|"timeout", conditionName, relation, maskTime, conditions:[{property, aggregation, range(秒), operator, target, countOperator, countTarget}], actions:[{type, name, alertTypeId, audioFileName…}], interExpression, exitExpression, timeout}`，下发给设备时转成 `scene_config`（snake_case）。
+平台场景对象（camelCase）：`{id, sceneName, isDisabled, conditionType:"conditions"|"timeout", conditionName, relation, maskTime, conditions:[{property, aggregation, range, operator, target, countOperator, countTarget}]（COUNT 时 range = 最近几条记录、operator/target = 条数、countOperator/countTarget = 取值，见下方"区域编号"）, actions:[{type, name, alertTypeId, audioFileName…}], interExpression, exitExpression, timeout}`，下发给设备时转成 `scene_config`（snake_case）。
 
 ### 保存场景（2026-10-15 在坐起测试 …627d 上实测）
 
@@ -484,9 +484,40 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 ### 区域编号
 
-- 条件里的区域值 = 户型里区域的 `index`（从 0 开始）。坐起测试（…627d）实测下发 `QL_radar_para_area: [[0,5,…],[1,4,…]]`，监护床是 0
+- 6 型：条件里的区域值 = 区域配置里的 `index`（从 0 开始）。坐起测试（…627d）实测下发 `QL_radar_para_area: [[0,5,…],[1,4,…]]`，监护床是 0
 - 模板里三种情况：用占位符 `{{area}}`（6 离床告警 / 马桶久坐 / 久坐提醒，13 久坐提醒），平台**不会自动替换**；直接写死编号（6 过度睡眠 / 入床提醒 / 淋浴过久 / 呼吸暂停 / 延迟离床报警，13 离床告警 / 离床延迟报警，15 离床告警 / 马桶久坐）；不涉及区域
-- 已见可疑配置：藕塘社区 13 型设备监护床 index 是 0、门是 1，离床告警却写 `QL_event_area == 1`（13 型编号规则是否同样从 0 开始未核实）
+
+**`{{area}}` 就是区域 ID**（2026-10-17 与用户确认，依据用户自己编写的《(自动化场景设置)设备场景配置模板条件说明》，不是厂家协议；已在 13 型真机上实测，见下）
+
+- 离床告警填监护床的区域 ID，区域滞留 / 久坐填对应区域的 ID。区域 ID = 区域配置里的 `index`，从 0 开始，户型设计里能看到（文档里的例子：监护床 0，所以 `{{area}}` 替换成 0）
+- **COUNT 条件的字段名容易看反**：`range` = 统计最近几条记录；`operator / target` = **有几条**；`countOperator / countTarget` = **每条的值**。例如 13 型离床模板 `{range:5, operator:">=", target:"1", countOperator:"==", countTarget:"{{area}}"}` 的意思是"最近 5 条事件区域 ID 里，至少 1 条等于监护床 ID"。`{{area}}` 在 `countTarget` 里，就是区域 ID 本身。运维端 `api/scene.ts` 一直按这个理解，没问题
+- 文档里的离床告警 = 人员事件 `QL_target_event` 值为 4（离开区域）+ 事件区域 ID `QL_event_area` 值为监护床 ID，两条同时满足
+- 场景条件里各属性的取值（文档和《场景告警条件配置说明.xlsx》）：人员姿态 1～11（同上面的姿态枚举）；人员事件 0 无、1 进入房间、2 离开房间、3 进入区域、4 离开区域、5 进入监护状态、6 退出监护状态；人员数量 1～8；事件区域 ID 0～99；心率事件 / 呼吸事件为过去 1 分钟的状态（心率 0 正常、1 过低、2 过高、3 未定义；呼吸 0 正常、1 过低、2 过高、3 暂停）；入睡状态 0 未定义、1 浅睡、2 深睡、3 清醒；蓝牙外设 1 = 触发；音量 1000～50000
+
+**13 型设备核对（2026-10-17 用藕塘社区 7 天历史只读核对；藕塘只有 6 型和 13 型）**
+
+- 设备上报的区域号就是配置里的 index：13房52床（…3720）10-16 凌晨，"区域 0（监护床）"的进出事件和"在床"姿态逐次对得上（01:10:38 起身 → 01:11:09 离开区域 0 → 01:11:12 经区域 1（门）离开房间 → 01:11:24 经门回来 → 01:11:27 姿态回到在床 → 01:11:28 进入区域 0）。轨迹帧里 255 表示还没进过区域
+- **藕塘 38 台 13 型的离床告警配错了区域**（新 13 型设备实测已确认区域 ID 规则，见下）：条件是"最近 5 条人员事件至少 1 条 = 4、最近 5 条区域 ID 至少 1 条 = **1**、最近 5 条心率和呼吸至少 3 条 = 0"，而这些设备的监护床是 0、门是 1。也就是"离开区域"和"门"同时出现在最近几条记录里就告警，不是"离开监护床"。7 天 100 次离床告警里，46 次前面几条事件里有门，36 次前 3 分钟里只有监护床事件（"最近 5 条记录"可能跨得更久，历史数据定不了），18 次查不到事件
+- 13 型原始数据是 `post-hex` 帧（`AAAA` 开头，帧类型 0x81 / 0x82 / 0x68 / 0x78 / 0xE8 / 0xF8），格式没有文档，没有解码
+- **平台内置的 13 型"离床告警"模板把区域 ID 写死成 1**（`QL_event_area` 最近 5 条至少 1 条 == 1），没有用 `{{area}}`。监护床通常是 0、门是 1，所以照模板套用就会变成看门。藕塘的配置应该就是这么来的（藕塘在模板基础上另加了心率、呼吸为 0 两条）
+- 下发场景时通信日志里的报文是 `"relation":"u0026"`、`"operator":"u003E="`（`&`、`>=` 的转义丢了反斜杠）。藕塘能正常告警的设备收到的也是这样，设备应答 `code 0`，暂不当作问题
+
+**新 13 型设备实测（2026-10-17，李虎机构 ultra跌倒 …C50D，固件出厂状态）**
+
+- 13 型走 `get-property / set-property / set-tact` 这套报文（不是 6 型的 `IOT.*`）
+- 出厂配置：`QL_radar_config [0,28,-30,-20,30,-20,-30,20,30,20,7]`（顶装 2.8 m、跌倒监测）、`QL_radar_area []`、`QL_falldown_config [6,0,0,0,10]`、`QL_reporting_mode [1]`
+- **老版下发 `POST /api/device-config/qinglan-install` 对 13 型无效**：平台发的是 `IOT.setproperty {QL_radar_para_config, QL_radar_para_area}`，设备不应答，读回还是出厂值。13 型只能用属性写入（`POST /api/device-property/write`），平台会转成 `set-property {QL_radar_config, QL_radar_area}`
+- **`code 103` = 设备正忙，这次设置没被接受**（2026-10-17 重新实测，纠正之前"左右范围固定 ±3 m"的错误结论）：设备刚应用完一条设置的几秒内，再下发会回 103，读回还是旧值。隔约 15 秒重发就会成功（`code 0`）。实测侧装 ±1.5、±2、±2.5、±3 m，−3…+2 m（不对称），以及深度 3.5 m 都能设置，**左右范围可以调**。运维端收到 103 会在 10 秒后自动重发一次
+- **改安装方式（顶装 ↔ 侧装）时第一次下发一定回 103**（2026-10-17 两个方向各测一次，前一次写入在 10 分钟前，不是"正忙"）。10 秒后原样重发就是 `code 0`，读回和下发的一致。第一次从出厂配置（顶装）改成侧装时那次 103 也是这个情况
+- **离床场景实测通过（`{{area}}` = 监护床 ID 0）**：场景用平台 13 型离床模板，只把区域 ID 改成 0（最近 5 条人员事件至少 1 条 = 4，最近 5 条区域 ID 至少 1 条 = 0）。房间 4×4 m，侧装 1.6 m，监护床在雷达正下方（ID 0），门在左下角（ID 1）。测试人只在床和床边活动，从没走到门那里（离墙最远 2.5 m，门在 3.9 m）：
+  - 设备逐条上报的 `rangeIndex` 只出现过 0 和 255（255 = 不在任何区域），从没出现 1
+  - 离开区域 0 三次（00:53:55、00:54:07、00:55:13），告警两次（00:53:56、00:55:15），都在离开后 1～2 秒。中间那次没告警，是因为 `mask_time 1`（1 分钟内不重复告警）
+  - 离开要走出床边一段距离才算：床宽 ±45 cm，人在 x = 80 时还算在区域 0 里，到 110～200 才报"离开区域"。和说明文档里"离开床区域 40 cm 后告警"一致
+  - 设备在场景触发时上报 `post [[100, 时间戳, 场景 id]]`
+- 13 型逐条位置记录 `GET /api/device/human-position/pages?filter[sn]=` 里带 `rangeIndex`、`eventType`、`posture`，坐标是相对雷达的 cm（x 横向、y 离墙的深度）。可以直接拿来看人在哪个区域
+- 同一时段 `event-timeline` 对这台设备返回空。可能是因为房间设计里的设备没有 `rangeId`（坐起测试那台有），原因没查
+- 测试期间设备两次上报 `post [[0, 时间戳, "FHK004-51B", 1, "5"]]`，而且 seq 从 0 重新开始，看起来是设备重启了（00:52:12、00:53:07）
+- 测试房间"13型离床测试"、共用户型"通用"留在李虎机构，设备 …C50D 保持这套配置
 
 ### 户型区域字典（`ranges[]`）
 
@@ -494,6 +525,109 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `spaceType`（空间区域类型，干扰区和门没有）、`spaceTypeOut`（门的"出区域类型"）：字典 `GET /sapi/code/options?codeType=ROOM_SPACE_TYPE`，51 床、52 沙发、53 过道、54 会客、55 餐厅、56 马桶、57 淋浴、58 洗漱、59 更衣、60 阅读
 - 雷达元素的 `rangeType`（安装区域）：字典 `RADAR_INSTALL_AREA`，1 卧室、2 客厅、3 卫生间、4 厨房、5 其他
 - 下发给设备的 `QL_radar_para_area` 只带 `[index, type, 坐标]`，`spaceType` 不下发，只在平台侧使用
+
+## 房间户型与雷达区域下发（2026-10-16 读平台前端代码 + 在李虎机构实测）
+
+客户端的简化方案见 [room-radar-simplification.md](room-radar-simplification.md)。
+
+### 两套界面：老版和 v3
+
+- 由机构设置 `GET /api/settings/org` 决定：`enableV3`，没有这个字段时看 `enableV2RoomTypeDesign || enableV2PropertySettings`。李虎机构三个都是 `true`，即 **v3**
+- 老版：户型列表页每行"房间户型平面图设计"新开 `/room-type-design?id=&source=1`；房间新增弹窗里用下拉选户型，勾"根据房间类型自动创建床位"
+- v3：户型、房间都在弹窗里设计（`/room-design` 一套组件），新建房间时用带缩略图的卡片选户型，房间设计里还能绑雷达、建床位、办理入住
+- 页面代码：`p__Basic__RoomTypePage`（户型列表）、`p__Basic__RoomTypeDesignPage`（老版设计页）、`p__Basic__RoomPage`（房间，两版都在里面）；雷达区域编辑器在 `common` 模块 18275（store）和 43676（画布）
+
+### 数据分层：一个雷达的区域配置会存在 5 个地方
+
+| 层 | 存在哪 | 说明 |
+|---|---|---|
+| 1 户型 | `/api/room/v3/room-type-design?roomTypeId=`（老接口 `/api/room-type-range?id=&source=1`） | `{roomStyle, elements[], roomLong, roomWidth, previewImageUrl}`。雷达元素（type 3）是**空槽位**：有 `qingLanConfig`、`deviceType`，没有 `sn / deviceId` |
+| 2 房间 | `/api/room/v3/design?roomId=`（老接口 `/api/room-type-range?id=&source=2`） | 建房时从户型**整份拷贝**（元素 id 不变），槽位上再写入绑定设备的 `sn / deviceId / deviceName`。房间详情 `room-view/v3/detail` 读的就是这一层 |
+| 3 设备自定义（老版） | `/api/device-config/qinglan-config?deviceId=&isApp=true` 的 `source = 3` | 老版设备配置里的"自定义区域"，覆盖户型的公共区域；`GET /api/device-config/qinglan-install/clean?deviceId=` 删掉后回到户型配置 |
+| 4 平台属性记录 | `/api/device-property/property-schema-values?sn=` | `QL_radar_config`、`QL_radar_area`（下发给设备的数组），以及**只存平台**的 `QL_radar_design`（整份 qingLanConfig JSON）、`QL_radar_working_type` |
+| 5 设备本身 | `POST /api/device-property/read` 读回 | 真正生效的值 |
+
+- `qinglan-config` 不带 `isApp=true` 时返回"请求参数格式不正确"。返回 `{source, sourceName, sourceId, rangeId, roomTypeId, roomTypeName, background, elements, config}`，source：1 户型、2 房间、3 设备（Radar）
+- 李虎机构 36 台雷达里只有 4 台能取到配置（都是 source 2），其他设备没绑进房间设计
+
+### 户型和房间的关系（2026-10-16 建临时户型 + 临时房间实测，测完已删除）
+
+- **每个房间都必须有户型**。新建：`POST /api/room/v3/apply-room-type-on-create {roomName, floorId, buildingId, roomTypeId, roomLong, roomWidth, autoCreateBeds}`，返回房间完整设计（就是户型的拷贝）。老版新建是 `POST /api/room`
+- **户型改了不会同步到已建房间**：把户型雷达高度 2 → 2.5 m 保存后，房间（新旧两个接口）都还是 2 m，只有 `GET /api/room/v3/current-room-type-design?roomId=` 返回户型的最新值。要同步只能在 v3 房间设计里点"从户型更新"，提示"已更新户型数据，点击保存生效"，一次一个房间
+- 老版房间编辑时户型下拉禁用，提示"房间户型不可编辑，如需更改请删除房间重新创建并绑定设备"。v3 房间设计里有"切换户型"（`/api/room/v3/room-type-list` 选，`room-type-range?source=1` 取设计），保存接口 `POST /api/room/v3/design` 只带 `{roomId, roomStyle, elements}`
+- **`roomTypeId` 只是个标签**（2026-10-17 用临时户型 + 临时房间实测，测完已删除）：
+  - 不带 `roomTypeId` 建房，v3 和老接口都报错（"字段【RoomTypeId】不能为空" / "房间户型标识不能为空"）
+  - 建房时传的长宽被忽略，房间尺寸取户型的尺寸
+  - v3"切换户型"（把另一个户型的设计保存进房间）**不会**改房间的 `roomTypeId`
+  - `PUT /api/room`（整条房间记录带新的 `roomTypeId`）可以直接改户型，接口不拦，房间设计不变
+  - 保存房间设计时，房间的长宽按 `roomStyle` 的宽高（cm ÷ 100）一起更新
+  - 有房间在用的户型删不掉："删除房间户型失败, 请先删除相关房间!"
+  - 设计从没保存过的房间，`room-view/v3/detail` 里没有 `background`
+- 户型自带床位槽位（`isBedSlot` 元素）时，`autoCreateBeds` 按槽位建床；实测户型没有床位槽位时不建床
+- 户型其他操作：`PUT /api/room-type/disable`；导出 `POST /api/room-type/export {roomTypeIds}` 返回一串文本（复制到剪贴板），导入 `POST /api/room-type/import {base64Data}`；引用平台内置模板 `GET /api/room-type/platfrom-pages`（平台原拼写）+ `POST /api/room-type/copy {roomTypeIds}`
+- 房间尺寸：`PUT /api/room/v3/size {roomId, roomWidth, roomLong}`（米）。宽 = 平面图水平方向，长 = 垂直方向
+- 设备绑定（v3）：`GET /api/room/v3/uninstalled-radars?keywords=`、`GET /api/device-position/bindable-room-devices?roomId&keywords&deviceType`、`PUT /api/device-position/bind-room-device {roomId, deviceId}` / `unbind-room-device`；床位设备 `bind-bed-device {bedId, deviceId}` / `unbind-bed-device {bedId}`；设备绑长者 `POST /api/device/bind {deviceId, memberId}` / `unbind`
+- 能配区域的设备类型：AIO（6）、UltraFall（13）、UltraPlus（15）
+
+### qingLanConfig 的规则（前端 store `common` 18275）
+
+坐标单位 cm，`container / bound / ranges / radar / supervision` 都在雷达"容器"坐标系里（`container.x/y` 是容器在房间里的偏移）。
+
+- `container`：雷达最大探测范围，尺寸**由安装方式 + 朝向 + 工作模式决定，不能拖**
+
+  | | 朝上/下 | 朝左/右 |
+  |---|---|---|
+  | 顶装（所有模式） | 宽 600 × 高 400 | 400 × 600 |
+  | 侧装 · 人员跟踪 | 800 × 600 | 600 × 800 |
+  | 侧装 · 呼吸睡眠 | 120 × 200 | 200 × 120 |
+  | 侧装 · 其他 | 600 × 400 | 400 × 600 |
+
+- `radar`：顶装在容器正中；侧装在朝向那一边的中点（朝下 = 容器上边中点，以此类推）。**后端换算时按这个规则自己算雷达位置**，不用传进来的 `radar.x/y`（传了不一致的值，换算结果对不上）
+- `bound`：实际监测边界，在容器内用户可缩小（`boundDistance` 上下左右到雷达的距离）。侧装时雷达那一边不能动
+- `supervision`：监护区左上角，正方形，**顶装 300 cm、侧装 200 cm**，默认居中（侧装贴雷达那一边）。监护床必须在里面
+- `installHeight` 米：顶装默认 2；侧装限制 1.5～3.5。`workingType`（3 人员跟踪 / 7 跌倒监测 / 11 呼吸睡眠 / 15 床位监护，默认 15）。切到**呼吸睡眠**会强制侧装、1.5 m，并把区域清成一张占满容器的监护床
+- `ranges[].index`：0～15，新区域取最小的空闲编号（删掉中间的区域后编号会留空）。场景条件里的区域号就是这个 index
+- `extra.installArea / installAreaAlias`：安装区域（字典 `RADAR_INSTALL_AREA`）；`fallTime`：跌倒时间
+- 可以"复制到剪贴板"：`qinglan:ranges:` + base64(encodeURIComponent(JSON))
+
+### 校验（前端 `validate()` 和后端 `POST /api/device-config/qinglan-validate` 不一样）
+
+| 规则 | 前端 | 后端 |
+|---|---|---|
+| 除干扰区外，区域不能超出 `bound` | ✓ | ✓ |
+| 监护床最多 1 个，且必须在监护区内 | ✓ | ✓ |
+| 床位监护模式下，普通床不能压监护区 | ✓ | ✓ |
+| 至少一个门（呼吸睡眠模式除外） | ✓ | ✓ |
+| 区域之间不能重叠（门/床/家具/感应区都算，**干扰区除外**） | ✗ | ✓ |
+| 最多 16 个、index 不重复、安装高度范围 | 编辑器里限制 | **不查**（17 个区域、重复 index、高度 5 m 都返回成功） |
+
+后端报错是英文，例如 `region 【门】 and region 【床2】 overlap`、`contains at least one "gate" area`。
+
+### 换算成设备数组（`POST /api/device-config/qinglan-compute`）
+
+- 输入 qingLanConfig，返回 `{bound: QL_radar_config, areas: QL_radar_area}`，**不做校验**（越界的区域照样算出来）
+- 可以在客户端本地复现（运维端 `rooms/qinglan.ts` 的 `toDeviceArrays`）。2026-10-17 核对：李虎、藕塘全部 56 份房间布置逐台和平台一致；另有 80 组随机配置（含小数坐标、存的雷达位置和装法对不上）也全部一致。规则如下：
+  1. 以雷达为原点：`dx = X − radar.x`，`dy = Y − radar.y`（容器坐标，cm）。**两处用的雷达位置不一样**：区域按装法规则算雷达位置（顶装在容器正中，侧装在朝向那边的中点，容器尺寸也按规则查表），不看存的 `radar.x/y`；监测边界用存的 `radar.x/y`。数据正常时两者相同；尺寸和装法对不上的旧数据（例如李虎"南京"：顶装朝左却存成 600×400）两者不同，设备上的区域和边界会错开
+     - 区域坐标先截成整厘米（`209.6` 按 `209` 算；藕塘 13房有一个门的 y 存成 `210.0104`）
+  2. 转到雷达坐标系 (x, y)：顶装 上 `(dx, −dy)`、下 `(−dx, dy)`、右 `(dy, dx)`、左 `(−dy, −dx)`；侧装 上 `(−dx, dy)`、下 `(dx, −dy)`、右 `(−dy, −dx)`、左 `(dy, dx)`。就是前面 `toRoom` 的逆运算
+  3. 矩形两角换算后取 x、y 的最小 / 最大，按 X-Y-, X+Y-, X-Y+, X+Y+ 排 4 个角
+  4. 除以 10 变分米：**区域向零截断**；**边界用银行家舍入**（.5 取偶，.NET 默认的 Math.Round）；**侧装时边界的近端 y 固定为 0**
+  5. `QL_radar_config = [installType, round(installHeight×10), 8 个角, workingType]`；`QL_radar_area` 每项 `[index, type, 8 个角]`
+- 坐起测试（…627d）房间配置算出来和设备上的属性记录完全一致
+
+### 下发
+
+- **v3**：房间设计里改完区域只改画布，要点"保存"才写平台（`POST /api/room/v3/design`）。下发是区域信息面板里另外一个"下发区域"按钮：`POST /api/device-property/write`，一次写 4 个属性 `QL_radar_config`（compute 的 bound）、`QL_radar_working_type`、`QL_radar_design`（整份 qingLanConfig）、`QL_radar_area`，`saveOnly:false`；结果看 SignalR `DeviceResponse`（set-property）。"读取区域"读回这 4 个属性，用 `QL_radar_design` 还原画布，只有 `QL_radar_area` 时只同步区域类型
+- **老版**：设备配置里"下发到设备" = `POST /api/device-config/qinglan-install {deviceId}`（后端自己找当前生效的配置并下发），"读取" = `GET /api/device-config/qinglan-install/read?deviceId=`
+- **保存房间设计不会下发**（2026-10-17 在坐起测试 …627d 上实测，测完已恢复原配置）：
+  - 原样保存：没有任何下行报文
+  - 改了内容再保存（高度 3 → 2.5 m）：没有下行，设备上还是 3 m。但平台**悄悄把属性记录 `QL_radar_config` 的值改成了 2.5 m**（`updatedAt` 更新），`deliveryStatus` 仍是 2（成功）、`deliveryAt` 仍是上一次真正下发的时间。网页端看"存储属性"会以为设备已经是 2.5 m
+  - 之后"从设备读取"会把记录改回设备的真实值，这时房间设计（2.5）和记录、设备（3）对不上，没有任何页面提示
+- v3"下发区域"（属性写入 4 个属性）：设备只收到一条 `IOT.setproperty {QL_radar_para_config, QL_radar_para_area}`，另外两个是平台属性，只存不发。设备约 0.7 秒回 `code 201`
+- 老版 `POST /api/device-config/qinglan-install {deviceId}`：后端用**房间设计（source 2）当前的配置**算好后下发，报文同上（多一个 `time` 字段），返回 `data` = seq。不需要客户端自己算
+- 读设备属性偶尔没有应答：同一次实测里有一条 `readproperty` 只有下行、没有上行记录。之前也见过只有上行应答、通信日志里找不到对应下行的情况。所以判断"已同步"不能只依赖一次读取
+- 坐起测试 09-29 的通信日志里，18:54:35 户型保存后，18:55 有两次 2 m 的下发，18:57 又有两次 3 m 的下发，每次都间隔约 3 秒成对出现。结合上面的实测，应该是有人手动点了下发
+- 设备收到的报文键是 `QL_radar_para_config / QL_radar_para_area`（见上面"雷达属性"一节）
 
 ## 长者建档与入住（2026-10-15 在李虎机构实测）
 

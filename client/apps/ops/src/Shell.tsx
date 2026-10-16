@@ -1,14 +1,15 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, HomeOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
+import RoomsPage from "./pages/RoomsPage";
 import AlertsPage from "./pages/AlertsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 
-type NavKey = "devices" | "scenes" | "members" | "alerts" | "realtime";
+type NavKey = "devices" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
 
 async function logout() {
   await stopRealtime();
@@ -39,6 +40,7 @@ export default function Shell({ s }: { s: Session }) {
 
   const items: ShellNavItem<NavKey>[] = [
     { key: "devices", label: "设备", icon: <HddOutlined /> },
+    { key: "rooms", label: "房间", icon: <HomeOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
     { key: "members", label: "长者", icon: <TeamOutlined /> },
     { key: "alerts", label: "告警", icon: <AlertOutlined /> },
@@ -75,6 +77,8 @@ export default function Shell({ s }: { s: Session }) {
       <div key={s.orgId} style={{ height: "100%" }}>
         {nav === "devices" ? (
           <DevicesPage />
+        ) : nav === "rooms" ? (
+          <RoomsPage />
         ) : nav === "scenes" ? (
           <ScenesPage />
         ) : nav === "members" ? (

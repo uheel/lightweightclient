@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Tabs, Tooltip } from "antd";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -11,6 +11,7 @@ import AngleTab from "./AngleTab";
 import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
 import PropertyTab from "./PropertyTab";
+import { radarInRoom, type QlConfig } from "../rooms/qinglan";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
 
@@ -56,6 +57,11 @@ export default function DeviceDetail({
   }, [d.sn, d.roomId]);
 
   const cfg = room?.configs.get(d.sn);
+  // 区域画布按房间平面图的方向画，并画出房间的墙
+  const plan = useMemo(
+    () => (cfg ? { facing: cfg.installDirection, room: room?.size ? { ...room.size, radar: radarInRoom(cfg as QlConfig) } : undefined } : undefined),
+    [cfg, room],
+  );
   const installType = cfg?.installType === 0 || cfg?.installType === 1 ? cfg.installType : undefined;
   // 在线状态和最近活动以设备数据（实时推送、心跳）为准，没收到时才用平台记录（规则见 core 的 deviceLink，与用户端一致）
   const link = deviceLink({ live, lastReportAt: hb?.t, platformOnline: d.isOnline, now: Math.max(now, live?.updatedAt ?? 0) });
@@ -197,7 +203,7 @@ export default function DeviceDetail({
           { key: "overview", label: "概览", children: overview },
           { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={link.online} /> },
           { key: "replay", label: "姿态回放", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
-          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} /> },
+          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} plan={plan} roomId={d.roomId} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
           { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}

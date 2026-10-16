@@ -10,8 +10,12 @@ export interface OrgNode {
   children?: OrgNode[];
 }
 
+/**
+ * 当前账号可以切换到的机构（网页端顶栏机构切换器用的也是这个接口）。
+ * 不用 /sapi/org/tree：它只返回请求头 orgid 那个机构往下的子树，切到末端机构后就只剩一个节点，切不回去了。
+ */
 export async function getOrgTree() {
-  return (await api.get<OrgNode[]>("/sapi/org/tree")).data ?? [];
+  return (await api.get<OrgNode[]>("/sapi/org/permission-tree")).data ?? [];
 }
 
 export function findOrg(nodes: OrgNode[], value: string): OrgNode | undefined {
