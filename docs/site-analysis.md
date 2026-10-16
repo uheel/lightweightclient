@@ -458,7 +458,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/scene-template/pages?includePlatfrom=true` | 场景模板列表：`id, templateName, deviceType, sceneGroupName, isDisabled`。**按机构存**：平台建的 63 个模板在账号所属机构（`rawOrgId`，"平台"）下，请求头 orgid 切到子机构（如李虎）后查不到，`includePlatfrom`（平台原拼写）也不管用，要用所属机构再查一次 |
+| `GET /api/scene-template/pages?filter[includePlatfrom]=true` | 场景模板列表（含平台模板）：`id, templateName, deviceType, sceneGroupName, isDisabled`。`includePlatfrom`（平台原拼写）**必须放在 filter 里**；写成普通参数 `includePlatfrom=true` 时，子机构账号和切到子机构的管理员都只能查到本机构自建的模板（2026-10-16 用子账号 leehu 核对）
 | `GET /api/scene-template/config?templateId=` | 单个模板的场景定义 `data.sceneConfig` |
 | `GET /api/scene-template/configs?templateId=a,b` | 批量取模板场景定义（平台"从模板导入"用的就是这个） |
 | `GET /api/device-scene/scene?deviceId=` | 设备当前场景（平台库里的，不是设备上读回的） |

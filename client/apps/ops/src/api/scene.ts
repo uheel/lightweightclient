@@ -1,4 +1,4 @@
-import { api, session } from "@radar/core";
+import { api } from "@radar/core";
 
 /** 场景模板与设备场景（接口说明见 docs/site-analysis.md"场景模板与设备场景"） */
 
@@ -46,24 +46,15 @@ export interface SceneTemplate {
 }
 
 /**
- * 全部可用模板，停用的不要。
- * 模板按机构存：平台建的模板在账号的所属机构（rawOrgId，例如"平台"）下，切到子机构后按子机构查不到，
- * 所以当前机构和所属机构各查一次再合并。按 id 取模板内容不受机构限制。
+ * 当前机构可用的全部模板（含平台模板），停用的不要。
+ * includePlatfrom（平台原拼写）必须写成 filter[includePlatfrom]=true，写成普通参数时子机构账号、切到子机构的管理员都查不到平台模板。
  */
 export async function getSceneTemplates() {
-  const s = session.get();
-  const orgs = s && s.rawOrgId && s.rawOrgId !== s.orgId ? [undefined, { orgId: s.rawOrgId, orgType: s.orgType }] : [undefined];
-  const lists = await Promise.all(
-    orgs.map((org) =>
-      api.get<SceneTemplate[]>("/api/scene-template/pages", {
-        params: { current: 1, pageSize: 1000, includePlatfrom: true, isDisabled: false },
-        org,
-      }),
-    ),
-  );
-  const byId = new Map<string, SceneTemplate>();
-  for (const r of lists) for (const t of r.data ?? []) if (!t.isDisabled) byId.set(t.id, t);
-  return [...byId.values()];
+  const res = await api.get<SceneTemplate[]>("/api/scene-template/pages", {
+    params: { current: 1, pageSize: 1000 },
+    filter: { includePlatfrom: true, isDisabled: false },
+  });
+  return (res.data ?? []).filter((t) => !t.isDisabled);
 }
 
 const configCache = new Map<string, Promise<Scene | undefined>>();
