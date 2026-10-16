@@ -135,8 +135,6 @@
   margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; color: #595959; max-height: 240px; overflow: auto;
 }
 .table-card { flex: 1; }
-.sn-option { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.sn-option b { font-weight: 500; }
 
 /* 姿态回放（移植自 room-posture-replay 脚本） */
 .dev-list[hidden] { display: none; }

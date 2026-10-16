@@ -1,15 +1,14 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, FileSearchOutlined, HddOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import AlertsPage from "./pages/AlertsPage";
-import LogsPage from "./pages/LogsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 
-type NavKey = "devices" | "scenes" | "members" | "alerts" | "logs" | "realtime";
+type NavKey = "devices" | "scenes" | "members" | "alerts" | "realtime";
 
 async function logout() {
   await stopRealtime();
@@ -23,8 +22,6 @@ export default function Shell({ s }: { s: Session }) {
   const [nav, setNav] = useState<NavKey>("devices");
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
-  /** 从其他页面跳到日志页时带上的 SN */
-  const [logSn, setLogSn] = useState<string>();
 
   const onEvent = useCallback(
     (e: RealtimeEvent) => {
@@ -45,17 +42,12 @@ export default function Shell({ s }: { s: Session }) {
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
     { key: "members", label: "长者", icon: <TeamOutlined /> },
     { key: "alerts", label: "告警", icon: <AlertOutlined /> },
-    { key: "logs", label: "日志", icon: <FileSearchOutlined /> },
     { key: "realtime", label: "推送", icon: <NotificationOutlined />, badge: nav === "realtime" ? 0 : unread },
   ];
 
   const go = (k: NavKey) => {
     setNav(k);
     if (k === "realtime") setUnread(0);
-  };
-  const openLogs = (sn: string) => {
-    setLogSn(sn);
-    go("logs");
   };
 
   const displayName = s.realName || s.nickName || s.userName;
@@ -82,15 +74,13 @@ export default function Shell({ s }: { s: Session }) {
       {/* 以 orgId 作为 key：切换机构时页面整体重新挂载、重新请求 */}
       <div key={s.orgId} style={{ height: "100%" }}>
         {nav === "devices" ? (
-          <DevicesPage onOpenLogs={openLogs} />
+          <DevicesPage />
         ) : nav === "scenes" ? (
           <ScenesPage />
         ) : nav === "members" ? (
           <MembersPage />
         ) : nav === "alerts" ? (
           <AlertsPage />
-        ) : nav === "logs" ? (
-          <LogsPage initialSn={logSn} />
         ) : (
           <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
         )}

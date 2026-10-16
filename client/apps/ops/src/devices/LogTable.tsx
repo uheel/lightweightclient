@@ -27,7 +27,7 @@ function directionTag(r: DeviceLog) {
 }
 
 /** 一台设备的通信日志表格 */
-export default function LogTable({ sn, compact }: { sn: string; compact?: boolean }) {
+export default function LogTable({ sn }: { sn: string }) {
   const { message } = App.useApp();
   const [command, setCommand] = useState<string>();
   const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs().startOf("day"), dayjs().endOf("day")]);
@@ -68,7 +68,7 @@ export default function LogTable({ sn, compact }: { sn: string; compact?: boolea
   ];
 
   return (
-    <div className={compact ? "detail-body" : "log-panel"}>
+    <div className="detail-body">
       <div className="toolbar">
         <AutoComplete
           allowClear

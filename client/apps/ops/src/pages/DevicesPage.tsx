@@ -40,7 +40,7 @@ export function lastSeen(t?: string | number) {
 }
 
 /** 设备工作台：左侧雷达列表（客户端筛选，↑↓ 切换），右侧设备详情 */
-export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) => void }) {
+export default function DevicesPage() {
   const { message } = App.useApp();
   const [list, setList] = useState<Radar[]>([]);
   const [types, setTypes] = useState<Map<number, string>>(new Map());
@@ -252,7 +252,7 @@ export default function DevicesPage({ onOpenLogs }: { onOpenLogs: (sn: string) =
       />
       <section className="dev-detail">
         {sel ? (
-          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} onOpenLogs={onOpenLogs} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
+          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
