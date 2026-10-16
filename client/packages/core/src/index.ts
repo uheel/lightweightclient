@@ -1,4 +1,5 @@
 export * from "./http";
+import "./desktop";
 export * from "./session";
 export * from "./auth";
 export * from "./org";
