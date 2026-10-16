@@ -110,6 +110,8 @@ export class ReplayEngine {
   }
 
   destroy() {
+    // 先停掉播放标记：已排队的 tick 看到它就不再续帧（开发时热替换后不会留下两份引擎同时在跑）
+    this.playing = false;
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     for (const f of this.off) f();
