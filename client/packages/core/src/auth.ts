@@ -1,11 +1,22 @@
 import { api, ApiError } from "./http";
-import type { Session } from "./session";
+import { loadPrefs, type Session } from "./session";
 
 export const SERVERS = [
   { label: "正式环境 rd.igoodlife.com", value: "https://rd.igoodlife.com" },
   { label: "海外 global.igoodlife.com", value: "https://global.igoodlife.com" },
   { label: "预发布 preprod.igoodlife.com", value: "https://preprod.igoodlife.com" },
 ];
+
+/**
+ * 打包给客户的客户端只连正式环境，登录页不显示服务器选择（之前记住的服务器也不用）；
+ * 开发版（tauri dev、浏览器调试）可以切换，方便测海外和预发布。
+ */
+export const CAN_PICK_SERVER = import.meta.env.DEV;
+
+/** 登录用的服务器：开发版用上次记住的，打包版固定正式环境 */
+export function initialServer() {
+  return (CAN_PICK_SERVER && loadPrefs().server) || SERVERS[0].value;
+}
 
 interface SignInData {
   token: string;

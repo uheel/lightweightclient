@@ -3,7 +3,7 @@ import { Button, Checkbox, Form, Input, Popover } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { isTauri } from "../http";
 import { loadPrefs, savePrefs, session } from "../session";
-import { SERVERS, signIn } from "../auth";
+import { CAN_PICK_SERVER, initialServer, SERVERS, signIn } from "../auth";
 import { brand } from "../theme";
 import { BreathTrace } from "./BreathTrace";
 import "./LoginPage.css";
@@ -83,7 +83,7 @@ function ServerSwitch({ value, onChange }: { value: string; onChange: (v: string
 /** 两个客户端共用的登录页：一条呼吸波形横贯窗口，名称在线上，表单在线下 */
 export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
   const prefs = loadPrefs();
-  const [server, setServer] = useState(prefs.server ?? SERVERS[0].value);
+  const [server, setServer] = useState(initialServer);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -105,7 +105,7 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
     <div className="lp">
       <div className="lp-top">
         {logo}
-        <ServerSwitch value={server} onChange={setServer} />
+        {CAN_PICK_SERVER && <ServerSwitch value={server} onChange={setServer} />}
       </div>
 
       <div className="lp-head">
