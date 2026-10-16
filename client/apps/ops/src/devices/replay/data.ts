@@ -1,4 +1,4 @@
-import { api } from "@radar/core";
+import { api, type PerfTimer } from "@radar/core";
 
 /**
  * 姿态回放的数据层（移植自油猴脚本 room-posture-replay.user.js，算法保持一致）：
@@ -179,6 +179,7 @@ export async function loadReplayData(
   end: number,
   sns: string[],
   onProgress?: (done: number, total: number) => void,
+  pt?: PerfTimer,
 ): Promise<ReplayData> {
   const devices = (detail.devices ?? []).filter((d) => d.sn);
   const nameOf = Object.fromEntries(devices.map((d) => [d.sn, d.deviceName || d.sn]));
@@ -212,6 +213,8 @@ export async function loadReplayData(
     }
   }
   const results = await runLimited(tasks, 4, onProgress);
+  pt?.lap("fetch");
+  pt?.info("requests", tasks.length);
   const errors = results.filter((r): r is Error => r instanceof Error);
   const trajErr = results.slice(0, chunks.length).find((r) => r instanceof Error);
   if (trajErr) throw trajErr;
@@ -310,6 +313,9 @@ export async function loadReplayData(
   for (const tr of tracks) for (const p of tr.points) allTs.push(p.t);
   allTs.sort((a, b) => a - b);
 
+  pt?.lap("process");
+  pt?.info("points", allTs.length);
+  pt?.info("tracks", tracks.length);
   return { tracks, events, marks, allTs, converted, warnings: errors.map((e) => e.message) };
 }
 

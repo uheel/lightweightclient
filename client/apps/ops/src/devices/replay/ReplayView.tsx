@@ -11,6 +11,7 @@ import {
   VerticalRightOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import { perfTimer } from "@radar/core";
 import { fmt, fmtDate, fmtTime, getRoomDetail, lowerBound, MAX_RANGE_DAYS, POSTURES, trackStateAt, loadReplayData, type Mark, type ReplayData, type RoomDetail } from "./data";
 import { ReplayEngine, type ReplayOptions } from "./engine";
 
@@ -121,10 +122,15 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
     setLoading(true);
     setMsg({ text: "加载中…" });
     try {
-      const res = await loadReplayData(roomId, d, start, end, list, (done, total) => setMsg({ text: `加载中… ${done}/${total}` }));
+      const pt = perfTimer("轨迹回放");
+      pt.info("hours", Math.round((end - start) / 36e5));
+      pt.info("devices", list.length);
+      const res = await loadReplayData(roomId, d, start, end, list, (done, total) => setMsg({ text: `加载中… ${done}/${total}` }), pt);
       setData(res);
       setQ([start, end]);
       engine.current?.setData(res, start, end);
+      pt.lap("engine");
+      pt.endAfterPaint();
       const parts = [`${res.tracks.length} 个目标`, `${res.allTs.length} 个轨迹点`, `${res.events.length} 个事件`];
       if (res.converted.length) parts.push(`已按安装方向换算坐标：${res.converted.join("、")}`);
       if (res.warnings.length) parts.push(`${res.warnings.length} 个请求失败：${res.warnings[0]}`);

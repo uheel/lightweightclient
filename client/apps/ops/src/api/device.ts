@@ -169,29 +169,17 @@ export interface DeviceLog {
   rawData?: string;
 }
 
-export interface LogQuery {
-  sn: string;
-  command?: string;
-  /** "YYYY-MM-DD HH:mm:ss" */
-  range?: [string, string];
-  current: number;
-  pageSize: number;
-}
-
 /**
- * 一台设备的通信日志（MQTT），按时间倒序。
+ * 一台设备在时间范围内的全部通信日志（MQTT，按时间倒序，最多 max 条）：各页并发取回后合并，见 api.getAll。
  * 必须带 sn：不带 sn 时平台要求 all=true 扫当天全部设备的日志，设备多的机构会一直不返回（2026-10-15 实测卡住）。
  */
-export async function getDeviceLogs(q: LogQuery) {
-  const res = await api.get<DeviceLog[]>("/api/device-log/pages", {
-    params: { current: q.current, pageSize: q.pageSize },
-    filter: {
-      sn: q.sn,
-      command: q.command,
-      createdAt: q.range ? q.range.join(",") : undefined,
-    },
+export async function getAllDeviceLogs(q: { sn: string; command?: string; range: [string, string]; pageSize: number; max: number }) {
+  const res = await api.getAll<DeviceLog>("/api/device-log/pages", {
+    pageSize: q.pageSize,
+    max: q.max,
+    filter: { sn: q.sn, command: q.command, createdAt: q.range.join(",") },
   });
-  return { list: res.data ?? [], total: res.total ?? 0 };
+  return { list: res.data ?? [], total: res.total ?? 0, perf: res.perf };
 }
 
 // ---------- 心跳 / 安装角度 ----------

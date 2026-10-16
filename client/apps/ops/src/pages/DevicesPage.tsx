@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin } from "antd";
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { deviceLink, type DeviceLink } from "@radar/core";
+import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
 import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
@@ -57,9 +57,13 @@ export default function DevicesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const pt = perfTimer("设备列表");
     try {
       const l = await getRadars();
+      pt.lap("fetch");
+      pt.info("rows", l.length);
       setList(l);
+      pt.endAfterPaint();
       return l;
     } catch (e) {
       message.error(`加载设备失败：${e instanceof Error ? e.message : String(e)}`);
