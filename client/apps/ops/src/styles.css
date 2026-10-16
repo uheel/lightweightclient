@@ -401,3 +401,13 @@
 .prop-confirm li { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #F4F5F9; font-size: 13px; }
 .prop-confirm li b { font-weight: 500; min-width: 120px; }
 .prop-diff { display: flex; flex-direction: column; gap: 2px; flex-basis: 100%; padding-left: 8px; color: #3A3E55; }
+
+/* 告警配置 */
+.alarm-list { list-style: none; margin: 0; padding: 0; }
+.alarm-list li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #F4F5F9; }
+.alarm-list li:last-child { border-bottom: 0; }
+.alarm-list li.muted b { color: #8A8FA8; }
+.alarm-name { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.alarm-name b { font-weight: 600; }
+.alarm-name small { flex-basis: 100%; color: #8A8FA8; font-size: 12px; }
+.alarm-area { flex: none; }

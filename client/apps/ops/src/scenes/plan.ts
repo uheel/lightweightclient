@@ -207,6 +207,24 @@ export function planDevice(opts: {
   };
 }
 
+/**
+ * 单台设备开 / 关一个场景，返回要下发的完整列表（已停用的场景平台保存时也会清掉，这里同样不带）。
+ * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area；关：去掉 names 里的所有同名场景。
+ */
+export function toggleScene(current: Scene[], names: string[], tpl?: { name: string; scene: Scene; area?: number }) {
+  const list = current.filter((s) => !s.isDisabled && !names.includes(s.sceneName));
+  if (tpl) {
+    let scene = fromTemplate(tpl.scene);
+    if (templateAreaValues(tpl.scene).length) {
+      if (tpl.area === undefined) throw new Error("没有选区域");
+      scene = fillArea(scene, tpl.area);
+    }
+    const old = current.find((s) => !s.isDisabled && s.sceneName === tpl.name);
+    list.push(old ? { ...scene, id: old.id } : scene);
+  }
+  return list.map((s) => ({ ...s, isDisabled: false }));
+}
+
 /** 并发执行，最多 n 个同时进行 */
 export async function pool<T>(items: T[], n: number, fn: (item: T, i: number) => Promise<void>) {
   let next = 0;

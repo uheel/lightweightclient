@@ -11,9 +11,11 @@ import {
   getTemplateScene,
   INSTALL_AREA,
   saveDeviceScenes,
+  waitIssued,
   type RadarLayout,
   type Scene,
   type SceneTemplate,
+  type SendState,
 } from "../api/scene";
 import { AREA_NEED, INSTALL_NEED, pickTemplates, planDevice, pool, tplKey, type Choice, type DevicePlan, type OpKind } from "../scenes/plan";
 
@@ -27,21 +29,6 @@ const OP_TAG: Record<OpKind, { color?: string; text: string }> = {
   absent: { text: "无需删除" },
   skip: { color: "orange", text: "跳过" },
 };
-
-type SendState = { status: "waiting" | "sending" | "ok" | "fail"; text?: string };
-
-/** 下发后等设备应答：轮询下发状态，直到时间变了且不再是"等待" */
-async function waitIssued(deviceId: string, before: string | undefined, timeoutMs = 30_000) {
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const s = await getSceneIssueStatus(deviceId);
-    if (s.sceneIssueAt && s.sceneIssueAt !== before && s.sceneIssueStatus !== 1) {
-      return s.sceneIssueStatus === 2 ? ({ status: "ok", text: s.sceneIssueAt } as SendState) : ({ status: "fail", text: s.sceneIssueError || "设备返回错误" } as SendState);
-    }
-  }
-  return { status: "fail", text: "30 秒内设备没有应答" } as SendState;
-}
 
 /** 批量场景：选设备 → 选场景（启用 / 禁用）→ 预览 → 下发 */
 export default function ScenesPage() {

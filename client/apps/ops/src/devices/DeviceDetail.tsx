@@ -6,6 +6,7 @@ import { deviceLink, POSTURE, type LiveData } from "@radar/core";
 import { getHeartbeats, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, WORKING_TYPE, type Heartbeat, type Radar, type RoomInfo } from "../api/device";
 import { lastSeen } from "../pages/DevicesPage";
 import { evaluate, GRADE_TEXT } from "./angle";
+import AlarmTab from "./AlarmTab";
 import AngleTab from "./AngleTab";
 import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
@@ -198,6 +199,7 @@ export default function DeviceDetail({
           { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={link.online} /> },
           { key: "replay", label: "姿态回放", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
           { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} /> },
+          { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} compact /> },
         ]}
       />
