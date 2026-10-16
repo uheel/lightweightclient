@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge, Dropdown, type MenuProps } from "antd";
 import { DownOutlined } from "@ant-design/icons";
+import { WindowControls } from "./WindowControls";
 import "./AppShell.css";
 
 export interface ShellNavItem<K extends string> {
@@ -11,7 +12,7 @@ export interface ShellNavItem<K extends string> {
 }
 
 /**
- * 两个客户端共用的外壳：48px 白色标题栏 + 76px 白色模块栏 + 内容区。
+ * 两个客户端共用的外壳：40px 白色标题栏（兼作窗口标题栏，可拖动；关掉系统标题栏时右侧带窗口按钮） + 76px 白色模块栏 + 内容区。
  * 外观只在这里改，保证用户端和运维端一致。
  */
 export function AppShell<K extends string>({
@@ -38,13 +39,13 @@ export function AppShell<K extends string>({
 }) {
   return (
     <div className="shell">
-      <header className="shell-header">
-        <div className="shell-brand">
+      <header className="shell-header" data-tauri-drag-region>
+        <div className="shell-brand" data-tauri-drag-region>
           <img src="/logo.svg" alt="" width={24} height={24} />
           {appName}
         </div>
         {org}
-        <span style={{ flex: 1 }} />
+        <span style={{ flex: 1, alignSelf: "stretch" }} data-tauri-drag-region />
         <span className="shell-live" title={live.title}>
           <i style={{ background: live.color }} />
           {live.text}
@@ -59,6 +60,7 @@ export function AppShell<K extends string>({
             <DownOutlined style={{ fontSize: 10, color: "#8A8FA8" }} />
           </span>
         </Dropdown>
+        <WindowControls />
       </header>
       <div className="shell-body">
         {nav && (

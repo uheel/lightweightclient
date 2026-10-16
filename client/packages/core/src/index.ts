@@ -11,3 +11,4 @@ export * from "./ui/SessionGate";
 export * from "./ui/useRealtime";
 export * from "./ui/OrgPicker";
 export * from "./ui/AppShell";
+export * from "./ui/WindowControls";

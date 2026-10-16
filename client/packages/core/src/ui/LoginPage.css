@@ -7,6 +7,7 @@
   --lp-muted: #8A8FA8;
   --lp-hair: #DADDEA;
   --lp-gutter: clamp(24px, 6vw, 88px);
+  position: relative;
   height: 100%;
   min-height: 560px;
   display: grid;
@@ -16,6 +17,13 @@
   overflow: auto;
 }
 
+.lp-bar {
+  position: absolute; top: 0; left: 0; right: 0; height: 32px;
+  display: flex; justify-content: flex-end; z-index: 1;
+}
+.lp-bar:empty { display: none; }
+.lp-bar .win-ctrl button { height: 32px; }
+.lp:has(.win-ctrl) .lp-top { padding-top: 40px; }
 .lp-top {
   display: flex;
   align-items: center;

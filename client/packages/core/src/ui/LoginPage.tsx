@@ -6,6 +6,7 @@ import { loadPrefs, savePrefs, session } from "../session";
 import { CAN_PICK_SERVER, initialServer, SERVERS, signIn } from "../auth";
 import { brand } from "../theme";
 import { BreathTrace } from "./BreathTrace";
+import { WindowControls } from "./WindowControls";
 import "./LoginPage.css";
 
 export interface LoginPageProps {
@@ -103,7 +104,11 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
 
   return (
     <div className="lp">
-      <div className="lp-top">
+      {/* 关掉系统标题栏时，顶部这条用来拖动窗口 */}
+      <div className="lp-bar" data-tauri-drag-region>
+        <WindowControls />
+      </div>
+      <div className="lp-top" data-tauri-drag-region>
         {logo}
         {CAN_PICK_SERVER && <ServerSwitch value={server} onChange={setServer} />}
       </div>
