@@ -319,6 +319,11 @@ export default function ZoneCanvas({
             );
           })}
           {selZone && !disabled && grips(selZone, sel!, () => true)}
+          {(() => {
+            // 箭头：设备正前方（设备坐标 y 增大的方向）在平面图上指向哪
+            const [ax, ay] = P(0, fs * 1.8);
+            return <line x1={0} y1={0} x2={ax} y2={ay} className="zc-look" />;
+          })()}
           <circle cx={0} cy={0} r={fs * 0.5} className="zc-radar" />
           {(() => {
             const [lx, ly] = installType === 1 ? P(0, -1) : [0, 1];

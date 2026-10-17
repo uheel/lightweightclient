@@ -31,18 +31,22 @@ export interface MountSwitch {
 const SIDE = 1;
 const TOP = 0;
 
-/** 侧装：雷达装在哪面墙的中点、朝向编号（朝上 = 装在上墙往下看） */
-function nearestWall(room: MountRoom) {
+/** 侧装：四面墙的中点和对应的朝向编号（朝上 = 装在上墙往下看） */
+function walls(room: MountRoom) {
   const { x, y } = room.radar;
-  const d = [
+  return [
     { facing: 1, dist: y, at: { x: room.width / 2, y: 0 } },
     { facing: 2, dist: room.width - x, at: { x: room.width, y: room.height / 2 } },
     { facing: 3, dist: room.height - y, at: { x: room.width / 2, y: room.height } },
     { facing: 4, dist: x, at: { x: 0, y: room.height / 2 } },
   ];
-  // 距离一样时（例如在房间正中）按 上 → 右 → 下 → 左 的顺序取第一个
-  return d.reduce((a, b) => (b.dist < a.dist - 1e-6 ? b : a));
 }
+
+/** 离雷达最近的墙；距离一样时（例如在房间正中）按 上 → 右 → 下 → 左 的顺序取第一个 */
+const nearestWall = (room: MountRoom) => walls(room).reduce((a, b) => (b.dist < a.dist - 1e-6 ? b : a));
+
+const SIDE_NAME = ["", "上", "右", "下", "左"];
+const FACE_NAME = ["", "朝上", "朝右", "朝下", "朝左"];
 
 /** 两个矩形求交，没有交集时返回 undefined */
 function intersect(a: DmRect, b: DmRect): DmRect | undefined {
@@ -64,41 +68,46 @@ export function switchMount(opts: {
   area: number[][];
   facing: number;
   room?: MountRoom;
+  /** 新的安装方式 0 顶装 / 1 侧装 */
   to: number;
+  /** 新朝向（1 上 2 右 3 下 4 左）：侧装是装在哪面墙，顶装是设备转的方向；不传时按装法自动定 */
+  toFacing?: number;
 }): MountSwitch {
-  const { config, area, facing, room, to } = opts;
+  const { config, area, facing, room, to, toFacing } = opts;
   const from = config[0] === SIDE ? SIDE : TOP;
+  const typeChanged = to !== from;
   const notes: string[] = [];
   let mode = config[10] ?? 15;
   let height = config[1] ?? 28;
 
   // 新的雷达位置和朝向
-  let nf = facing;
+  let nf = toFacing ?? facing;
   let radar = room?.radar;
-  if (room) {
-    if (to === TOP) {
+  if (to === TOP) {
+    if (room && typeChanged) {
       radar = { x: room.width / 2, y: room.height / 2 };
       notes.push("雷达放到了房间正中（吊顶）");
-    } else {
-      const w = nearestWall(room);
-      radar = w.at;
-      nf = w.facing;
-      notes.push(`雷达放到了${["", "上", "右", "下", "左"][w.facing]}墙的中点，朝房间里看`);
     }
-  }
+    if (toFacing && toFacing !== facing) notes.push(`雷达转成了${FACE_NAME[toFacing]}`);
+  } else if (room && (typeChanged || (toFacing && toFacing !== facing))) {
+    const w = toFacing ? walls(room).find((x) => x.facing === toFacing)! : nearestWall(room);
+    radar = w.at;
+    nf = w.facing;
+    notes.push(`雷达放到了${SIDE_NAME[w.facing]}墙的中点，朝房间里看`);
+  } else if (!room && toFacing && toFacing !== facing) notes.push(`雷达改成了装在${SIDE_NAME[toFacing]}墙`);
   // 雷达挪动的距离（平面图，分米）：区域在房间里不动，相对雷达就要反着挪
   const dx = room && radar ? (room.radar.x - radar.x) / 10 : 0;
   const dy = room && radar ? (room.radar.y - radar.y) / 10 : 0;
 
-  if (to === TOP && mode === 11) {
+  if (typeChanged && to === TOP && mode === 11) {
     mode = 15;
     notes.push("呼吸睡眠只能侧装，工作模式改成了床位监护");
   }
-  if (to === TOP && height < 22) {
+  if (typeChanged && to === TOP && height < 22) {
     height = 28;
     notes.push("高度改成了 2.8 米，请按实际安装高度填写");
   }
-  if (to === SIDE && (height < 15 || height > 35)) {
+  if (typeChanged && to === SIDE && (height < 15 || height > 35)) {
     height = Math.min(35, Math.max(15, height));
     notes.push(`侧装高度只能 1.5～3.5 米，改成了 ${height / 10} 米`);
   }

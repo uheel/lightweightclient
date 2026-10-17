@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Checkbox, InputNumber, Select, Switch, TimePicker, Tooltip } from "antd";
+import { Button, Checkbox, InputNumber, Segmented, Select, Switch, TimePicker, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
@@ -538,7 +538,7 @@ const QL_RADAR_AREA: Structured = {
     for (const o of x) if (!y.some((r) => r.id === o.id)) out.push(`删除 ${o.id} ${areaName(o.type)}`);
     return out;
   },
-  Editor: ({ value, onChange, onError, disabled, ctx, setOther }) => {
+  Editor: ({ value, onChange, onError, disabled, ctx, setOther, setPlan }) => {
     const list = readAreas(value);
     const plan = (ctx[PLAN_CTX] ?? {}) as PlanCtx;
     const cfgRaw = toArray(ctx.QL_radar_config);
@@ -547,6 +547,15 @@ const QL_RADAR_AREA: Structured = {
     const mode = cfg?.[10] ?? 15;
     const facing = plan.facing && plan.facing >= 1 && plan.facing <= 4 ? plan.facing : 1;
     const bound = cfg ? QL_RADAR_CONFIG_DECODE(cfg) : undefined;
+    // 改朝向：区域在房间里的位置不变；侧装时雷达挪到选的那面墙，顶装时雷达原地转向
+    const setFacing = (f: number) => {
+      if (!cfg || !setOther || !setPlan || f === facing) return;
+      const res = switchMount({ config: cfg, area: writeAreas(list), facing, room: plan.room, to: installType, toFacing: f });
+      setOther("QL_radar_config", res.config);
+      onError(checkAreas(readAreas(res.area)));
+      onChange(res.area);
+      setPlan({ facing: res.facing, room: plan.room && res.radar ? { ...plan.room, radar: res.radar } : plan.room, mountNotes: res.notes });
+    };
     const update = (next: Area[]) => {
       onError(checkAreas(next));
       onChange(writeAreas(next));
@@ -561,6 +570,17 @@ const QL_RADAR_AREA: Structured = {
     const err = checkAreas(list) ?? (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
     return (
       <div className="st st-area">
+        <div className="zc-facing">
+          <span>{installType === 1 ? "装在哪面墙" : "雷达朝向"}</span>
+          <Segmented
+            size="small"
+            value={facing}
+            disabled={disabled || !cfg || !setPlan}
+            onChange={(v) => setFacing(Number(v))}
+            options={(installType === 1 ? ["上墙", "右墙", "下墙", "左墙"] : ["朝上", "朝右", "朝下", "朝左"]).map((label, i) => ({ value: i + 1, label }))}
+          />
+          <small className="muted">{installType === 1 ? "按平面图的上下左右；雷达装在墙的中间，朝房间里看" : "设备正面（箭头）朝平面图的哪一边"}</small>
+        </div>
         <ZoneCanvas
           installType={installType}
           facing={facing}
@@ -574,7 +594,7 @@ const QL_RADAR_AREA: Structured = {
           onBound={setOther ? setBound : undefined}
         />
         {plan.mountNotes && plan.mountNotes.length > 0 && (
-          <p className="pp-note warn">改了安装方式：区域在房间里的位置不变，{plan.mountNotes.join("；")}。请确认高度和监测范围后再下发。</p>
+          <p className="pp-note warn">改了安装方式或朝向：区域在房间里的位置不变，{plan.mountNotes.join("；")}。请确认高度和监测范围后再下发。</p>
         )}
         <p className="pp-note">
           {plan.facing ? "按房间平面图的方向画，粗框是房间的墙。" : "这台雷达不在房间布置里，按默认朝向画。"}区域的编号就是场景规则里引用的区域 ID。
