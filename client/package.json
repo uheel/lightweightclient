@@ -12,6 +12,8 @@
     "web:user": "npm run dev -w @radar/user",
     "build:ops": "npm run bundle -w @radar/ops",
     "build:user": "npm run bundle -w @radar/user",
+    "release:ops": "node scripts/release.mjs ops",
+    "release:user": "node scripts/release.mjs user",
     "typecheck": "npm run build -w @radar/ops -w @radar/user --if-present"
   }
 }

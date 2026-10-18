@@ -24,6 +24,8 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)));
+        // 自动更新（菜单里的"检查更新"），见 packages/core/src/ui/UpdateMenu.tsx
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(tauri_plugin_process::init());
     }
 
     builder

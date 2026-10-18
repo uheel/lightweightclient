@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "RadarOps",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.igoodlife.radar.ops",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -37,5 +37,12 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyRTMyMDI1Q0EwNDEyQ0QKUldUTkVnVEtKU0RqMG05bkFpSysyMVVtTHd0a1hoeTRuRFhpSnA4ZGRkZ3RWbXJMMDVFVGU0TS8K",
+      "endpoints": ["https://update.uheel.one/ops/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Badge, Dropdown, type MenuProps } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { WindowControls } from "./WindowControls";
+import { useUpdater } from "./UpdateMenu";
 import "./AppShell.css";
 
 export interface ShellNavItem<K extends string> {
@@ -37,6 +38,13 @@ export function AppShell<K extends string>({
   onNav?: (key: K) => void;
   children: ReactNode;
 }) {
+  // 版本号和检查更新统一加在用户菜单里（放在"退出登录"之前），两个客户端不用各自处理
+  const updater = useUpdater();
+  const items = [...(user.menu ?? [])];
+  const at = items.findIndex((i) => i?.key === "logout");
+  items.splice(at < 0 ? items.length : at, 0, ...(updater.menu ?? []), { type: "divider" });
+  const menu = updater.menu?.length ? items : user.menu;
+
   return (
     <div className="shell">
       <header className="shell-header" data-tauri-drag-region>
@@ -50,9 +58,11 @@ export function AppShell<K extends string>({
           <i style={{ background: live.color }} />
           {live.text}
         </span>
-        <Dropdown menu={{ items: user.menu }}>
-          <span className="shell-user">
-            <span className="avatar">{user.name.charAt(0)}</span>
+        <Dropdown menu={{ items: menu }}>
+          <span className="shell-user" title={updater.hasUpdate ? "有新版本可以更新" : undefined}>
+            <Badge dot={updater.hasUpdate} offset={[-2, 2]}>
+              <span className="avatar">{user.name.charAt(0)}</span>
+            </Badge>
             <span className="shell-user-name">
               {user.name}
               {user.sub && <small>{user.sub}</small>}
@@ -77,6 +87,7 @@ export function AppShell<K extends string>({
         )}
         <main className="shell-content">{children}</main>
       </div>
+      {updater.dialog}
     </div>
   );
 }
