@@ -51,12 +51,15 @@
 .lp-head { grid-row: 3; padding: 0 var(--lp-gutter); }
 .lp-name {
   margin: 0;
-  font-family: "DengXian Light", "DengXian", "Microsoft YaHei UI Light", "PingFang SC", "Noto Sans SC", sans-serif;
-  font-weight: 300;
-  font-size: clamp(44px, 5.4vw, 68px);
-  line-height: 1.1;
-  letter-spacing: 0.06em;
+  /* 名称是英文（Radar Config / Health Guardian）：Segoe UI Variable 半粗、字距收紧；
+     最后一个词用信号蓝，和下面那条呼吸线呼应 */
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font-weight: 600;
+  font-size: clamp(40px, 4.6vw, 60px);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
 }
+.lp-name em { font-style: normal; color: var(--lp-signal); }
 .lp-tagline {
   margin: 14px 0 0;
   max-width: 30em;

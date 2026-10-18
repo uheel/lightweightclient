@@ -11,7 +11,7 @@ import { WindowControls } from "./WindowControls";
 import "./LoginPage.css";
 
 export interface LoginPageProps {
-  /** 客户端名称，例如"雷达运维" / "康养看护" */
+  /** 客户端名称，例如"Radar Config" / "Health Guardian" */
   appName: string;
   /** 名称下方的一句话介绍 */
   tagline: string;
@@ -123,7 +123,16 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
       </div>
 
       <div className="lp-head">
-        <h1 className="lp-name">{appName}</h1>
+        <h1 className="lp-name">
+          {appName.includes(" ") ? (
+            <>
+              {appName.slice(0, appName.lastIndexOf(" ") + 1)}
+              <em>{appName.slice(appName.lastIndexOf(" ") + 1)}</em>
+            </>
+          ) : (
+            appName
+          )}
+        </h1>
         <p className="lp-tagline">{tagline}</p>
       </div>
 
