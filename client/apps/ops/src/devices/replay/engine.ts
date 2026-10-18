@@ -1,5 +1,5 @@
 import { assetUrl } from "@radar/core";
-import { clamp, EVENTS, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
+import { clamp, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
 
 /**
  * 姿态回放的画布部分（移植自油猴脚本 room-posture-replay.user.js）：房间平面图 + 可缩放时间轴 + 播放。
@@ -686,17 +686,18 @@ export class ReplayEngine {
       ctx.fillText(d ? "这段时间没有轨迹和姿态数据" : "查询后显示", TL.GUTTER + 8, L.lanesTop + TL.LANE_H / 2);
     }
 
-    // 事件
+    // 事件：进出房间 / 区域、姿态事件、离床告警；告警画在上层、加宽
     ctx.fillStyle = C.muted;
     ctx.fillText("事件", 8, L.evTop + TL.EV_H / 2 + 1);
     ctx.fillStyle = C.lane;
     ctx.fillRect(TL.GUTTER, L.evTop, pw, TL.EV_H);
     if (d) {
-      for (const ev of d.events) {
-        if (ev.t < this.v0 || ev.t > this.v1) continue;
-        ctx.fillStyle = EVENTS[ev.type]?.color ?? C.muted;
-        ctx.fillRect(this.xOf(ev.t) - 1, L.evTop, 2, TL.EV_H);
-      }
+      for (const alarm of [false, true])
+        for (const m of d.marks) {
+          if (m.alarm !== alarm || m.t < this.v0 || m.t > this.v1) continue;
+          ctx.fillStyle = m.color;
+          ctx.fillRect(this.xOf(m.t) - (alarm ? 1.5 : 1), L.evTop, alarm ? 3 : 2, TL.EV_H);
+        }
     }
   }
 
@@ -907,20 +908,22 @@ export class ReplayEngine {
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  /** 跳到上一个 / 下一个事件或告警（提前 2 秒）；刚跳到的那个事件在 t + 2 秒处，找下一个要越过它 */
+  /**
+   * 跳到上一个 / 下一个事件或告警，正好落在事件时刻，暂停时看到的就是事件发生时的姿态和位置
+   * （以前提前 2 秒，暂停时显示的是事件前的状态，例如点"床上坐起"却显示"在床"）
+   */
   jumpMark(dir: 1 | -1) {
     const marks = this.data?.marks ?? [];
     if (!marks.length) return;
-    const at = this.t + 2000;
-    const m = dir > 0 ? marks[lowerBound(marks, at + 100, (x) => x.t)] : marks[lowerBound(marks, at - 100, (x) => x.t) - 1];
-    if (m) this.seek(m.t - 2000);
+    const m = dir > 0 ? marks[lowerBound(marks, this.t + 100, (x) => x.t)] : marks[lowerBound(marks, this.t - 100, (x) => x.t) - 1];
+    if (m) this.seek(m.t);
   }
 
   /** 定位到某个事件：不在视图内时先把视图移过去 */
   gotoMark(t: number) {
     const span = this.v1 - this.v0;
     if (!this.inView(t)) this.setView(t - span / 2, t + span / 2);
-    this.seek(t - 2000);
+    this.seek(t);
   }
 
   toStart() {

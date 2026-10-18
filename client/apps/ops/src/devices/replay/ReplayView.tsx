@@ -88,8 +88,10 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
   const [span, setSpan] = useState("");
   const [q, setQ] = useState<[number, number]>([0, 0]);
 
-  // 画布引擎
+  // 画布引擎；没绑定房间 / 房间加载失败时只显示提示，没有画布
+  const hasStage = !!roomId && !roomError;
   useEffect(() => {
+    if (!hasStage) return;
     const e = new ReplayEngine(
       { stage: stage.current!, roomBase: roomBase.current!, roomDyn: roomDyn.current!, tlWrap: tlWrap.current!, tlBase: tlBase.current!, tlOver: tlOver.current!, tip: tip.current! },
       () => optsRef.current,
@@ -101,7 +103,8 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
       e.destroy();
       engine.current = null;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStage]);
 
   useEffect(() => {
     try {
@@ -131,7 +134,7 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
       engine.current?.setData(res, start, end);
       pt.lap("engine");
       pt.endAfterPaint();
-      const parts = [`${res.tracks.length} 个目标`, `${res.allTs.length} 个轨迹点`, `${res.events.length} 个事件`];
+      const parts = [`${res.tracks.length} 个目标`, `${res.allTs.length} 个轨迹点`, `${res.marks.length} 个事件`];
       if (res.converted.length) parts.push(`已按安装方向换算坐标：${res.converted.join("、")}`);
       if (res.warnings.length) parts.push(`${res.warnings.length} 个请求失败：${res.warnings[0]}`);
       setMsg({ text: parts.join(" · "), err: res.warnings.length > 0 });
@@ -394,8 +397,8 @@ function StatusList({ clock, data }: { clock: Clock; data: ReplayData | null }) 
 /** 事件列表很长：只有当前事件变化时才更新，而且只重渲染前后两行 */
 function MarkList({ clock, data, multiDay, onGoto }: { clock: Clock; data: ReplayData | null; multiDay: boolean; onGoto: (t: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  // 跳到事件时落在事件前 2 秒（见 engine.jumpMark），所以把 2 秒内即将发生的那条算作当前
-  const markIndex = useSyncExternalStore(clock.subscribe, () => (data ? lowerBound(data.marks, clock.get() + 2001, (m) => m.t) - 1 : -1));
+  // 当前 = 已经发生的最后一条（跳到事件时正好落在事件时刻，见 engine.jumpMark）
+  const markIndex = useSyncExternalStore(clock.subscribe, () => (data ? lowerBound(data.marks, clock.get() + 1, (m) => m.t) - 1 : -1));
   const goto = useRef(onGoto);
   goto.current = onGoto;
   const onClick = useCallback((t: number) => goto.current(t), []);

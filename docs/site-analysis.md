@@ -259,6 +259,9 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 设备属性（`/api/device-type-property/list?deviceTypeCode=6`，共 57 个）里**没有安装角度**，不能主动读取，只能等心跳
 - 告警类型分组 `alertTypeGroup`：1 = 场景（烟感、水浸、门磁…），2 = 事件（跌倒、呼吸心率、离床…），3 = 离线，4 = 紧急求助，5 = 安装姿态（"设备安装水平告警"）
 
+- **`alert/pages` 不能按设备筛**（2026-10-17 李虎机构实测）：`filter[sn]`、`deviceSn`、`sns`、`deviceSns`、`keyword`、`search` 都被忽略，返回整个机构的告警。要按设备看只能按时间段取回后本地按 `sn` 筛。记录里有 `sn, deviceName, alertTypeName, alertTypeColor, createdAt`，没有雷达目标编号
+- 告警记录和姿态时间线不一定对得上：坐起测试 10-14 00:31～00:39 有疑似坐地 / 跌倒告警，同时段 `posture-timeline` 一个分段都没有（按 userId 1～3 查也没有）
+
 注意：平台机构下 `alert/pages` 返回为空，这是机构之间数据隔离的结果（见"组织机构模型"一节）。查告警要带具体机构的 `orgid`。
 
 ## 数据概况（2026-10-12）

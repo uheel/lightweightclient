@@ -15,20 +15,32 @@ export const HOLD_MS = 3000;
 export const STALE_MS = 10 * 60 * 1000; // 无轨迹但仍有姿态时，最多沿用 10 分钟内的最后位置
 export const MAX_RANGE_DAYS = 7;
 
-/** 姿态配色：告警姿态用红 / 橙系，与客户端状态色一致 */
-export const POSTURES: Record<number, { text: string; color: string; alarm?: boolean }> = {
+/**
+ * 姿态配色：告警姿态用红 / 橙系，与客户端状态色一致。
+ * 行走、坐、静止、在床是平常姿态；其他姿态都有对应的场景告警，开始时刻算一个事件（event）。注意"坐"（3）和"床上坐起"（9）是两个姿态。
+ */
+export const POSTURES: Record<number, { text: string; color: string; alarm?: boolean; event?: boolean }> = {
   1: { text: "行走", color: "#1F9D55" },
-  2: { text: "疑似跌倒", color: "#E8590C", alarm: true },
+  2: { text: "疑似跌倒", color: "#E8590C", alarm: true, event: true },
   3: { text: "坐", color: "#D97706" },
   4: { text: "静止", color: "#9AA0B8" },
-  5: { text: "跌倒确认", color: "#D93036", alarm: true },
+  5: { text: "跌倒确认", color: "#D93036", alarm: true, event: true },
   6: { text: "在床", color: "#3B4FD8" },
-  7: { text: "疑似坐地", color: "#F08C00", alarm: true },
-  8: { text: "确认坐地告警", color: "#B4232A", alarm: true },
-  9: { text: "床上坐起", color: "#7048E8" },
-  10: { text: "疑似床上坐起告警", color: "#D6336C", alarm: true },
-  11: { text: "确认床上坐起告警", color: "#A61E4D", alarm: true },
+  7: { text: "疑似坐地", color: "#F08C00", alarm: true, event: true },
+  8: { text: "确认坐地告警", color: "#B4232A", alarm: true, event: true },
+  9: { text: "床上坐起", color: "#7048E8", event: true },
+  10: { text: "疑似床上坐起告警", color: "#D6336C", alarm: true, event: true },
+  11: { text: "确认床上坐起告警", color: "#A61E4D", alarm: true, event: true },
 };
+
+/**
+ * 场景告警记录（事件分组）也算事件：离床告警不是姿态，只能从这里来；
+ * 跌倒、坐地、坐起的姿态段有时缺失（2026-10-14 坐起测试有跌倒 / 坐地告警，同时段姿态时间线为空），也用告警补上。
+ * 同一设备 1 分钟内已有同类姿态事件的告警不重复列出。
+ */
+const ALERT_COLOR = "#C2255C";
+const ALERT_DEDUP_MS = 60_000;
+const eventKind = (text: string) => ["跌倒", "坐地", "坐起"].find((k) => text.includes(k));
 
 export const EVENTS: Record<number, { text: string; color: string }> = {
   1: { text: "进入房间", color: "#1F9D55" },
@@ -170,7 +182,8 @@ export interface ReplayData {
 type Res =
   | { kind: "traj"; data: { x: number; y: number; timestamp: number; sn: string; userId: number }[] }
   | { kind: "posture"; sn: string; data: { segments?: { posture: number; userId: number; startAt: string; endAt: string }[] } }
-  | { kind: "event"; sn: string; data: { events?: { eventType: number; userId: number; occurredAt: string; rangeName?: string }[] } };
+  | { kind: "event"; sn: string; data: { events?: { eventType: number; userId: number; occurredAt: string; rangeName?: string }[] } }
+  | { kind: "alert"; data: { alertTypeName?: string; alertTypeColor?: string; sn?: string; createdAt: string }[] };
 
 export async function loadReplayData(
   roomId: string,
@@ -212,6 +225,16 @@ export async function loadReplayData(
       );
     }
   }
+  // 告警记录可以跨天查。平台不认 filter[sn]（试过 sn / deviceSn / sns 等都返回整个机构的），所以整段查一次，本地按设备筛
+  tasks.push(() =>
+    api
+      .getAll<Extract<Res, { kind: "alert" }>["data"][number]>("/api/alert/pages", {
+        pageSize: 200,
+        max: 5000,
+        filter: { alertTypeGroup: 2, createdAt: `${fmt(start)},${fmt(end)}` },
+      })
+      .then((res) => ({ kind: "alert", data: res.data ?? [] })),
+  );
   const results = await runLimited(tasks, 4, onProgress);
   pt?.lap("fetch");
   pt?.info("requests", tasks.length);
@@ -228,6 +251,7 @@ export async function loadReplayData(
   };
   const seen = new Set<string>();
   const events: ReplayData["events"] = [];
+  const alerts: { t: number; sn: string; name: string; color?: string }[] = [];
   for (const r of results) {
     if (!r || r instanceof Error) continue;
     if (r.kind === "traj") {
@@ -241,6 +265,10 @@ export async function loadReplayData(
     } else if (r.kind === "posture") {
       for (const seg of r.data.segments ?? []) {
         getTrack(r.sn, seg.userId).postures.push({ s: parseTime(seg.startAt), e: parseTime(seg.endAt) + 999, p: seg.posture });
+      }
+    } else if (r.kind === "alert") {
+      for (const a of r.data) {
+        if (a.sn && sns.includes(a.sn)) alerts.push({ t: parseTime(a.createdAt), sn: a.sn, name: a.alertTypeName || "告警", color: a.alertTypeColor });
       }
     } else {
       for (const ev of r.data.events ?? []) {
@@ -301,11 +329,22 @@ export async function loadReplayData(
     const who = labelOf[`${ev.sn}:${ev.uid}`] ?? (multiDevice ? `${nameOf[ev.sn]} · 目标${ev.uid}` : `目标${ev.uid}`);
     marks.push({ t: ev.t, color: def.color, text: `${who} ${def.text}${ev.range ? " · " + ev.range : ""}`, alarm: false });
   }
+  const postureEvents: { t: number; sn: string; kind?: string }[] = [];
   for (const tr of tracks) {
-    for (const seg of tr.postures) {
+    tr.postures.forEach((seg, i) => {
       const def = POSTURES[seg.p];
-      if (def?.alarm) marks.push({ t: seg.s, color: def.color, text: `${tr.label} ${def.text}`, alarm: true });
-    }
+      // 同一姿态被切成相邻的几段时只算一次
+      const prev = tr.postures[i - 1];
+      if (!def?.event || (prev && prev.p === seg.p && seg.s - prev.e <= 2000)) return;
+      marks.push({ t: seg.s, color: def.color, text: `${tr.label} ${def.text}`, alarm: !!def.alarm });
+      postureEvents.push({ t: seg.s, sn: tr.sn, kind: eventKind(def.text) });
+    });
+  }
+  for (const a of alerts) {
+    const kind = eventKind(a.name);
+    if (kind && postureEvents.some((e) => e.sn === a.sn && e.kind === kind && Math.abs(e.t - a.t) <= ALERT_DEDUP_MS)) continue;
+    const color = a.color && /^#[0-9a-f]{3,8}$/i.test(a.color) ? a.color : ALERT_COLOR;
+    marks.push({ t: a.t, color, text: `${multiDevice ? (nameOf[a.sn] || a.sn) + " " : ""}${a.name}`, alarm: true });
   }
   marks.sort((a, b) => a.t - b.t);
 
