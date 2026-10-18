@@ -256,7 +256,7 @@ export default function DevicesPage() {
       />
       <section className="dev-detail">
         {sel ? (
-          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} />
+          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}

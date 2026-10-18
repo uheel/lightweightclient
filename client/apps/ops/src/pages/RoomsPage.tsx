@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Progress, Spin } from "antd";
 import { FileSearchOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
-import { getDeviceTypeMap, getRadars, getStoredProperties, type Radar, type StoredProperty } from "../api/device";
-import { getRoomDesign, getRooms, radarElements, readFromDevice, type Room, type RoomDesign } from "../api/room";
+import { getDeviceTypeMap, getRadars, getStoredProperties, writeDeviceProperties, type Radar, type StoredProperty } from "../api/device";
+import { getRoomDesign, getRooms, radarElements, readFromDevice, saveRoomDesign, type Room, type RoomDesign } from "../api/room";
 import { getDeviceScenes, type Scene } from "../api/scene";
 import { checkRoom, ZONE_TYPES, type Level, type RadarReport, type RoomReport } from "../rooms/check";
 import RoomDetail, { IssueItem, LEVEL_TEXT, type DeviceRead } from "../rooms/RoomDetail";
 import { pool } from "../scenes/plan";
+import { placeInLayout, slotSource } from "../rooms/radarSlot";
 
 type Filter = "all" | "radar" | "problem";
 
@@ -30,8 +31,8 @@ const roomOrder = (a: Room, b: Room) =>
 type DesignState = { design?: RoomDesign; error?: string };
 
 /**
- * 房间布置：左侧房间列表（带体检状态），右侧房间平面图和每台雷达的配置、问题、下发数据比对。
- * 进页面时一次取回房间、设备，以及有雷达的房间的布置、平台记录、设备场景，之后筛选、搜索、体检都在本地算。
+ * 房间布置：左侧房间列表（带诊断状态），右侧房间平面图和每台雷达的配置、问题、下发数据比对。
+ * 进页面时一次取回房间、设备、全部房间的布置，以及布置里和绑了房间的雷达的平台记录、设备场景，之后筛选、搜索、诊断都在本地算。
  */
 export default function RoomsPage() {
   const { message } = App.useApp();
@@ -46,9 +47,11 @@ export default function RoomsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [selId, setSelId] = useState<string>();
-  /** 右侧显示体检报告（全部问题）还是单个房间 */
+  /** 右侧显示诊断结果（全部问题）还是单个房间 */
   const [showReport, setShowReport] = useState(true);
   const [reads, setReads] = useState<Record<string, DeviceRead>>({});
+  /** 正在重排区域编号的房间 */
+  const [fixing, setFixing] = useState<string>();
   const loadSeq = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +73,7 @@ export default function RoomsPage() {
     const seq = ++loadSeq.current;
     setLoading(true);
     setReads({});
-    const pt = perfTimer("房间体检");
+    const pt = perfTimer("房间诊断");
     try {
       const [r, d] = await Promise.all([getRooms(), getRadars()]);
       if (seq !== loadSeq.current) return;
@@ -80,8 +83,8 @@ export default function RoomsPage() {
       setDesigns(new Map());
       setValues(new Map());
       setScenes(new Map());
-      // 只有绑了雷达的房间才先取布置；其他房间点开时再取
-      const roomIds = [...new Set(d.map((x) => x.roomId).filter((x): x is string => !!x))];
+      // 全部房间的布置都取：没绑雷达的房间布置里也可能留着旧雷达（删掉的、换绑的），要查出来
+      const roomIds = r.map((x) => x.id);
       const zoned = d.filter((x) => x.roomId && (x.deviceType === undefined || ZONE_TYPES.has(x.deviceType)));
       const total = roomIds.length + zoned.length;
       let done = 0;
@@ -102,6 +105,11 @@ export default function RoomsPage() {
       if (seq !== loadSeq.current) return;
       setDesigns(ds);
       pt.lap("details");
+      // 布置里有、但没绑房间的雷达：补取记录和场景（不挡首屏）
+      const have = new Set(zoned.map((x) => x.sn));
+      const inLayouts = new Set([...ds.values()].flatMap((x) => radarElements(x.design).map((e) => e.sn)));
+      const extra = d.filter((x) => !have.has(x.sn) && inLayouts.has(x.sn));
+      if (extra.length) loadDeviceData(extra);
       pt.info("rooms", r.length);
       pt.info("devices", zoned.length);
       pt.endAfterPaint();
@@ -123,10 +131,13 @@ export default function RoomsPage() {
   const typeName = useCallback((t?: number) => (t === undefined ? "未知型号" : types.get(t) ?? `型号 ${t}`), [types]);
 
   const reports = useMemo(() => {
+    const layoutRooms = new Map<string, Room[]>();
+    for (const room of rooms)
+      for (const e of radarElements(designs.get(room.id)?.design)) if (e.sn) layoutRooms.set(e.sn, [...(layoutRooms.get(e.sn) ?? []), room]);
     const m = new Map<string, RoomReport>();
     for (const room of [...rooms].sort(roomOrder)) {
       const ds = designs.get(room.id);
-      m.set(room.id, checkRoom({ room, design: ds?.design, designError: ds?.error, devices, values, scenes }));
+      m.set(room.id, checkRoom({ room, design: ds?.design, designError: ds?.error, devices, values, scenes, layoutRooms }));
     }
     return m;
   }, [rooms, designs, devices, values, scenes]);
@@ -193,6 +204,45 @@ export default function RoomsPage() {
     }
   }
 
+  /** 重排区域编号：重新取布置再保存（保存时 index 改成位置），设备上的数组不变，不用下发 */
+  async function renumber(roomId: string) {
+    setFixing(roomId);
+    try {
+      const design = await getRoomDesign(roomId);
+      if (!design) throw new Error("房间布置读不到");
+      await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements: design.elements });
+      const fresh = await getRoomDesign(roomId);
+      setDesigns((m) => new Map(m).set(roomId, { design: fresh }));
+      // 平台网页端"读取区域"按 QL_radar_design 还原画布，一起更新（只保存，不下发）
+      await Promise.all(
+        radarElements(fresh)
+          .filter((e) => e.sn && e.qingLanConfig && devices.some((d) => d.sn === e.sn))
+          .map((e) => writeDeviceProperties(e.sn!, [{ propertyName: "QL_radar_design", value: e.qingLanConfig }], true).catch(() => {})),
+      );
+      message.success("区域编号已重排，平台画布和设备上的编号现在一致");
+    } catch (e) {
+      message.error(`重排失败：${errText(e)}`);
+    } finally {
+      setFixing(undefined);
+    }
+  }
+
+  /** 绑在房间、布置里没有的雷达：按空位置 → 户型 → 空白默认放进布置 */
+  async function addSlot(roomId: string, d: Radar) {
+    setFixing(roomId);
+    try {
+      const src = await slotSource(d, roomId);
+      await placeInLayout(d, roomId, src);
+      const fresh = await getRoomDesign(roomId);
+      setDesigns((m) => new Map(m).set(roomId, { design: fresh }));
+      message.success(src.kind === "blank" ? "已放进布置（空白配置），到设备属性 › 安装区域画区域并下发" : "已放进布置，到设备属性 › 安装区域点“按房间布置下发”发到设备上");
+    } catch (e) {
+      message.error(`放进布置失败：${errText(e)}`);
+    } finally {
+      setFixing(undefined);
+    }
+  }
+
   const levelDot = (l: Level) => (l === "error" ? "bad" : l === "warn" ? "warn" : l === "ok" ? "good" : "none");
 
   return (
@@ -204,7 +254,7 @@ export default function RoomsPage() {
             <span className="muted">
               {rooms.length} 间 · {counts.problem} 间有问题
             </span>
-            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="重新体检" style={{ marginLeft: "auto" }} />
+            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="重新诊断" style={{ marginLeft: "auto" }} />
           </div>
           <Input allowClear prefix={<SearchOutlined style={{ color: "#8A8FA8" }} />} placeholder="房间 / 楼栋 / 楼层 / 设备" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="seg">
@@ -216,7 +266,7 @@ export default function RoomsPage() {
           </div>
         </div>
         <button className={`room-report-entry${showReport ? " on" : ""}`} onClick={() => setShowReport(true)}>
-          <FileSearchOutlined /> 体检报告
+          <FileSearchOutlined /> 诊断结果
           <span className="grow" />
           {progress ? <span className="muted small">检查中 {progress.done}/{progress.total}</span> : <b>{counts.problem}</b>}
         </button>
@@ -262,7 +312,7 @@ export default function RoomsPage() {
           <Report reports={all} loading={loading} progress={progress} onPick={pick} />
         ) : sel ? (
           designs.has(sel.room.id) || sel.radars.length ? (
-            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} />
+            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} onFix={(i, r) => (i.fix === "add-slot" ? r.device && addSlot(sel.room.id, r.device) : renumber(sel.room.id))} fixing={fixing === sel.room.id} />
           ) : (
             <Spin style={{ margin: 80 }} />
           )
@@ -274,7 +324,7 @@ export default function RoomsPage() {
   );
 }
 
-/** 体检报告：机构里所有房间的问题，点一条跳到那个房间 */
+/** 诊断结果：机构里所有房间的问题，点一条跳到那个房间 */
 function Report({ reports, loading, progress, onPick }: { reports: RoomReport[]; loading: boolean; progress?: { done: number; total: number }; onPick: (id: string) => void }) {
   const bad = reports.filter((r) => r.level === "error" || r.level === "warn");
   const withRadar = reports.filter((r) => r.radars.length > 0);
@@ -286,7 +336,7 @@ function Report({ reports, loading, progress, onPick }: { reports: RoomReport[];
     <div className="detail room-detail">
       <div className="detail-head">
         <div className="detail-title">
-          <h1>体检报告</h1>
+          <h1>诊断结果</h1>
         </div>
         <div className="detail-sub room-sub">
           <span>房间布置、区域、平台记录和场景里的区域引用，都在本地按已取回的数据检查；设备上实际是什么，到房间里点"读设备核对"</span>

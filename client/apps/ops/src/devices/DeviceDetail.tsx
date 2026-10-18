@@ -11,6 +11,7 @@ import AngleTab from "./AngleTab";
 import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
 import PropertyTab from "./PropertyTab";
+import LocationDialog from "./LocationDialog";
 import { radarInRoom, type QlConfig } from "../rooms/qinglan";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
@@ -21,6 +22,7 @@ export default function DeviceDetail({
   typeName,
   listHidden,
   onToggleList,
+  onMoved,
 }: {
   d: Radar;
   /** 这台设备的实时推送（由设备列表统一订阅） */
@@ -28,8 +30,11 @@ export default function DeviceDetail({
   typeName?: string;
   listHidden: boolean;
   onToggleList: () => void;
+  /** 改了安装位置，设备列表要重新取 */
+  onMoved?: () => void;
 }) {
   const [room, setRoom] = useState<RoomInfo>();
+  const [moving, setMoving] = useState(false);
   const [hb, setHb] = useState<Heartbeat>();
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
@@ -41,6 +46,7 @@ export default function DeviceDetail({
   }, []);
 
   useEffect(() => {
+    setRoom(undefined);
     if (d.roomId) getRoomInfo(d.roomId).then(setRoom, () => {});
     // 最近一次心跳：查最近 2 小时
     getHeartbeats(d.sn, [dayjs().subtract(2, "hour").format(FMT), dayjs().format(FMT)], 200)
@@ -103,7 +109,12 @@ export default function DeviceDetail({
             <dt>所属机构</dt>
             <dd>{d.orgName}</dd>
             <dt>房间</dt>
-            <dd>{room?.place || d.roomName || "未绑定房间"}</dd>
+            <dd>
+              {room?.place || d.roomName || "未绑定房间"}
+              <Button type="link" size="small" onClick={() => setMoving(true)} style={{ height: "auto", padding: "0 6px" }}>
+                {d.roomId ? "更改" : "设置"}
+              </Button>
+            </dd>
             <dt>长者</dt>
             <dd>{d.realName || (d.memberCount ? `${d.memberCount} 人` : "—")}</dd>
             <dt>设备类型</dt>
@@ -203,10 +214,19 @@ export default function DeviceDetail({
           { key: "overview", label: "概览", children: overview },
           { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={link.online} /> },
           { key: "replay", label: "姿态回放", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
-          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} plan={plan} roomId={d.roomId} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
+          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
           { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}
+      />
+      <LocationDialog
+        d={d}
+        open={moving}
+        onClose={() => setMoving(false)}
+        onMoved={() => {
+          setMoving(false);
+          onMoved?.();
+        }}
       />
     </div>
   );

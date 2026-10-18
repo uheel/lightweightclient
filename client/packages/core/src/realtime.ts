@@ -16,6 +16,7 @@ import { session } from "./session";
  * - Record / Person：实时报警记录、人员报警
  * - AntNotice / AntNoticeClose / AntNotification / AntNotificationClose：平台下发的提示
  * - DeviceResponse：设备对属性读写指令的应答 {sn, command:"get-property"|"set-property", seq, code, message, data}
+ * - DeviceConfigChange：设备场景读写完成 {sn, command:"read"|"write", data}，读场景时 data.scenes 是场景列表
  */
 
 export type RealtimeState = "disconnected" | "connecting" | "connected" | "reconnecting";
@@ -38,6 +39,7 @@ const KNOWN_METHODS = [
   "AntNotification",
   "AntNotificationClose",
   "DeviceResponse",
+  "DeviceConfigChange",
 ];
 
 /** 已订阅的频道（引用计数）。连接 / 重连成功后会整体重新订阅 */

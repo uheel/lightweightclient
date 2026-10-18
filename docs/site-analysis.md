@@ -301,7 +301,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 ### 实时推送（SignalR /hub/message）
 - 订阅设备：`send("AddToGroupAsync", "sn1,sn1:radar,sn2,…")`（每台设备两个频道，用逗号拼成一个参数），取消订阅用 `RemoveFromGroupAsync`
 - `DeviceData` 的格式是 `{sn, msgType, payload, timestamp, dataType}`：msgType 1 呼吸心率，2 人体存在，3 跌倒，4 青岚呼吸心率（含睡眠状态），5 青岚轨迹（含姿态），6 超宽带呼吸睡眠，7 超宽带存在，11 在线状态。解析见 `client/packages/core/src/liveData.ts`
-- 其他推送：`Alert`、`AlertClose`、`AlertCount`、`Record`、`Person`、`DeviceConfigChange`、`DeviceResponse`
+- 其他推送：`Alert`、`AlertClose`、`AlertCount`、`Record`、`Person`、`DeviceConfigChange`（场景读写完成，见"场景模板与设备场景"）、`DeviceResponse`
 - 状态枚举：青岚（msgType 4，原始记录 `sleepStatus` 同）睡眠状态实测为 **1 浅睡 / 2 深睡 / 3 清醒**（2026-10-15：白天在床醒着的长者几乎全是 3，夜里 3 对应报告的清醒 / 离床段；早先按 0 离床 / 3 眼动 / 4 清醒解析是错的，导致醒着在床也显示"在床睡觉"）；人体存在 0 无人 / 1 有人 / 2 信号弱；生命状态 3 表示生命体征弱；呼吸状态 0 正常 / 1 过低 / 2 过高 / 3 暂停
 
 ## 长者健康数据（2026-10-14，已用一条真实样本脱敏核对）
@@ -465,7 +465,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `GET /api/scene-template/config?templateId=` | 单个模板的场景定义 `data.sceneConfig` |
 | `GET /api/scene-template/configs?templateId=a,b` | 批量取模板场景定义（平台"从模板导入"用的就是这个） |
 | `GET /api/device-scene/scene?deviceId=` | 设备当前场景（平台库里的，不是设备上读回的） |
-| `POST /api/device-scene/read` `{sn}` | 下发读取指令，结果从推送回来 |
+| `POST /api/device-scene/read` `{sn}` | 下发读取指令（`IOT.gettact`），返回 seq；结果从 SignalR **`DeviceConfigChange`** 回来：`{sn, command:"read", data:{scenes:[平台格式 camelCase]}}`（2026-10-18 实测走这个，同时还有一条 `AntNotification`"读取设备【…】场景完成"）；网页端也认 `DeviceResponse` `command:"get-tact"`（`data` 直接是列表）。写场景完成是 `DeviceConfigChange` `command:"write"`。网页端只按 sn 认应答，读回后按 `sceneName` 和平台记录合并（同名用设备内容、保留平台 id；只在设备上的追加） |
 | `POST /api/device-scene/scene` | 保存并下发设备场景，见下方"保存场景" |
 | `GET /api/device-config/scene-status?deviceId=` | 最近一次下发：`sceneIssueStatus, sceneIssueAt, sceneIssueError` |
 | `POST /api/device/test-{类型}-scene-alert` `{sn, sceneId}` | 测试场景上报 |
@@ -480,6 +480,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 已有场景原样带回（带 `id`）；从模板来的新场景去掉场景、条件、动作上的 `id`，平台会分配新 id。平台自己的编辑页只加载 `isDisabled !== true` 的场景、保存时全部置 `isDisabled:false`
 - 平台转成 `IOT.settact` 下发，`range` 秒数转成 `start:0, end:range-1`；设备应答 `code 201`，随后 `scene-status` 的 `sceneIssueStatus` 为 2（成功）
 - 实测把模板"离床告警"的 `{{area}}` 换成 `"0"`（监护床 index）后正常下发和应答
+- **平台记录跟设备 id 走，不跟 sn**：删掉设备再用同一个 sn 添加，新设备 id 下 `GET /api/device-scene/scene` 是空的，但设备上的场景还在（2026-10-18 距离test …6711 实测：平台记录为空，读设备读回"跌倒告警"）。所以按平台记录整体覆盖保存前，要先读一次设备，否则会把只在设备上的场景删掉
 
 ### 模板按设备类型分开
 
@@ -531,7 +532,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 ## 房间户型与雷达区域下发（2026-10-16 读平台前端代码 + 在李虎机构实测）
 
-客户端的简化方案见 [room-radar-simplification.md](room-radar-simplification.md)。
+客户端的简化方案见 [room-radar-simplification.md](room-radar-simplification.md)；户型、房间、设备、场景各份记录的关系和一致性问题见 [room-device-model.md](room-device-model.md)。
 
 ### 两套界面：老版和 v3
 
@@ -569,6 +570,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 户型自带床位槽位（`isBedSlot` 元素）时，`autoCreateBeds` 按槽位建床；实测户型没有床位槽位时不建床
 - 户型其他操作：`PUT /api/room-type/disable`；导出 `POST /api/room-type/export {roomTypeIds}` 返回一串文本（复制到剪贴板），导入 `POST /api/room-type/import {base64Data}`；引用平台内置模板 `GET /api/room-type/platfrom-pages`（平台原拼写）+ `POST /api/room-type/copy {roomTypeIds}`
 - 房间尺寸：`PUT /api/room/v3/size {roomId, roomWidth, roomLong}`（米）。宽 = 平面图水平方向，长 = 垂直方向
+- 改设备位置（雷达设备页"编辑"）：`GET /api/device/v3?id=&propertyNames=roomId` 取整条记录，`PUT /api/device/v3 {id, deviceName, sn, deviceType, sortOrder, description, properties:{roomId, buildingId, floorId}}`，`roomId: null` 解绑。2026-10-18 在 …0901d0 上实测：只改 `device.roomId`，房间布置（v3 design）和床位绑定都不动。`GET /api/device/v3` 不带 `propertyNames` 时 `properties` 是空的
 - 设备绑定（v3）：`GET /api/room/v3/uninstalled-radars?keywords=`、`GET /api/device-position/bindable-room-devices?roomId&keywords&deviceType`、`PUT /api/device-position/bind-room-device {roomId, deviceId}` / `unbind-room-device`；床位设备 `bind-bed-device {bedId, deviceId}` / `unbind-bed-device {bedId}`；设备绑长者 `POST /api/device/bind {deviceId, memberId}` / `unbind`
 - 能配区域的设备类型：AIO（6）、UltraFall（13）、UltraPlus（15）
 
@@ -589,7 +591,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - `bound`：实际监测边界，在容器内用户可缩小（`boundDistance` 上下左右到雷达的距离）。侧装时雷达那一边不能动
 - `supervision`：监护区左上角，正方形，**顶装 300 cm、侧装 200 cm**，默认居中（侧装贴雷达那一边）。监护床必须在里面
 - `installHeight` 米：顶装默认 2；侧装限制 1.5～3.5。`workingType`（3 人员跟踪 / 7 跌倒监测 / 11 呼吸睡眠 / 15 床位监护，默认 15）。切到**呼吸睡眠**会强制侧装、1.5 m，并把区域清成一张占满容器的监护床
-- `ranges[].index`：0～15，新区域取最小的空闲编号（删掉中间的区域后编号会留空）。场景条件里的区域号就是这个 index
+- `ranges[].index`：0～15，新区域取最小的空闲编号（删掉中间的区域后编号会留空）。**但下发时 `qinglan-compute` 按列表位置重新编成 0…n-1，不用这个 index**（2026-10-18 4*6 实测：画布 0/1/3 → 设备 0/1/2），场景条件里的区域号要按设备编号填，见 [room-device-model.md](room-device-model.md)
 - `extra.installArea / installAreaAlias`：安装区域（字典 `RADAR_INSTALL_AREA`）；`fallTime`：跌倒时间
 - 可以"复制到剪贴板"：`qinglan:ranges:` + base64(encodeURIComponent(JSON))
 
@@ -615,7 +617,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
   2. 转到雷达坐标系 (x, y)：顶装 上 `(dx, −dy)`、下 `(−dx, dy)`、右 `(dy, dx)`、左 `(−dy, −dx)`；侧装 上 `(−dx, dy)`、下 `(dx, −dy)`、右 `(−dy, −dx)`、左 `(dy, dx)`。就是前面 `toRoom` 的逆运算
   3. 矩形两角换算后取 x、y 的最小 / 最大，按 X-Y-, X+Y-, X-Y+, X+Y+ 排 4 个角
   4. 除以 10 变分米：**区域向零截断**；**边界用银行家舍入**（.5 取偶，.NET 默认的 Math.Round）；**侧装时边界的近端 y 固定为 0**
-  5. `QL_radar_config = [installType, round(installHeight×10), 8 个角, workingType]`；`QL_radar_area` 每项 `[index, type, 8 个角]`
+  5. `QL_radar_config = [installType, round(installHeight×10), 8 个角, workingType]`；`QL_radar_area` 每项 `[区域编号, type, 8 个角]`，**区域编号 = 在 ranges 里的位置（0…n-1），不是存的 index**。10-17 核对的 56 份布置都没有空号，所以当时没发现；运维端 `toDeviceArrays` 还在用存的 index，有空号时和平台不一致（2026-10-18）
 - 坐起测试（…627d）房间配置算出来和设备上的属性记录完全一致
 
 ### 下发

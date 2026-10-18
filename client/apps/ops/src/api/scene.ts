@@ -1,4 +1,5 @@
-import { api } from "@radar/core";
+import { api, realtime } from "@radar/core";
+import { isResponseOk, type DeviceResponse } from "./device";
 
 /** 场景模板与设备场景（接口说明见 docs/site-analysis.md"场景模板与设备场景"） */
 
@@ -78,6 +79,54 @@ export async function getDeviceScenes(deviceId: string) {
 }
 
 /**
+ * 从设备读回场景（IOT.gettact），30 秒超时。平台网页端两种推送都认、只按 sn 对：
+ * DeviceConfigChange {sn, command:"read", data:{scenes}}（实测走的是这个），或 DeviceResponse {sn, command:"get-tact", code, data:[...]}。
+ * 平台记录可能和设备不一致（例如删掉设备再添加，新设备 id 下没有记录，设备上的场景还在）。
+ */
+export function readDeviceScenes(sn: string, timeoutMs = 30_000) {
+  return new Promise<Scene[]>((resolve, reject) => {
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      offs.forEach((off) => off());
+      clearTimeout(timer);
+      fn();
+    };
+    const list = (v: unknown) => (Array.isArray(v) ? (v as Scene[]) : []);
+    const offs = [
+      realtime.on("DeviceConfigChange", (payload) => {
+        const r = payload as { sn?: string; command?: string; data?: { scenes?: unknown } };
+        if (r?.sn === sn && r.command === "read") finish(() => resolve(list(r.data?.scenes)));
+      }),
+      realtime.on("DeviceResponse", (payload) => {
+        const r = payload as DeviceResponse;
+        if (r?.sn !== sn || r.command !== "get-tact") return;
+        finish(() => (isResponseOk(r.code) ? resolve(list(r.data)) : reject(new Error(`${r.message || "设备返回错误"}（code ${r.code}）`))));
+      }),
+    ];
+    const timer = window.setTimeout(() => finish(() => reject(new Error("30 秒内设备没有应答，请确认设备在线"))), timeoutMs);
+    api.post<unknown>("/api/device-scene/read", { sn }).catch((e) => finish(() => reject(e)));
+  });
+}
+
+/**
+ * 合并平台记录和设备读回的场景，规则同平台网页端：按场景名对上，同名的用设备上的内容、保留平台的 id；只在设备上有的追加在后面。
+ * 只在平台上有的保留（平台网页端也是这样）。
+ */
+export function mergeDeviceScenes(platform: Scene[], device: Scene[]) {
+  if (!device.length) return platform;
+  const names = new Set(platform.map((s) => s.sceneName));
+  return [
+    ...platform.map((p) => {
+      const d = device.find((x) => x.sceneName === p.sceneName);
+      return d ? { ...d, id: p.id, sceneName: p.sceneName, isDisabled: false } : p;
+    }),
+    ...device.filter((d) => !names.has(d.sceneName)).map((d) => ({ ...d, isDisabled: false })),
+  ];
+}
+
+/**
  * 保存并下发设备场景。整体覆盖：列表里没有的场景会被删除。
  * 返回下发指令的 seq。
  */
@@ -146,7 +195,8 @@ export async function getRoomLayouts(roomId: string) {
       if (e.type === 3 && e.sn) {
         out.set(e.sn, {
           installArea: e.rangeType,
-          ranges: (e.qingLanConfig?.ranges ?? []).map((r, i) => ({ index: r.index ?? i, type: r.type, text: r.text, spaceType: r.spaceType })),
+          // 区域号 = 位置（平台下发按位置编号，存的 index 可能有空号），见 rooms/qinglan.ts zonesOf
+          ranges: (e.qingLanConfig?.ranges ?? []).map((r, i) => ({ index: i, type: r.type, text: r.text, spaceType: r.spaceType })),
         });
       }
       walk(e.children);

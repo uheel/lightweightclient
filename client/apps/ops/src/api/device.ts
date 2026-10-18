@@ -1,4 +1,4 @@
-import { api } from "@radar/core";
+import { api, realtime } from "@radar/core";
 
 /** 运维端专用：设备相关接口（用户端不使用，不放进 core） */
 
@@ -80,6 +80,53 @@ export async function createRadar(d: NewRadar) {
     properties: { buildingId: d.buildingId, floorId: d.floorId, roomId: d.roomId },
   });
   return res.data;
+}
+
+/** 设备记录（GET /api/device/v3?id=），编辑时要整条带回 */
+interface DeviceRecord {
+  id: string;
+  deviceName: string;
+  sn: string;
+  deviceType: number;
+  sortOrder?: number;
+  description?: string;
+  properties?: { roomId?: string | null; buildingId?: string | null; floorId?: string | null; bedId?: string | null };
+}
+
+/**
+ * 改设备的安装位置（房间绑定），和平台雷达设备页"编辑"一样：PUT /api/device/v3，整条记录带回，properties 里放位置；roomId 为 null = 解绑。
+ * 只改绑定（device.roomId），不动房间布置和床位绑定（2026-10-18 在 …0901d0 上实测），那两份要调用方自己处理，见 docs/room-device-model.md。
+ */
+export async function setRadarLocation(deviceId: string, loc: { buildingId?: string; floorId?: string; roomId?: string } | null) {
+  const rec = (await api.get<DeviceRecord>("/api/device/v3", { params: { id: deviceId, propertyNames: "roomId" } })).data;
+  if (!rec) throw new Error("设备记录读不到");
+  await api.put("/api/device/v3", {
+    id: rec.id,
+    deviceName: rec.deviceName,
+    sn: rec.sn,
+    deviceType: rec.deviceType,
+    sortOrder: rec.sortOrder,
+    description: rec.description,
+    properties: loc?.roomId ? { roomId: loc.roomId, buildingId: loc.buildingId, floorId: loc.floorId } : { roomId: null },
+  });
+}
+
+/** 绑在房间上的设备（平台房间设计左侧的设备列表），带床位绑定 */
+export interface RoomDevice {
+  deviceId: string;
+  sn: string;
+  deviceName?: string;
+  bedId?: string;
+  bedName?: string;
+}
+
+export async function getRoomDevices(roomId: string) {
+  return (await api.get<RoomDevice[]>("/api/room/radars", { params: { roomId } })).data ?? [];
+}
+
+/** 解除床位上的设备绑定 */
+export async function unbindBedDevice(bedId: string) {
+  await api.put("/api/device-position/unbind-bed-device", { bedId });
 }
 
 export interface Option {
@@ -414,7 +461,47 @@ export interface DeviceResponse {
   /** 0 / 200 / 201 表示成功 */
   code?: number;
   message?: string;
-  data?: Record<string, unknown>;
+  /** get-property 是 {属性名: 值}，get-tact 是场景列表 */
+  data?: unknown;
 }
 
 export const isResponseOk = (code?: number) => code === 0 || code === 200 || code === 201;
+
+/**
+ * 下发一条读写指令并等设备应答：send 返回 seq，应答从实时推送 DeviceResponse 回来（按 sn + command + seq 对上），超时报错。
+ * send 直接返回对象时当作数据本身（平台网页端也兼容这种情况）。应答没带 seq 时按 sn + command 认。
+ */
+export function awaitDeviceResponse<T>(sn: string, command: string, send: () => Promise<unknown>, timeoutMs = 30_000) {
+  return new Promise<T>((resolve, reject) => {
+    const early: DeviceResponse[] = [];
+    let seq: string | undefined;
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      off();
+      clearTimeout(timer);
+      fn();
+    };
+    const matches = (r: DeviceResponse) => r.seq === undefined || r.seq === null || String(r.seq) === seq;
+    const take = (r: DeviceResponse) =>
+      finish(() => (isResponseOk(r.code) ? resolve(r.data as T) : reject(new Error(`${r.message || "设备返回错误"}（code ${r.code}）`))));
+    const off = realtime.on("DeviceResponse", (payload) => {
+      const r = payload as DeviceResponse;
+      if (r?.sn !== sn || r.command !== command) return;
+      if (seq === undefined) early.push(r);
+      else if (matches(r)) take(r);
+    });
+    const timer = window.setTimeout(() => finish(() => reject(new Error("30 秒内设备没有应答，请确认设备在线"))), timeoutMs);
+    send().then(
+      (data) => {
+        if (data && typeof data === "object") return finish(() => resolve(data as T));
+        if (data === undefined || data === null || data === "") return finish(() => reject(new Error("指令没有返回序列号")));
+        seq = String(data);
+        const hit = early.find(matches);
+        if (hit) take(hit);
+      },
+      (e) => finish(() => reject(e)),
+    );
+  });
+}

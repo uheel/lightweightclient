@@ -20,13 +20,24 @@ export const LEVEL_TEXT: Record<Level, string> = { ok: "正常", warn: "需注�
 const LEVEL_CLASS: Record<Level, string> = { ok: "ok", warn: "warn", error: "bad", none: "" };
 
 /** 一条问题；有逐项说明时列在下面 */
-export function IssueItem({ i, who, onHover }: { i: Issue; who?: string; onHover?: (zone?: number) => void }) {
+export function IssueItem({ i, who, onHover, onFix, fixing }: { i: Issue; who?: string; onHover?: (zone?: number) => void; onFix?: (i: Issue) => void; fixing?: boolean }) {
   return (
     <li className={`issue ${i.level}`} onMouseEnter={() => onHover?.(i.zone)} onMouseLeave={() => onHover?.()}>
       <span className="issue-line">
         {i.level === "error" ? <CloseCircleFilled /> : <ExclamationCircleFilled />}
         {who && <b className="issue-dev">{who}</b>}
         <span>{i.text}</span>
+        {i.fix && onFix && (
+          <Button
+            size="small"
+            type="link"
+            loading={fixing}
+            onClick={() => onFix(i)}
+            title={i.fix === "renumber" ? "把布置里的区域编号改成和设备一致，只保存布置，设备上不变" : "按空位置 → 户型里的雷达 → 空白默认放一个雷达进布置"}
+          >
+            {i.fix === "renumber" ? "重排编号" : "放进布置"}
+          </Button>
+        )}
       </span>
       {i.details && i.details.length > 0 && (
         <ul className="issue-details">
@@ -50,11 +61,16 @@ export default function RoomDetail({
   typeName,
   reads,
   onRead,
+  onFix,
+  fixing,
 }: {
   report: RoomReport;
   typeName: (t?: number) => string;
   reads: Record<string, DeviceRead>;
   onRead: (r: RadarReport) => void;
+  /** 一键修复（重排编号、放进布置），保存布置 */
+  onFix?: (i: Issue, r: RadarReport) => void;
+  fixing?: boolean;
 }) {
   const { room, design, radars } = report;
   const [focus, setFocus] = useState<{ sn?: string; zone?: number }>({});
@@ -109,13 +125,23 @@ export default function RoomDetail({
               <i className="lg" style={{ background: ZONE_COLOR[t] }} /> {ZONE_TYPE[t]}
             </span>
           ))}
-          <span>数字是区域 ID，场景里的 {"{{area}}"} 填它</span>
+          <span>数字是设备上的区域 ID，场景里的 {"{{area}}"} 填它</span>
         </div>
       </div>
 
       {radars.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这个房间没有雷达" />}
       {radars.map((r) => (
-        <RadarCard key={r.sn || r.element?.id} r={r} label={label(r)} typeName={typeName} read={reads[r.sn]} onRead={() => onRead(r)} onFocus={(zone) => setFocus({ sn: r.sn, zone })} />
+        <RadarCard
+          key={r.sn || r.element?.id}
+          r={r}
+          label={label(r)}
+          typeName={typeName}
+          read={reads[r.sn]}
+          onRead={() => onRead(r)}
+          onFocus={(zone) => setFocus({ sn: r.sn, zone })}
+          onFix={onFix ? (i) => onFix(i, r) : undefined}
+          fixing={fixing}
+        />
       ))}
     </div>
   );
@@ -128,6 +154,8 @@ function RadarCard({
   read,
   onRead,
   onFocus,
+  onFix,
+  fixing,
 }: {
   r: RadarReport;
   label: string;
@@ -135,6 +163,8 @@ function RadarCard({
   read?: DeviceRead;
   onRead: () => void;
   onFocus: (zone?: number) => void;
+  onFix?: (i: Issue) => void;
+  fixing?: boolean;
 }) {
   const c = r.config;
   const d = r.device;
@@ -158,7 +188,7 @@ function RadarCard({
         )}
         <span className="grow" />
         {r.level !== "none" && <span className={`grade ${LEVEL_CLASS[r.level]}`}>{LEVEL_TEXT[r.level]}</span>}
-        {r.level === "none" && <span className="muted small">这个型号不配区域</span>}
+        {r.level === "none" && <span className="muted small">{r.placeholder ? "空位置，装设备时沿用这里的安装方式和区域" : "这个型号不配区域"}</span>}
       </h2>
 
       {c && (
@@ -191,7 +221,7 @@ function RadarCard({
       {r.issues.length > 0 && (
         <ul className="issues">
           {r.issues.map((i, k) => (
-            <IssueItem key={k} i={i} onHover={onFocus} />
+            <IssueItem key={k} i={i} onHover={onFocus} onFix={onFix} fixing={fixing} />
           ))}
         </ul>
       )}

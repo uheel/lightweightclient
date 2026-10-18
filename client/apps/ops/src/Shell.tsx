@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, HomeOutlined, LogoutOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, LogoutOutlined, MedicineBoxOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import RoomsPage from "./pages/RoomsPage";
@@ -40,7 +40,7 @@ export default function Shell({ s }: { s: Session }) {
 
   const items: ShellNavItem<NavKey>[] = [
     { key: "devices", label: "设备", icon: <HddOutlined /> },
-    { key: "rooms", label: "房间", icon: <HomeOutlined /> },
+    { key: "rooms", label: "诊断", icon: <MedicineBoxOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
     { key: "members", label: "长者", icon: <TeamOutlined /> },
     { key: "alerts", label: "告警", icon: <AlertOutlined /> },

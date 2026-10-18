@@ -5,7 +5,7 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 /**
  * 区域画布：在平面图方向上拖动区域、拖边角改大小，监测范围也直接拖边。界面上不出现坐标数字。
  * 内部全部用设备坐标（分米，以雷达为原点）：设备只认这个，也正好是设备的精度（10 cm）。
- * 画的时候按房间平面图的方向转一下（和平台网页端、运维端"房间"页一致）。
+ * 画的时候按房间平面图的方向转一下（和平台网页端、运维端"诊断"页一致）。
  */
 
 /** 设备坐标里的矩形，分米 */
@@ -120,6 +120,8 @@ export default function ZoneCanvas({
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [sel, setSel] = useState<Target>();
+  /** 删除区域后编号前移的提示 */
+  const [shifted, setShifted] = useState<string>();
   // 拖动状态放在 ref 里：快速拖动时 pointermove 可能比重新渲染先到，读 state 会丢掉这些移动
   const dragRef = useRef<Drag>(undefined);
   const [dragging, setDragging] = useState(false);
@@ -208,8 +210,17 @@ export default function ZoneCanvas({
     setSel({ kind: "zone", index: next.length - 1 });
   }
 
+  /**
+   * 删掉后按编号顺序重排成 0…n-1：平台下发按位置编号，留空号的话平台再下发一次编号就变了，
+   * 场景引用的区域号会对不上（docs/room-device-model.md"区域编号有三个数"）。
+   */
   function remove(i: number) {
-    onZones(zones.filter((_, j) => j !== i));
+    const gone = zones[i]?.id;
+    const rest = zones.filter((_, j) => j !== i);
+    const order = [...rest].sort((a, b) => a.id - b.id);
+    const moved = order.filter((z, k) => z.id !== k).map((z) => z.id);
+    onZones(rest.map((z) => ({ ...z, id: order.indexOf(z) })));
+    setShifted(moved.length && gone !== undefined ? `删掉了编号 ${gone}，后面的编号 ${moved.join("、")} 各往前挪了一位。场景里引用这些编号的要跟着改` : undefined);
     setSel(undefined);
   }
 
@@ -367,6 +378,7 @@ export default function ZoneCanvas({
           <span className="muted">拖动区域移动，选中后拖边角调大小，方向键微调 10 厘米；点虚线框可以调监测范围。</span>
         )}
       </div>
+      {shifted && <p className="pp-note warn">{shifted}</p>}
     </div>
   );
 }

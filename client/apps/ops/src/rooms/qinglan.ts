@@ -14,7 +14,7 @@ export interface QlRect {
 
 export interface QlZone {
   id?: string;
-  /** 下发给设备的区域 ID，0～15，场景条件里的 {{area}} 就是它 */
+  /** 平台画布上显示的编号。设备和场景用的是在 ranges 里的位置（见 zonesOf），保存布置时客户端把它重写成位置 */
   index?: number;
   /** 2 普通床，3 干扰区，4 门，5 监护床，6 感应区，7 家具 */
   type: number;
@@ -116,8 +116,21 @@ export function supervisionRect(c: QlConfig): QlRect {
   return { x: o.x + (c.supervision?.x ?? 0), y: o.y + (c.supervision?.y ?? 0), width: s, height: s };
 }
 
-/** 区域列表，补上缺的 index（平台旧数据按顺序编号） */
-export const zonesOf = (c: QlConfig): (QlZone & { index: number })[] => (c.ranges ?? []).map((z, i) => ({ ...z, index: z.index ?? i }));
+/**
+ * 区域列表，index = 在 ranges 里的位置。平台下发（qinglan-compute）按位置编号，不用存的 index，
+ * 所以设备、场景用的区域号就是位置；存的 index 删区域后会留空号，只是平台画布上显示的数。见 docs/room-device-model.md"区域编号有三个数"。
+ */
+export const zonesOf = (c: QlConfig): (QlZone & { index: number })[] => (c.ranges ?? []).map((z, i) => ({ ...z, index: i }));
+
+/** 存的 index 和位置对不上的区域（平台画布显示的编号和设备上的不一样） */
+export const zoneIndexDrift = (c: QlConfig) =>
+  (c.ranges ?? []).flatMap((z, i) => (z.index !== undefined && z.index !== i ? [{ stored: z.index, actual: i, zone: z }] : []));
+
+/** 把存的 index 改成位置（设备数组不变，不用下发）；没有要改的就原样返回 */
+export function renumberZones(c: QlConfig): QlConfig {
+  if (!c.ranges?.some((z, i) => z.index !== i)) return c;
+  return { ...c, ranges: c.ranges.map((z, i) => ({ ...z, index: i })) };
+}
 
 // ---------- 换算成设备数组 ----------
 
@@ -251,6 +264,8 @@ export interface Issue {
   zone?: number;
   /** 逐项说明（例如布置和设备哪几个区域不一样） */
   details?: string[];
+  /** 诊断页能一键修的：renumber 重排区域编号并保存布置；add-slot 把绑在房间的雷达放进布置 */
+  fix?: "renumber" | "add-slot";
 }
 
 const zoneName = (z: QlZone & { index: number }) => `区域 ${z.index}（${z.text || ZONE_TYPE[z.type] || `类型 ${z.type}`}）`;
@@ -279,12 +294,14 @@ export function validate(c: QlConfig): Issue[] {
   else if (mountOf(c) === SIDE && (h < 1.5 || h > 3.5)) out.push({ level: "warn", text: `侧装高度 ${h} m，平台只允许 1.5～3.5 m（低于 1.5 m 时床上坐起的识别率会大大降低）` });
 
   if (zones.length > 16) out.push({ level: "error", text: `区域有 ${zones.length} 个，设备最多 16 个` });
-  const seen = new Map<number, number>();
-  for (const z of zones) seen.set(z.index, (seen.get(z.index) ?? 0) + 1);
-  for (const [i, n] of seen) {
-    if (n > 1) out.push({ level: "error", text: `区域 ID ${i} 重复了 ${n} 次`, zone: i });
-    if (i < 0 || i > 15) out.push({ level: "error", text: `区域 ID ${i} 超出 0～15`, zone: i });
-  }
+  const drift = zoneIndexDrift(c);
+  if (drift.length)
+    out.push({
+      level: "warn",
+      text: `平台画布上的区域编号和设备上的不一样（删过中间的区域留了空号）：${drift.map((d) => `画布 ${d.stored} = 设备 ${d.actual}（${d.zone.text || ZONE_TYPE[d.zone.type] || `类型 ${d.zone.type}`}）`).join("，")}。场景要按设备编号填；重排编号后两边一致，设备上不变`,
+      zone: drift[0]!.actual,
+      fix: "renumber",
+    });
 
   const bound = boundRect(c);
   for (const z of zones) {

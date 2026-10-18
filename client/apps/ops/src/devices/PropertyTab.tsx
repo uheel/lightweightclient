@@ -16,6 +16,7 @@ import {
 } from "../api/device";
 import { structuredFor, PLAN_CTX, type PlanCtx } from "./propertyEditors";
 import { syncLayoutFromDevice } from "../rooms/syncLayout";
+import { sameArray, toDeviceArrays, validate, type QlConfig } from "../rooms/qinglan";
 import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
 
 /**
@@ -112,6 +113,7 @@ export default function PropertyTab({
   online,
   plan,
   roomId,
+  layout,
   onLayoutSynced,
 }: {
   sn: string;
@@ -122,6 +124,8 @@ export default function PropertyTab({
   plan?: Omit<PlanCtx, "deviceType">;
   /** 写回房间布置之后（让外面重新取房间信息） */
   onLayoutSynced?: () => void;
+  /** 房间布置里这台雷达的配置：可以按它整份下发（布置刚从户型拷来、平台记录已经一样时，普通"改了才下发"发不出去） */
+  layout?: QlConfig;
 }) {
   const { message, modal, notification } = App.useApp();
   const [schema, setSchema] = useState<PropertySchema>();
@@ -143,6 +147,8 @@ export default function PropertyTab({
   const pending = useRef<Pending>(undefined);
   /** 这次下发已经因为设备忙（code 103）自动重发过一次 */
   const retried = useRef(false);
+  /** 按房间布置下发时直接给的值（不经过 edits），重发和应答时都用它 */
+  const forced = useRef<Record<string, unknown>>(undefined);
   /** 还没下发的房间布置改动（顶装 / 侧装互换后的朝向、雷达位置） */
   const [planEdit, setPlanEdit] = useState<Partial<PlanCtx>>();
   const planEditRef = useRef(planEdit);
@@ -259,6 +265,7 @@ export default function PropertyTab({
     p.timer = window.setTimeout(() => {
       if (!finish(p)) return;
       if (command === "set-property") {
+        forced.current = undefined;
         markDelivery(p.names, { status: "timeout", at: Date.now() });
         refreshStored();
       }
@@ -284,7 +291,7 @@ export default function PropertyTab({
     const ok = isResponseOk(r.code);
     if (p.command === "get-property") {
       if (ok) {
-        applyRead(p.names, r.data ?? {});
+        applyRead(p.names, (r.data ?? {}) as Record<string, unknown>);
       } else {
         notification.error({ message: "读取设备属性失败", description: `${r.message ?? ""}（code ${r.code}）`, duration: 10 });
       }
@@ -295,12 +302,15 @@ export default function PropertyTab({
       markDelivery(p.names, { status: "ok", at: now });
       // 设备上的值已经是下发的值
       const written: Record<string, unknown> = {};
-      for (const n of p.names) written[n] = editsRef.current[n];
+      const fromLayout = forced.current;
+      for (const n of p.names) written[n] = fromLayout ? fromLayout[n] : editsRef.current[n];
+      forced.current = undefined;
       applyDevice(written, "write");
-      message.success("设备已接收下发的属性");
+      message.success(fromLayout ? "设备已按房间布置更新安装配置和区域" : "设备已接收下发的属性");
       const pe = planEditRef.current;
       setPlanEdit(undefined);
-      if (roomId && ("QL_radar_area" in written || "QL_radar_config" in written)) {
+      // 按布置下发时布置本身就是来源，不用写回
+      if (roomId && !fromLayout && ("QL_radar_area" in written || "QL_radar_config" in written)) {
         const mount = pe?.facing !== undefined ? { facing: pe.facing, radar: pe.room?.radar } : undefined;
         syncLayoutFromDevice(roomId, sn, { config: written.QL_radar_config, area: written.QL_radar_area }, mount).then(
           (res) => {
@@ -322,6 +332,7 @@ export default function PropertyTab({
       return;
     } else {
       const busy = r.code === BUSY;
+      forced.current = undefined;
       markDelivery(p.names, { status: "error", at: now, error: busy ? "设备一直在忙，没有接受（code 103），请过一会儿再下发" : `${r.message ?? "下发失败"}（code ${r.code}）` });
       notification.error({ message: "下发设备属性失败", description: busy ? "设备一直在忙，没有接受这次设置（code 103）。请过一会儿再下发。" : `${r.message ?? ""}（code ${r.code}）`, duration: 10 });
     }
@@ -455,10 +466,13 @@ export default function PropertyTab({
     });
   }
 
-  async function doWrite(list: PropertyDef[], saveOnly: boolean, isRetry = false) {
-    if (!isRetry) retried.current = false;
+  async function doWrite(list: PropertyDef[], saveOnly: boolean, isRetry = false, values?: Record<string, unknown>) {
+    if (!isRetry) {
+      retried.current = false;
+      forced.current = values;
+    }
     const names = list.map((p) => p.propertyName);
-    const props = names.map((n) => ({ propertyName: n, value: valueOf(n) }));
+    const props = names.map((n) => ({ propertyName: n, value: forced.current ? forced.current[n] : valueOf(n) }));
     const p = saveOnly ? undefined : begin("set-property", names);
     if (!saveOnly && !p) return;
     if (p) markDelivery(names, { status: "pending" });
@@ -495,6 +509,7 @@ export default function PropertyTab({
       gotSeq(p, data);
     } catch (e) {
       if (p && !finish(p)) return;
+      forced.current = undefined;
       markDelivery(names, { status: "error", at: Date.now(), error: e instanceof Error ? e.message : String(e) });
       message.error(`下发失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -502,6 +517,60 @@ export default function PropertyTab({
 
   const doWriteRef = useRef(doWrite);
   doWriteRef.current = doWrite;
+
+  // ---------- 按房间布置下发 ----------
+
+  const layoutArrays = useMemo(() => (layout ? toDeviceArrays(layout) : undefined), [layout]);
+  const layoutProps = (schema?.properties ?? []).filter((p) => ["QL_radar_config", "QL_radar_area", "QL_radar_design", "QL_radar_working_type"].includes(p.propertyName));
+  const showLayoutBar = !!layoutArrays && rows.some((p) => p.propertyName === "QL_radar_area" || p.propertyName === "QL_radar_config");
+  /** 设备读回 / 下发过的值和布置比：undefined = 还没读设备 */
+  const devMatch =
+    layoutArrays && "QL_radar_config" in device && "QL_radar_area" in device
+      ? sameArray(device.QL_radar_config.value, layoutArrays.config) && sameArray(device.QL_radar_area.value ?? [], layoutArrays.area)
+      : undefined;
+
+  function pushLayout() {
+    if (!layout || !layoutArrays) return;
+    const values: Record<string, unknown> = {
+      QL_radar_config: layoutArrays.config,
+      QL_radar_area: layoutArrays.area,
+      QL_radar_design: layout,
+      QL_radar_working_type: layout.workingType ?? 15,
+    };
+    const list = layoutProps.filter((p) => p.propertyName in values);
+    if (!list.some((p) => p.propertyName === "QL_radar_area")) return message.warning("这台设备没有区域属性，不能按布置下发");
+    const errs = validate(layout).filter((i) => i.level === "error");
+    modal.confirm({
+      title: "按房间布置下发安装配置和区域？",
+      width: 560,
+      okText: "下发到设备",
+      cancelText: "再看看",
+      content: (
+        <div className="prop-confirm">
+          <p className="muted small">把房间布置里这台雷达的安装方式、监测范围和 {layout.ranges?.length ?? 0} 个区域发给设备（SN {sn}），设备收到后立即按新配置工作。</p>
+          <ul>
+            <li>
+              <b>安装配置</b> <span className="mono">{JSON.stringify(layoutArrays.config)}</span>
+            </li>
+            <li>
+              <b>区域</b> <span className="mono">{layoutArrays.area.length ? layoutArrays.area.map((a) => a.slice(0, 2).join(":")).join("，") : "没有区域"}</span>
+            </li>
+          </ul>
+          {errs.length > 0 && <p className="err-text small">布置有问题，下发后设备可能用不了：{errs.map((i) => i.text).join("；")}</p>}
+        </div>
+      ),
+      onOk: () => {
+        if (pending.current) return message.warning("上一条指令还在等设备应答，请稍后再试");
+        // 还没下发的手动修改作废，免得和布置混在一起
+        setEdits((e) => {
+          const next = { ...e };
+          for (const p of list) delete next[p.propertyName];
+          return next;
+        });
+        return doWrite(list, false, false, values);
+      },
+    });
+  }
 
   function undo() {
     setPlanEdit(undefined);
@@ -601,6 +670,17 @@ export default function PropertyTab({
               <h2>{groupLabel}</h2>
               {groupText && <p>{groupText}</p>}
             </header>
+            {showLayoutBar && (
+              <div className="pp-layout">
+                <span>
+                  <b>房间布置</b>：{layout?.installType === 0 ? "顶装" : "侧装"}，{layout?.ranges?.length ?? 0} 个区域
+                  {devMatch === true ? "，设备上一致" : devMatch === false ? "，设备上不一样" : "（平台记录可能已被保存布置改过，不代表设备上是这个，读取本组可以核对）"}
+                </span>
+                <Button size="small" icon={<CloudUploadOutlined />} disabled={!!busy || !online} onClick={pushLayout}>
+                  按房间布置下发
+                </Button>
+              </div>
+            )}
             {allReadOnly ? (
               <dl className="pp-kv">
                 {rows.map((p) => (

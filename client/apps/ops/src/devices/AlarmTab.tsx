@@ -8,7 +8,9 @@ import {
   getSceneIssueStatus,
   getSceneTemplates,
   getTemplateScene,
+  mergeDeviceScenes,
   RANGE_TYPE,
+  readDeviceScenes,
   saveDeviceScenes,
   SPACE_TYPE,
   waitIssued,
@@ -65,6 +67,8 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   const [pick, setPick] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string>();
   const [result, setResult] = useState<{ label: string; ok: boolean; text?: string }>();
+  /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
+  const [deviceRead, setDeviceRead] = useState<{ state: "skip" | "reading" | "ok" | "fail"; text?: string; extra?: number }>({ state: "skip" });
 
   async function load() {
     setLoading(true);
@@ -92,10 +96,24 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
       setDefs(sc);
       setScenes(current);
       setLayout(layouts?.get(d.sn));
+      setLoading(false);
+      readDevice(current);
     } catch (e) {
       setError(errText(e));
-    } finally {
       setLoading(false);
+    }
+  }
+
+  /** 平台记录不一定是设备上的（删了设备再添加时新 id 下没有记录），在线时再读一次设备，按场景名合并 */
+  async function readDevice(platform: Scene[]) {
+    if (!online || d.isDisabled) return setDeviceRead({ state: "skip" });
+    setDeviceRead({ state: "reading" });
+    try {
+      const merged = mergeDeviceScenes(platform, await readDeviceScenes(d.sn));
+      setScenes(merged);
+      setDeviceRead({ state: "ok", extra: merged.length - platform.length });
+    } catch (e) {
+      setDeviceRead({ state: "fail", text: errText(e) });
     }
   }
   useEffect(() => {
@@ -155,7 +173,8 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
     }
   }
 
-  const blocked = d.isDisabled ? "设备已停用" : !online ? "设备离线，无法下发" : undefined;
+  // 设备上的场景没读回来之前不让开关：保存是整体覆盖，会把只在设备上的场景删掉
+  const blocked = d.isDisabled ? "设备已停用" : !online ? "设备离线，无法下发" : deviceRead.state === "reading" ? "正在读设备上的场景" : undefined;
 
   if (loading)
     return (
@@ -172,7 +191,25 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
           <Button size="small" type="text" icon={<ReloadOutlined />} disabled={!!busy} onClick={load} title="重新读取" style={{ marginLeft: "auto" }} />
         </h2>
         {error && <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`读取失败：${error}`} />}
-        {blocked && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={`${blocked}，开关暂不可用`} />}
+        {blocked && deviceRead.state !== "reading" && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={`${blocked}，开关暂不可用`} />}
+        {deviceRead.state === "reading" && (
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            <Spin size="small" /> 正在读设备上的场景，读回后再开关…
+          </p>
+        )}
+        {deviceRead.state === "fail" && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 10 }}
+            message={`没读到设备上的场景（${deviceRead.text}），下面按平台记录显示；设备上另有的场景，开关时会被覆盖掉`}
+          />
+        )}
+        {deviceRead.state === "ok" && !!deviceRead.extra && (
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            设备上有 {deviceRead.extra} 个场景平台没有记录（例如删掉设备后重新添加），已按设备读回的显示，开关时会一起保存到平台。
+          </p>
+        )}
         <ul className="alarm-list">
           {rows.map((r) => {
             const on = !!r.current;

@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { App, Form, Input, Modal, Select, Space } from "antd";
+import { App, Checkbox, Form, Input, Modal, Select, Space } from "antd";
 import {
   createRadar,
   getBuildingOptions,
   getFloorOptions,
+  getRadars,
   getRadarTypes,
   getRoomOptions,
   type Option,
   type Radar,
 } from "../api/device";
+import { placeInLayout, SLOT_TEXT, slotSource, type SlotSource } from "../rooms/radarSlot";
 
 interface Values {
   sn: string;
@@ -37,6 +39,11 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
   const [saving, setSaving] = useState(false);
   const buildingId = Form.useWatch("buildingId", form);
   const floorId = Form.useWatch("floorId", form);
+  const roomId = Form.useWatch("roomId", form);
+  const deviceType = Form.useWatch("deviceType", form);
+  /** 选了房间时，布置里放哪（平台新增设备只绑房间，不动布置） */
+  const [slot, setSlot] = useState<SlotSource>();
+  const [place, setPlace] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -54,13 +61,35 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     if (floorId) getRoomOptions(floorId).then(setRooms, () => {});
   }, [floorId]);
 
+  useEffect(() => {
+    setSlot(undefined);
+    if (!roomId) return;
+    let alive = true;
+    slotSource({ sn: "", deviceType } as Radar, roomId).then((x) => alive && setSlot(x), () => {});
+    return () => {
+      alive = false;
+    };
+  }, [roomId, deviceType]);
+
   async function submit() {
     const v = await form.validateFields();
     setSaving(true);
     try {
       const sn = v.sn.trim();
-      await createRadar({ ...v, sn, deviceName: v.deviceName.trim(), description: v.description?.trim() || undefined });
-      message.success(`已添加设备 ${v.deviceName.trim()}`);
+      const deviceName = v.deviceName.trim();
+      const id = await createRadar({ ...v, sn, deviceName, description: v.description?.trim() || undefined });
+      let note = "";
+      if (v.roomId && place && slot && slot.kind !== "has") {
+        try {
+          // 新增接口应返回设备 id；没返回时按 SN 查一下（布置里的雷达要带 deviceId）
+          const devId = typeof id === "string" && id ? id : (await getRadars()).find((x) => x.sn === sn)?.id;
+          await placeInLayout({ id: devId ?? "", sn, deviceName, deviceType: v.deviceType } as Radar, v.roomId, slot);
+        } catch (e) {
+          note = `，但放进房间布置失败（${e instanceof Error ? e.message : String(e)}），可到"诊断"页补上`;
+        }
+      }
+      if (note) message.warning(`已添加设备 ${deviceName}${note}`);
+      else message.success(`已添加设备 ${deviceName}`);
       onCreated(sn);
     } catch (e) {
       message.error(`添加失败：${e instanceof Error ? e.message : String(e)}`);
@@ -129,6 +158,13 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
             </Form.Item>
           </Space.Compact>
         </Form.Item>
+        {roomId && slot && slot.kind !== "has" && (
+          <Form.Item style={{ marginTop: -12 }}>
+            <Checkbox checked={place} onChange={(e) => setPlace(e.target.checked)}>
+              {slot.kind === "roomType" && slot.typeName ? `从户型"${slot.typeName}"拷一个雷达位置（沿用户型里的安装方式和区域）` : SLOT_TEXT[slot.kind]}
+            </Checkbox>
+          </Form.Item>
+        )}
         <Form.Item name="description" label="备注">
           <Input.TextArea maxLength={200} autoSize={{ minRows: 2, maxRows: 4 }} />
         </Form.Item>

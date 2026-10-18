@@ -1,6 +1,6 @@
-import { api, realtime } from "@radar/core";
-import type { QlConfig } from "../rooms/qinglan";
-import { isResponseOk, readDeviceProperties, type DeviceResponse } from "./device";
+import { api } from "@radar/core";
+import { renumberZones, type QlConfig } from "../rooms/qinglan";
+import { awaitDeviceResponse, readDeviceProperties } from "./device";
 
 /** 房间与房间布置（v3 接口，见 docs/site-analysis.md"房间户型与雷达区域下发"） */
 
@@ -67,9 +67,23 @@ export async function getRoomDesign(roomId: string) {
   return (await api.get<RoomDesign>("/api/room/v3/design", { params: { roomId } })).data;
 }
 
-/** 保存房间布置（平台房间详情、换算都读这一份）。注意：不会下发到设备，只会把平台属性记录的值改掉 */
+/**
+ * 保存房间布置（平台房间详情、换算都读这一份）。注意：不会下发到设备，只会把平台属性记录的值改掉。
+ * 保存时把每台雷达的区域 index 重写成位置，让平台画布显示的编号和设备上的一致（平台下发按位置编号）。
+ */
 export async function saveRoomDesign(roomId: string, d: Pick<RoomDesign, "roomStyle" | "elements">) {
-  await api.post<number>("/api/room/v3/design", { roomId, roomStyle: d.roomStyle, elements: d.elements });
+  const fix = (list?: PlanElement[]): PlanElement[] | undefined =>
+    list?.map((e) => ({
+      ...e,
+      ...(e.type === 3 && e.qingLanConfig ? { qingLanConfig: renumberZones(e.qingLanConfig) } : {}),
+      ...(e.children ? { children: fix(e.children) } : {}),
+    }));
+  await api.post<number>("/api/room/v3/design", { roomId, roomStyle: d.roomStyle, elements: fix(d.elements) });
+}
+
+/** 房间所用户型的当前设计（户型改过的话是改后的，和房间里的拷贝无关） */
+export async function getRoomTypeDesignOf(roomId: string) {
+  return (await api.get<RoomDesign>("/api/room/v3/current-room-type-design", { params: { roomId } })).data;
 }
 
 /** 房间布置里的雷达元素（含组合里的） */
@@ -97,36 +111,6 @@ export function roomSize(d?: RoomDesign, r?: Room) {
  * 6 型应答里的键是报文别名（QL_radar_para_config），13 型是字典名（QL_radar_config），调用方两种都要认。
  * 注意：读回的值平台也会存成"平台记录"。
  */
-export function readFromDevice(sn: string, names: string[], timeoutMs = 30_000) {
-  return new Promise<Record<string, unknown>>((resolve, reject) => {
-    const early: DeviceResponse[] = [];
-    let seq: string | undefined;
-    let done = false;
-    const finish = (fn: () => void) => {
-      if (done) return;
-      done = true;
-      off();
-      clearTimeout(timer);
-      fn();
-    };
-    const take = (r: DeviceResponse) =>
-      finish(() => (isResponseOk(r.code) ? resolve(r.data ?? {}) : reject(new Error(`${r.message || "设备返回错误"}（code ${r.code}）`))));
-    const off = realtime.on("DeviceResponse", (payload) => {
-      const r = payload as DeviceResponse;
-      if (r?.sn !== sn || r.command !== "get-property") return;
-      if (seq === undefined) early.push(r);
-      else if (String(r.seq) === seq) take(r);
-    });
-    const timer = window.setTimeout(() => finish(() => reject(new Error("30 秒内设备没有应答，请确认设备在线"))), timeoutMs);
-    readDeviceProperties(sn, names).then(
-      (data) => {
-        if (data && typeof data === "object") return finish(() => resolve(data as Record<string, unknown>));
-        if (data === undefined || data === null || data === "") return finish(() => reject(new Error("读取指令没有返回序列号")));
-        seq = String(data);
-        const hit = early.find((r) => String(r.seq) === seq);
-        if (hit) take(hit);
-      },
-      (e) => finish(() => reject(e)),
-    );
-  });
+export async function readFromDevice(sn: string, names: string[], timeoutMs = 30_000) {
+  return (await awaitDeviceResponse<Record<string, unknown>>(sn, "get-property", () => readDeviceProperties(sn, names), timeoutMs)) ?? {};
 }

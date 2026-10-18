@@ -20,7 +20,7 @@ import {
 
 /**
  * 在设备属性里直接下发了安装配置 / 区域之后，把同样的改动写回房间布置。
- * 平台的房间详情、运维端"房间"页都以房间布置为准；不写回的话，设备是新的、平台上画的还是旧的。
+ * 平台的房间详情、运维端"诊断"页都以房间布置为准；不写回的话，设备是新的、平台上画的还是旧的。
  * 平台 v3 房间设计里的"读取区域"也是这样把设备上的区域套回画布。
  */
 
@@ -89,12 +89,16 @@ export function applyDeviceArrays(c: QlConfig, written: { config?: unknown; area
   }
 
   if (written.area !== undefined) {
-    const rows = (parseArray(written.area) ?? []).map(nums).filter((r) => r.length >= 10);
+    // 区域号 = 位置：设备的行按区域号排好，第 k 行对应布置里第 k 个区域（类型相同才算同一个，保留名称、spaceType、id）
+    const rows = (parseArray(written.area) ?? [])
+      .map(nums)
+      .filter((r) => r.length >= 10)
+      .sort((a, b) => a[0]! - b[0]!);
     const old = zonesOf(c);
     const r = radarInContainer(geo);
-    next.ranges = rows.map((row): QlZone => {
-      const [index, type] = [row[0]!, row[1]!];
-      const prev = old.find((z) => z.index === index && z.type === type);
+    next.ranges = rows.map((row, index): QlZone => {
+      const type = row[1]!;
+      const prev = old[index]?.type === type ? old[index] : undefined;
       const rect = rectFromCorners(geo, row.slice(2, 10), r);
       return {
         ...(prev ?? { id: `z${Date.now().toString(36)}${index}`, text: ZONE_TYPE[type] ?? `区域 ${index}`, fill: fillOf(type) }),
