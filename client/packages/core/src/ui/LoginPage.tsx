@@ -1,11 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Button, Checkbox, Form, Input, Popover } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { isTauri } from "../http";
 import { loadPrefs, savePrefs, session } from "../session";
 import { CAN_PICK_SERVER, initialServer, SERVERS, signIn } from "../auth";
 import { brand } from "../theme";
-import { BreathTrace } from "./BreathTrace";
+import { BreathTrace, type BreathTraceHandle } from "./BreathTrace";
+import { revealFromLine } from "./SessionGate";
 import { WindowControls } from "./WindowControls";
 import "./LoginPage.css";
 
@@ -87,23 +88,31 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
   const [server, setServer] = useState(initialServer);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [leaving, setLeaving] = useState(false);
+  const trace = useRef<BreathTraceHandle>(null);
 
   async function onFinish(v: FormValues) {
     setLoading(true);
     setError(undefined);
+    let s;
     try {
-      const s = await signIn(server, v.username.trim(), v.password);
-      savePrefs({ server, username: v.remember ? v.username.trim() : "" });
-      session.set(s);
+      s = await signIn(server, v.username.trim(), v.password);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
       setLoading(false);
+      trace.current?.shake();
+      return;
     }
+    savePrefs({ server, username: v.remember ? v.username.trim() : "" });
+    // 线先深吸一口气、拉直，再从这条线拉开进入主界面
+    setLeaving(true);
+    const y = (await trace.current?.settle()) ?? 0;
+    revealFromLine(y);
+    session.set(s);
   }
 
   return (
-    <div className="lp">
+    <div className={leaving ? "lp lp-leaving" : "lp"}>
       {/* 关掉系统标题栏时，顶部这条用来拖动窗口 */}
       <div className="lp-bar" data-tauri-drag-region>
         <WindowControls />
@@ -119,7 +128,7 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
       </div>
 
       <div className="lp-trace">
-        <BreathTrace color={brand.primary} />
+        <BreathTrace ref={trace} color={brand.primary} />
       </div>
 
       <Form<FormValues>
@@ -127,6 +136,7 @@ export function LoginPage({ appName, tagline, logo, notice }: LoginPageProps) {
         requiredMark={false}
         initialValues={{ username: prefs.username, remember: true }}
         onFinish={onFinish}
+        onFinishFailed={() => trace.current?.shake(0.45)}
       >
         {notice && <p className="lp-notice" role="status">{notice}</p>}
         <div className="lp-row">
