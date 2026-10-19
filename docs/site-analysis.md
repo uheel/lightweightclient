@@ -634,6 +634,31 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 坐起测试 09-29 的通信日志里，18:54:35 户型保存后，18:55 有两次 2 m 的下发，18:57 又有两次 3 m 的下发，每次都间隔约 3 秒成对出现。结合上面的实测，应该是有人手动点了下发
 - 设备收到的报文键是 `QL_radar_para_config / QL_radar_para_area`（见上面"雷达属性"一节）
 
+## 楼栋、楼层、房间、床位的增删改（2026-10-19 读平台前端代码 + 在李虎机构用临时楼栋实测，测完已删除）
+
+都是 SDBPage 的通用接口（见"通用 CRUD 页面"），下面只记和通用规则不一样、或者容易出事的地方。
+
+| 资源 | 列表 | 新增 | 修改 | 删除 |
+|---|---|---|---|---|
+| 楼栋 | `GET /api/building/pages` | `POST /api/building {buildingName（≤32，必填）, buildingNum（≤32）, description}`，返回 id | `PUT /api/building`（整条记录） | `DELETE /api/building?id=&name=楼栋名` |
+| 楼层 | `GET /api/floor/pages` | `POST /api/floor {buildingId, floorName（≤32）, floorNumber（-5～99）}` | `PUT /api/floor` | `DELETE /api/floor?id=&name=楼层名` |
+| 房间 | `GET /api/room/pages` | `POST /api/room/v3/apply-room-type-on-create`（见"户型和房间的关系"） | `PUT /api/room {id, floorId, roomName, roomTypeId, roomLong, roomWidth, sortOrder}`；尺寸用 `PUT /api/room/v3/size` | `DELETE /api/room?id=&name=房间名` |
+| 床位 | `GET /api/bed/pages` | `POST /api/bed {roomId, bedName（≤32）, bedNumber?}`；批量 `POST /api/bed/batch-create {roomId, startBedNumber, endBedNumber}` | `PUT /api/bed {id, roomId, bedName, bedNumber}` | `DELETE /api/bed?id=&name=` |
+
+- **删除是级联的**：删楼栋会删掉它的全部楼层、房间、床位、入住/退住记录，并解绑所有设备；删楼层删它的房间（及以下）；删房间、删床位都会删入住记录、解绑设备。实测删楼栋后楼层、房间、床位都没了
+- **删除时的名字校验**：网页端要手输名字，名字作为 `name` 参数发给后端。楼栋、楼层、房间后端会核对，名字不对返回 `data: 0` 不删（房间不带 `name` 报"字段【name】不能为空"）；**床位不核对，名字随便填也会删掉**。客户端删除前要自己确认
+- 返回 `data` 是影响条数：`1` 成功，`0` 没删（名字不对或记录不存在），`succeeded` 都是 true
+- 唯一性：楼栋名在机构内唯一（409001"楼栋名称…已存在"）；楼层号、楼层名在楼栋内都唯一（重名时报错信息写的也是"物理楼层【n】已存在"，不准）；房间名在楼层内唯一（别的楼层可以重名）；**床位号在楼层内唯一**（"当前楼层床位号【1】已存在"），床位名不查重
+- `PUT /api/room/v3/size` 会同时改房间布置里的外框（`roomStyle` 的宽高），房间里的家具、区域不动
+- 不填 `floorNumber` 时存成 0；不填 `bedNumber` 时为空，可以重复不填
+- 批量建床 `batch-create` 的床位名就是床位号（"2""3"），没有房间前缀；客户端要带前缀的话逐个 `POST /api/bed`
+- `GET /api/bed/pages` 直接带 `roomId` 参数不筛选（返回全机构的床），要按房间分组就一次取全部在本地分
+- 平台列表里的统计数不可信：楼栋的 `bedCount` 和实际床位数对不上（实测 1 vs 5），要在本地按房间、床位数
+- 床位的 `bedStatus`：1 空闲，2 已入住（带 `realName`）；`deviceCount` 绑了几台设备；`rangeId` 关联平面图里的床位槽位
+- 建户型：`POST /api/room-type {roomTypeName, roomLong, roomWidth}` 返回 id，不需要设计就能用来建房；户型下拉 `GET /api/room-type/options`。运维端在机构没有"通用"户型时自动建一个
+- 楼栋批量 CSV：`POST /api/building/batch-csv {csvContent: "名称,编号,描述\n…"}`，同名的更新，返回 `{createItems, updateItems}`
+- 房间 Excel 导入：`/api/room/import?buildingId=`（模板 `/api/room/download`，"楼栋房间床位导入模板"）
+
 ## 长者建档与入住（2026-10-15 在李虎机构实测）
 
 | 接口 | 说明 |

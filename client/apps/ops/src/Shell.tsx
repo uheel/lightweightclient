@@ -1,16 +1,17 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, LogoutOutlined, MedicineBoxOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, HomeOutlined, LogoutOutlined, MedicineBoxOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import RoomsPage from "./pages/RoomsPage";
+import SpacesPage from "./pages/SpacesPage";
 import AlertsPage from "./pages/AlertsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 import MonitorMode from "./monitor/MonitorMode";
 
-type NavKey = "devices" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
+type NavKey = "devices" | "spaces" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
 /** 侧栏上的"监控"不是一个页面，而是打开全屏的监控模式 */
 type RailKey = NavKey | "monitor";
 
@@ -45,6 +46,7 @@ export default function Shell({ s }: { s: Session }) {
   const items: ShellNavItem<RailKey>[] = [
     { key: "monitor", label: "监控", icon: <FundProjectionScreenOutlined /> },
     { key: "devices", label: "设备", icon: <HddOutlined /> },
+    { key: "spaces", label: "楼宇", icon: <HomeOutlined /> },
     { key: "rooms", label: "诊断", icon: <MedicineBoxOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
     { key: "members", label: "长者", icon: <TeamOutlined /> },
@@ -83,6 +85,8 @@ export default function Shell({ s }: { s: Session }) {
       <div key={s.orgId} style={{ height: "100%" }}>
         {nav === "devices" ? (
           <DevicesPage />
+        ) : nav === "spaces" ? (
+          <SpacesPage />
         ) : nav === "rooms" ? (
           <RoomsPage />
         ) : nav === "scenes" ? (
