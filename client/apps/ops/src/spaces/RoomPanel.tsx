@@ -1,37 +1,46 @@
 import { useEffect, useState } from "react";
-import { Button, InputNumber, Popconfirm, Space, Tooltip } from "antd";
-import { CloseOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import type { Radar } from "../api/device";
+import { Button, InputNumber, Popconfirm, Select, Space, Tooltip } from "antd";
+import { CloseOutlined, DeleteOutlined, DisconnectOutlined, PlusOutlined } from "@ant-design/icons";
+import type { Radar, RoomDevice } from "../api/device";
 import type { Room } from "../api/room";
 import type { BedRow } from "../api/space";
 import EditableText from "./EditableText";
 
 const occupied = (b: BedRow) => b.bedStatus === 2 || !!b.realName;
 
-/** 楼宇页右侧的房间面板：改名、改尺寸、管床位，看绑了哪些雷达 */
+/** 楼宇页右侧的房间面板：改名、改尺寸、管床位（空床直接办入住、给床位绑本房间的设备），看绑了哪些雷达 */
 export default function RoomPanel({
   room,
   place,
   beds,
   radars,
+  roomDevices,
   onClose,
   onRename,
   onResize,
   onAddBed,
   onRenameBed,
   onDeleteBed,
+  onCheckIn,
+  onBindBedDevice,
+  onUnbindBedDevice,
   onDelete,
 }: {
   room: Room;
   place: string;
   beds: BedRow[];
   radars: Radar[];
+  /** 房间里的设备和它们绑的床位（/api/room/radars），还没取到时为 undefined */
+  roomDevices?: RoomDevice[];
   onClose: () => void;
   onRename: (name: string) => Promise<void>;
   onResize: (width: number, long: number) => Promise<void>;
   onAddBed: () => Promise<void>;
   onRenameBed: (b: BedRow, name: string) => Promise<void>;
   onDeleteBed: (b: BedRow) => Promise<void>;
+  onCheckIn: (b: BedRow) => void;
+  onBindBedDevice: (b: BedRow, deviceId: string) => Promise<void>;
+  onUnbindBedDevice: (b: BedRow, d: RoomDevice) => Promise<void>;
   onDelete: () => void;
 }) {
   const [w, setW] = useState(room.roomWidth ?? 4);
@@ -81,28 +90,65 @@ export default function RoomPanel({
         床位 <span className="muted">{beds.length}</span>
       </h3>
       <ul className="space-beds-list">
-        {beds.map((b) => (
-          <li key={b.id}>
-            <EditableText value={b.bedName} onSave={(v) => onRenameBed(b, v)} className="grow" />
-            {occupied(b) ? <span className="space-who">{b.realName ?? "已入住"}</span> : <span className="muted small">空床</span>}
-            {!!b.deviceCount && <span className="muted small">{b.deviceCount} 台设备</span>}
-            {occupied(b) ? (
-              <Tooltip title="有人入住，先办理退住再删">
-                <Button type="text" size="small" icon={<DeleteOutlined />} disabled />
-              </Tooltip>
-            ) : (
-              <Popconfirm
-                title={`删除床位"${b.bedName}"？`}
-                description={b.deviceCount ? `会解绑 ${b.deviceCount} 台设备` : undefined}
-                okText="删除"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => onDeleteBed(b)}
-              >
-                <Button type="text" size="small" icon={<DeleteOutlined />} title="删除床位" />
-              </Popconfirm>
-            )}
-          </li>
-        ))}
+        {beds.map((b) => {
+          const onBed = roomDevices?.filter((d) => d.bedId === b.id) ?? [];
+          const free = roomDevices?.filter((d) => !d.bedId) ?? [];
+          return (
+            <li key={b.id} className="space-bed-row">
+              <div className="space-bed-line">
+                <EditableText value={b.bedName} onSave={(v) => onRenameBed(b, v)} className="grow" />
+                {occupied(b) ? (
+                  <span className="space-who">{b.realName ?? "已入住"}</span>
+                ) : (
+                  <Button type="link" size="small" className="space-checkin" onClick={() => onCheckIn(b)}>
+                    入住
+                  </Button>
+                )}
+                {occupied(b) ? (
+                  <Tooltip title="有人入住，先办理退住再删">
+                    <Button type="text" size="small" icon={<DeleteOutlined />} disabled />
+                  </Tooltip>
+                ) : (
+                  <Popconfirm
+                    title={`删除床位"${b.bedName}"？`}
+                    description={b.deviceCount ? `会解绑 ${b.deviceCount} 台设备` : undefined}
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => onDeleteBed(b)}
+                  >
+                    <Button type="text" size="small" icon={<DeleteOutlined />} title="删除床位" />
+                  </Popconfirm>
+                )}
+              </div>
+              <div className="space-bed-line small">
+                {onBed.map((d) => (
+                  <span key={d.deviceId} className="space-bed-dev">
+                    {d.deviceName || d.sn}
+                    <Popconfirm title={`从床位上解绑"${d.deviceName || d.sn}"？`} description="设备仍留在这个房间" okText="解绑" onConfirm={() => onUnbindBedDevice(b, d)}>
+                      <DisconnectOutlined className="space-bed-x" title="从床位解绑" />
+                    </Popconfirm>
+                  </span>
+                ))}
+                {onBed.length === 0 &&
+                  (roomDevices === undefined ? null : free.length ? (
+                    <Select
+                      size="small"
+                      variant="borderless"
+                      className="space-bed-pick"
+                      placeholder="+ 绑床位设备"
+                      value={null}
+                      loading={busy === `dev-${b.id}`}
+                      popupMatchSelectWidth={false}
+                      onChange={(v: string) => v && wrap(`dev-${b.id}`, () => onBindBedDevice(b, v))()}
+                      options={free.map((d) => ({ value: d.deviceId, label: `${d.deviceName || d.sn} · ${d.sn.slice(-6)}` }))}
+                    />
+                  ) : (
+                    <span className="muted">没有床位设备</span>
+                  ))}
+              </div>
+            </li>
+          );
+        })}
       </ul>
       <Button size="small" icon={<PlusOutlined />} loading={busy === "bed"} onClick={wrap("bed", onAddBed)}>
         加一张床

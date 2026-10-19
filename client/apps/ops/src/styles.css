@@ -584,3 +584,30 @@
 .editable:hover .editable-pen { opacity: 1; }
 .editable-pen:hover { color: #3B4FD8; }
 .editable-input { max-width: 240px; }
+
+/* 长者：列表 + 详情 */
+.mem-actions { display: flex; gap: 8px; }
+.mem-lost { border: 0; border-radius: 6px; padding: 5px 8px; background: #FFF4E0; color: #9A5B00; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.mem-lost.on { box-shadow: inset 0 0 0 1px #D97706; }
+.mem-detail .detail-head { margin-bottom: 12px; }
+.mem-detail .detail-title .grade:not(.ok):not(.bad) { background: #F1F2F7; color: #5B6078; }
+.mem-bed { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.mem-bed b { font-size: 15px; font-weight: 600; }
+.mem-rel-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.mem-rel-form > .ant-select { grid-column: 1 / -1; }
+.mem-rel-form > .muted { grid-column: 1 / -1; }
+.mem-danger { margin-top: 16px; }
+.mem-form { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+.mem-form .ant-form-item { margin-bottom: 12px; }
+.mem-form-wide { grid-column: 1 / -1; }
+.space-beds-list li.space-bed-row { flex-direction: column; align-items: stretch; gap: 0; padding: 4px 0; }
+.space-bed-line { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.space-bed-line.small { min-height: 22px; font-size: 12px; color: #5B6078; }
+.space-checkin { padding: 0 4px; height: 22px; }
+.space-bed-dev { display: inline-flex; align-items: center; gap: 4px; background: #F1F2F7; border-radius: 4px; padding: 0 6px; line-height: 20px; }
+.space-bed-x { color: #8A8FA8; cursor: pointer; }
+.space-bed-x:hover { color: #B4232A; }
+.space-bed-pick { margin-left: -8px; min-width: 130px; }
+.space-bed-pick .ant-select-selection-placeholder { color: #3B4FD8; font-size: 12px; }
+.space-radars li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-radars li > .mono { flex: none; max-width: 45%; }

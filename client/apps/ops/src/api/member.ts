@@ -107,3 +107,124 @@ export async function getMember(id: string) {
 export async function checkIn(memberId: string, bedId: string, date: string) {
   await api.put("/api/member/check-in", { memberId, bedId, date });
 }
+
+// ---------- 长者管理（见 docs/site-analysis.md"入住、调床、退住、设备关联、亲友"） ----------
+
+/** 长者列表一行。注意：这里的楼栋 / 房间 / 床位是办入住时的那张床，调床后不更新，位置以床位一侧（getAllBeds）为准 */
+export interface MemberRow {
+  id: string;
+  realName: string;
+  /** 打码的手机号 */
+  phoneNumber?: string;
+  gender?: number;
+  age?: number;
+  birthDate?: string;
+  /** 1 已登记，2 已入住，3 已退住 */
+  checkType?: number;
+  checkInAt?: string;
+  deviceCount?: number;
+  createdAt?: string;
+}
+
+/** 当前机构全部长者（含亲友：加亲友也会建一条长者记录） */
+export async function getMembers() {
+  return (await api.getAll<MemberRow>("/api/member/pages", { pageSize: 500, max: 20_000 })).data ?? [];
+}
+
+/** 长者详情（只返回有值的字段；手机号不打码） */
+export interface MemberDetail extends Partial<NewMember> {
+  id: string;
+  realName: string;
+  bedId?: string;
+  [k: string]: unknown;
+}
+
+export async function getMemberDetail(id: string) {
+  return (await api.get<MemberDetail>("/api/member", { params: { id } })).data;
+}
+
+/** 改资料：整条记录带回 */
+export async function updateMember(id: string, patch: Partial<NewMember>) {
+  const rec = await getMemberDetail(id);
+  if (!rec) throw new Error("长者记录读不到");
+  await api.put("/api/member", { ...rec, ...patch });
+}
+
+/** 从本机构移除。平台不核对名字，也不管是否已入住（没退住就删会在床上留下"幽灵"），调用方先确认已退住 */
+export async function deleteMember(id: string, realName: string) {
+  const n = (await api.del<number>("/api/member", { params: { id, name: realName } })).data;
+  if (!n) throw new Error("没有删除，可能已经被删掉了");
+}
+
+/** 调床：只能调到空床（平台不拦有人的床，会把原来的人挤掉） */
+export async function adjustBed(memberId: string, bedId: string, description?: string) {
+  await api.put("/api/member/bed-adjust", { memberId, bedId, description });
+}
+
+/** 两位已入住的长者对调床位 */
+export async function swapBed(memberId: string, swapMemberId: string, description?: string) {
+  await api.put("/api/member/bed-swap", { memberId, swapMemberId, description });
+}
+
+export const CHECKOUT_REASONS = [
+  { value: 1, label: "回家" },
+  { value: 2, label: "转院" },
+  { value: 3, label: "死亡" },
+  { value: 4, label: "其他" },
+];
+
+export async function checkOut(memberId: string, checkOutReason: number, description?: string) {
+  await api.put("/api/member/check-out", { memberId, checkOutReason, description });
+}
+
+// ---------- 长者关联的设备 ----------
+
+export interface MemberDevice {
+  deviceId: string;
+  sn: string;
+  deviceName?: string;
+  deviceType?: number;
+  /** 候选列表里：已归属的长者 */
+  owners?: { memberId: string; memberName: string }[];
+}
+
+export async function getMemberDevices(memberId: string) {
+  return (await api.get<MemberDevice[]>("/api/device-position/v3/member-devices", { params: { memberId } })).data ?? [];
+}
+
+export async function getMemberDeviceCandidates(memberId: string) {
+  return (await api.get<MemberDevice[]>("/api/device-position/v3/member-device-candidates", { params: { memberId } })).data ?? [];
+}
+
+/** 一台设备只归属一位长者；已归属别人时要 transfer = true 才转过来 */
+export async function bindMemberDevice(memberId: string, deviceId: string, transfer = false) {
+  await api.put("/api/device-position/v3/bind-member-device", { memberId, deviceId, confirmTransfer: transfer });
+}
+
+export async function unbindMemberDevice(memberId: string, deviceId: string) {
+  await api.put("/api/device-position/v3/unbind-member-device", { memberId, deviceId });
+}
+
+// ---------- 亲友 ----------
+
+export interface Relative {
+  memberId: string;
+  realName: string;
+  phoneNumber?: string;
+  relationshipType?: number;
+  isAdmin?: boolean;
+}
+
+export async function getRelatives(memberId: string) {
+  return (await api.get<Relative[]>("/api/member/relatives/pages", { params: { current: 1, pageSize: 100 }, filter: { memberId } })).data ?? [];
+}
+
+/** 加亲友：平台按手机号在本机构建（或找到）一条长者记录，再建立关系 */
+export async function addRelative(memberId: string, r: { realName: string; phoneNumber?: string; relationshipType: number }) {
+  await api.post("/api/member/relatives", { memberId, ...r, relationshipType: String(r.relationshipType) });
+}
+
+/** 只解除关系，亲友那条长者记录还在 */
+export async function removeRelative(memberId: string, relatedMemberId: string) {
+  await api.del("/api/member/relatives", { params: { memberId, relatedMemberId } });
+}

@@ -124,9 +124,25 @@ export async function getRoomDevices(roomId: string) {
   return (await api.get<RoomDevice[]>("/api/room/radars", { params: { roomId } })).data ?? [];
 }
 
-/** 解除床位上的设备绑定 */
+/** 解除床位上的设备绑定。注意：平台会连设备的房间绑定一起清掉，要留在房间里用 unbindBedKeepRoom */
 export async function unbindBedDevice(bedId: string) {
   await api.put("/api/device-position/unbind-bed-device", { bedId });
+}
+
+/** 床位绑设备：一台设备只能绑一张床；平台会把设备的房间改成床位所在的房间（布置不动），所以只给同房间的设备绑 */
+export async function bindBedDevice(bedId: string, deviceId: string) {
+  await api.put("/api/device-position/bind-bed-device", { bedId, deviceId });
+}
+
+/** 设备绑房间（只改绑定，不动房间布置） */
+export async function bindRoomDevice(roomId: string, deviceId: string) {
+  await api.put("/api/device-position/bind-room-device", { roomId, deviceId });
+}
+
+/** 从床位上解绑设备，但设备留在房间里（平台解绑床位会清掉房间绑定，再绑回去） */
+export async function unbindBedKeepRoom(bedId: string, roomId: string, deviceId: string) {
+  await unbindBedDevice(bedId);
+  await bindRoomDevice(roomId, deviceId);
 }
 
 export interface Option {

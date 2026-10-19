@@ -1,361 +1,263 @@
-import { useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Progress, Segmented, Space, Steps, Table, Tag, Upload } from "antd";
-import type { TableColumnsType } from "antd";
-import { ArrowLeftOutlined, DownloadOutlined, InboxOutlined, UploadOutlined } from "@ant-design/icons";
-import dayjs from "dayjs";
-import { session } from "@radar/core";
-import { checkIn, createMember, findMemberByPhone, getAllBeds, getCodes, getMember } from "../api/member";
-import { applyExisting, bedPath, COLUMNS, headerTitle, parseRows, templateSheets, type Dicts, type ImportRow } from "../members/importPlan";
-import { readTable, saveBlob, writeXlsx } from "../members/xlsx";
-import { pool } from "../scenes/plan";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App, Button, Empty, Input, Spin } from "antd";
+import { PlusOutlined, ReloadOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { perfTimer } from "@radar/core";
+import { deleteMember, getAllBeds, getCodes, getMembers, type Bed, type MemberRow } from "../api/member";
+import ImportView from "../members/ImportView";
+import MemberDetail, { memberState, STATE_TEXT, type MemberState } from "../members/MemberDetail";
+import { BedDialog, CheckOutDialog, MemberFormDialog, SwapDialog, type MemberDicts } from "../members/dialogs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-type Result = { status: "waiting" | "running" | "ok" | "warn" | "fail"; text: string };
-type View = "all" | "problem" | "ok";
-
+const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
 const GENDER: Record<number, string> = { 1: "男", 2: "女" };
 
-/** 读字典和床位（模板和预览都要用） */
-async function loadDicts(): Promise<Dicts> {
-  const [idTypes, memberTypes, beds] = await Promise.all([getCodes("ID_TYPE"), getCodes("HEALTH_STATUS"), getAllBeds()]);
-  const byValue = (a: { value: string }, b: { value: string }) => Number(a.value) - Number(b.value);
-  return { idTypes: idTypes.sort(byValue), memberTypes: memberTypes.sort(byValue), beds };
-}
+type Filter = "all" | MemberState;
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "in", label: "已入住" },
+  { key: "registered", label: "未入住" },
+  { key: "out", label: "已退住" },
+];
 
-/** 批量导入长者：下载模板 → 选文件 → 预览校验 → 建档并入住 */
+/**
+ * 长者：左边列表，右边资料、入住（办入住 / 调床 / 对调 / 退住）、关联设备、亲友；批量导入是这一页的一个视图。
+ * 进页面一次取回长者和全部床位，筛选、搜索、入住状态都在本地算。入住位置以床位一侧为准（平台长者列表里的床位调床后不更新）。
+ */
 export default function MembersPage() {
   const { message, modal } = App.useApp();
-  const [step, setStep] = useState(0);
-  const [busy, setBusy] = useState<string>();
-  const [fileName, setFileName] = useState("");
-  const [rows, setRows] = useState<ImportRow[]>([]);
-  const [parseError, setParseError] = useState<string>();
-  const [view, setView] = useState<View>("all");
-  const [results, setResults] = useState<Record<number, Result>>({});
-  const [running, setRunning] = useState(false);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [beds, setBeds] = useState<Bed[]>([]);
+  const [dicts, setDicts] = useState<MemberDicts>({ idTypes: [], memberTypes: [], relations: [] });
+  const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [q, setQ] = useState("");
+  const [selId, setSelId] = useState<string>();
+  const [form, setForm] = useState<{ memberId?: string }>();
+  const [bedDlg, setBedDlg] = useState<{ kind: "check-in" | "adjust"; member: MemberRow; current?: Bed }>();
+  const [swapFor, setSwapFor] = useState<MemberRow>();
+  const [outFor, setOutFor] = useState<MemberRow>();
   const seq = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  async function downloadTemplate() {
-    setBusy("正在读取床位和选项…");
-    try {
-      const dicts = await loadDicts();
-      saveBlob(writeXlsx(templateSheets(dicts)), `长者导入模板-${session.get()?.orgName ?? ""}.xlsx`);
-    } catch (e) {
-      message.error(`生成模板失败：${errText(e)}`);
-    } finally {
-      setBusy(undefined);
-    }
-  }
-
-  async function openFile(file: File) {
-    const my = ++seq.current;
-    setFileName(file.name);
-    setRows([]);
-    setResults({});
-    setParseError(undefined);
-    setView("all");
-    setStep(1);
-    try {
-      setBusy("读取文件…");
-      const [table, dicts] = await Promise.all([readTable(file), loadDicts()]);
-      const { rows, error } = parseRows(table, dicts);
-      if (my !== seq.current) return;
-      if (error) {
-        setParseError(error);
-        return;
+  const load = useCallback(
+    async (quiet = false) => {
+      const my = ++seq.current;
+      if (!quiet) setLoading(true);
+      const pt = perfTimer("长者");
+      try {
+        const [m, b] = await Promise.all([getMembers(), getAllBeds()]);
+        if (my !== seq.current) return;
+        setMembers(m);
+        setBeds(b);
+        pt.info("members", m.length);
+        pt.info("beds", b.length);
+        pt.endAfterPaint();
+      } catch (e) {
+        message.error(`加载失败：${errText(e)}`);
+      } finally {
+        if (my === seq.current) setLoading(false);
       }
-      // 按手机号查当前机构是否已有档案
-      let done = 0;
-      const valid = rows.filter((r) => r.data);
-      await pool(valid, 6, async (r) => {
-        try {
-          applyExisting(r, await findMemberByPhone(r.data!.phoneNumber));
-        } catch (e) {
-          r.warnings.push(`查询已有档案失败：${errText(e)}`);
-        }
-        done++;
-        if (my === seq.current) setBusy(`按手机号核对已有档案 ${done} / ${valid.length}…`);
-      });
-      if (my === seq.current) setRows(rows);
-    } catch (e) {
-      if (my === seq.current) setParseError(`读取失败：${errText(e)}`);
-    } finally {
-      if (my === seq.current) setBusy(undefined);
-    }
-  }
-
-  const ready = rows.filter((r) => r.data);
-  const toCreate = ready.filter((r) => !r.existing);
-  const toCheckIn = ready.filter((r) => r.bed);
-  const actionable = ready.filter((r) => !r.existing || r.bed);
-  const problems = rows.filter((r) => r.errors.length || r.warnings.length);
-
-  const shown = useMemo(
-    () => (view === "problem" ? rows.filter((r) => r.errors.length || r.warnings.length) : view === "ok" ? rows.filter((r) => r.data) : rows),
-    [rows, view],
+    },
+    [message],
   );
 
-  function confirmImport() {
-    modal.confirm({
-      title: `导入 ${actionable.length} 位长者？`,
-      content: (
-        <div>
-          新建档案 {toCreate.length} 位，办理入住 {toCheckIn.length} 位。
-          {rows.length - ready.length > 0 && <div>有错误的 {rows.length - ready.length} 行不导入。</div>}
-          <div className="muted small">建档后如需删除，请在平台的长者管理里操作。</div>
-        </div>
-      ),
-      okText: "导入",
-      onOk: runImport,
-    });
-  }
+  useEffect(() => {
+    load();
+    Promise.all([getCodes("ID_TYPE"), getCodes("HEALTH_STATUS"), getCodes("FAMILY_RELATIONS")]).then(
+      ([idTypes, memberTypes, relations]) => setDicts({ idTypes, memberTypes, relations: relations.sort((a, b) => Number(a.value) - Number(b.value)) }),
+      () => {},
+    );
+  }, [load]);
 
-  async function runImport() {
-    setRunning(true);
-    setStep(2);
-    const set = (line: number, r: Result) => setResults((m) => ({ ...m, [line]: r }));
-    setResults(Object.fromEntries(actionable.map((r) => [r.line, { status: "waiting", text: "排队中" } as Result])));
-    await pool(actionable, 3, async (r) => {
-      set(r.line, { status: "running", text: "处理中" });
-      let memberId = r.existing?.memberId;
-      const notes: string[] = [];
-      try {
-        if (!memberId) {
-          memberId = await createMember(r.data!);
-          // 手机号属于别的机构里的长者时，平台返回的是那位长者
-          const got = await getMember(memberId);
-          if (got && got.realName !== r.data!.realName) {
-            set(r.line, { status: "warn", text: `手机号已属于另一位长者"${got.realName}"，未新建，也未办理入住` });
-            return;
-          }
-          notes.push("已建档");
-        } else notes.push("已有档案");
-        if (r.bed) {
-          await checkIn(memberId, r.bed.bedId, r.checkInDate!);
-          notes.push(`已入住 ${r.bed.roomName} ${r.bed.bedName}`);
-        }
-        set(r.line, { status: "ok", text: notes.join("，") });
-      } catch (e) {
-        set(r.line, { status: "fail", text: `${notes.length ? notes.join("，") + "；" : ""}${r.bed && notes.length ? "入住失败" : "失败"}：${errText(e)}` });
-      }
-    });
-    setRunning(false);
-  }
+  const bedOfMember = useMemo(() => new Map(beds.filter((b) => b.memberId).map((b) => [b.memberId!, b])), [beds]);
+  const bedOf = useCallback((id: string) => bedOfMember.get(id), [bedOfMember]);
+  const states = useMemo(() => new Map(members.map((m) => [m.id, memberState(m, bedOfMember.get(m.id))])), [members, bedOfMember]);
+  const lost = useMemo(() => members.filter((m) => states.get(m.id) === "lost").length, [members, states]);
 
   const counts = useMemo(() => {
-    const v = Object.values(results);
-    return {
-      total: v.length,
-      done: v.filter((x) => x.status !== "waiting" && x.status !== "running").length,
-      ok: v.filter((x) => x.status === "ok").length,
-      warn: v.filter((x) => x.status === "warn").length,
-      fail: v.filter((x) => x.status === "fail").length,
-    };
-  }, [results]);
+    const c: Record<Filter, number> = { all: members.length, in: 0, registered: 0, out: 0, lost: 0 };
+    for (const s of states.values()) c[s]++;
+    return c;
+  }, [members, states]);
 
-  function downloadResult() {
-    const head = [...COLUMNS.map(headerTitle), "导入结果"];
-    const body = rows.map((r) => [
-      ...COLUMNS.map((c) => r.raw[c.key]),
-      results[r.line]?.text ?? (r.errors.length ? `未导入：${r.errors.join("；")}` : r.existing && !r.bed ? "已有档案，无需处理" : "未导入"),
-    ]);
-    saveBlob(
-      writeXlsx([{ name: "导入结果", header: true, textColumns: true, rows: [head, ...body], widths: [...COLUMNS.map((c) => c.width ?? 12), 40] }]),
-      `长者导入结果-${dayjs().format("YYYYMMDD-HHmm")}.xlsx`,
-    );
+  const shown = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    return members
+      .filter((m) => filter === "all" || states.get(m.id) === filter)
+      .filter((m) => {
+        if (!kw) return true;
+        const b = bedOfMember.get(m.id);
+        return [m.realName, m.phoneNumber, b?.roomName, b?.bedName, b?.building].some((v) => v?.toLowerCase().includes(kw));
+      })
+      .sort((a, b) => byName(a.realName, b.realName));
+  }, [members, filter, q, states, bedOfMember]);
+
+  const sel = selId ? members.find((m) => m.id === selId) : undefined;
+  const checkedIn = useMemo(() => members.filter((m) => bedOfMember.has(m.id)), [members, bedOfMember]);
+
+  function pick(id: string) {
+    setSelId(id);
+    requestAnimationFrame(() => listRef.current?.querySelector(`[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" }));
   }
 
-  const cols: TableColumnsType<ImportRow> = [
-    { title: "行", dataIndex: "line", width: 52, fixed: "left", render: (v) => <span className="muted">{v}</span> },
-    {
-      title: "长者",
-      width: 170,
-      fixed: "left",
-      render: (_, r) => (
-        <span className="mem-cell">
-          <b>{r.raw.realName || <span className="err-text">（无姓名）</span>}</b>
-          <small>
-            {[r.data?.gender ? GENDER[r.data.gender] : r.raw.gender, r.data?.age ? `${r.data.age} 岁` : r.raw.age, r.data?.phoneNumber ?? r.raw.phoneNumber]
-              .filter(Boolean)
-              .join(" · ")}
-          </small>
-        </span>
-      ),
-    },
-    {
-      title: "证件",
-      width: 190,
-      render: (_, r) => (r.raw.idNumber ? <span className="mono">{r.data?.idNumber ?? r.raw.idNumber}</span> : <span className="muted">—</span>),
-    },
-    {
-      title: "入住床位",
-      width: 260,
-      render: (_, r) =>
-        r.bed ? (
-          <span className="mem-cell">
-            <span>{bedPath(r.bed)}</span>
-            <small>入住日期 {r.checkInDate}</small>
-          </span>
-        ) : r.raw.bed ? (
-          <span className="muted">{[r.raw.building, r.raw.floor, r.raw.room, r.raw.bed].filter(Boolean).join(" / ")}</span>
-        ) : (
-          <span className="muted">只建档</span>
-        ),
-    },
-    {
-      title: "检查",
-      width: 340,
-      render: (_, r) => (
-        <div className="mem-msgs">
-          {r.errors.map((e) => (
-            <span key={e} className="err-text">
-              {e}
-            </span>
-          ))}
-          {r.warnings.map((w) => (
-            <span key={w} className="warn-text">
-              {w}
-            </span>
-          ))}
-          {!r.errors.length && !r.warnings.length && <span className="muted">—</span>}
-        </div>
-      ),
-    },
-    {
-      title: step === 2 ? "结果" : "将要",
-      width: 220,
-      render: (_, r) => {
-        const s = results[r.line];
-        if (s) {
-          const color = { waiting: "default", running: "processing", ok: "success", warn: "warning", fail: "error" }[s.status];
-          return (
-            <span className="mem-result">
-              <Tag color={color}>{{ waiting: "排队", running: "处理中", ok: "成功", warn: "未处理", fail: "失败" }[s.status]}</Tag>
-              {s.status !== "waiting" && s.status !== "running" && <small>{s.text}</small>}
-            </span>
-          );
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const i = shown.findIndex((m) => m.id === selId);
+    const next = shown[Math.max(0, Math.min(shown.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+    if (next) pick(next.id);
+  }
+
+  /** 写操作之后：静默重取长者和床位 */
+  const refresh = () => load(true);
+
+  function askDelete(m: MemberRow) {
+    modal.confirm({
+      title: `把"${m.realName}"从本机构删除？`,
+      content: "长者从本机构的列表里移除，平台上不能恢复。他的亲友记录不会一起删，需要的话另外删。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteMember(m.id, m.realName);
+          message.success("已删除");
+          setSelId(undefined);
+          setMembers((list) => list.filter((x) => x.id !== m.id));
+        } catch (e) {
+          message.error(`删除失败：${errText(e)}`);
         }
-        if (!r.data) return <Tag color="error">不导入</Tag>;
-        if (r.existing && !r.bed) return <span className="muted">已有档案，无需处理</span>;
-        return (
-          <Space size={4}>
-            {!r.existing && <Tag color="green">建档</Tag>}
-            {r.bed && <Tag color="blue">入住</Tag>}
-          </Space>
-        );
       },
-    },
-  ];
+    });
+  }
+
+  if (importing)
+    return (
+      <ImportView
+        onBack={(changed) => {
+          setImporting(false);
+          if (changed) refresh();
+        }}
+      />
+    );
 
   return (
-    <div className="page scene-page">
-      <div className="page-head">
-        <h1>批量导入长者</h1>
-        <Steps size="small" current={step} style={{ maxWidth: 560 }} items={[{ title: "准备表格" }, { title: "预览检查" }, { title: "导入" }]} />
-      </div>
-
-      {step === 0 && (
-        <div className="ops-card mem-start">
-          <div className="mem-steps">
-            <div>
-              <h2>1. 下载模板</h2>
-              <p className="muted">
-                模板里有填写说明和本机构当前的空床位清单。手机号、证件号码列已设为文本，避免 Excel 改成科学计数。
-              </p>
-              <Button icon={<DownloadOutlined />} loading={busy !== undefined} onClick={downloadTemplate}>
-                下载模板
-              </Button>
-            </div>
-            <div>
-              <h2>2. 选择填好的文件</h2>
-              <p className="muted">支持 .xlsx 和 .csv。导入前会逐行检查并预览，确认后才写入平台。</p>
-              <Upload.Dragger
-                accept=".xlsx,.csv"
-                showUploadList={false}
-                beforeUpload={(f) => {
-                  openFile(f);
-                  return false;
-                }}
-              >
-                <p className="ant-upload-drag-icon">
-                  <InboxOutlined />
-                </p>
-                <p className="ant-upload-text">点击或把文件拖到这里</p>
-              </Upload.Dragger>
-            </div>
+    <div className="workbench">
+      <section className="dev-list" onKeyDown={onKeyDown}>
+        <div className="dev-list-head">
+          <div className="dev-list-title">
+            <h1>长者</h1>
+            <span className="muted">
+              {members.length} 位 · {counts.in} 位入住
+            </span>
+            <Button type="text" icon={<ReloadOutlined />} onClick={() => load()} title="刷新" style={{ marginLeft: "auto" }} />
           </div>
-          <Alert
-            type="info"
-            showIcon
-            message="平台按手机号识别长者"
-            description="手机号已在本机构登记过的长者不会重复建档，也不会修改已有资料，只在需要时办理入住。手机号属于其他机构的长者时，平台不会新建档案，这一行会标为未处理。"
-          />
-        </div>
-      )}
-
-      {step > 0 && (
-        <div className="ops-card">
-          <div className="toolbar">
-            <Button icon={<ArrowLeftOutlined />} disabled={running} onClick={() => setStep(0)}>
-              换文件
+          <div className="mem-actions">
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setForm({})}>
+              新建
             </Button>
-            <span className="muted">{fileName}</span>
-            {busy ? (
-              <span className="muted">{busy}</span>
-            ) : step === 1 && rows.length > 0 ? (
-              <Space size={16} className="small">
-                <span>
-                  共 {rows.length} 行，可导入 <b>{ready.length}</b>（建档 {toCreate.length}，入住 {toCheckIn.length}）
-                </span>
-                {rows.length - ready.length > 0 && <span className="err-text">有错误 {rows.length - ready.length} 行</span>}
-              </Space>
-            ) : step === 2 ? (
-              <span className="mem-progress">
-                {running ? `导入中 ${counts.done} / ${counts.total}` : `完成：成功 ${counts.ok}，未处理 ${counts.warn}，失败 ${counts.fail}`}
-                <Progress percent={Math.round((counts.done / Math.max(1, counts.total)) * 100)} size="small" showInfo={false} status={counts.fail ? "exception" : undefined} />
-              </span>
-            ) : null}
-            <span className="grow" />
-            {rows.length > 0 && (
-              <Segmented<View>
-                size="small"
-                value={view}
-                onChange={setView}
-                options={[
-                  { value: "all", label: `全部 ${rows.length}` },
-                  { value: "problem", label: `有问题 ${problems.length}` },
-                  { value: "ok", label: `可导入 ${ready.length}` },
-                ]}
-              />
-            )}
-            {step === 2 && !running && (
-              <Button icon={<DownloadOutlined />} onClick={downloadResult}>
-                下载结果
-              </Button>
-            )}
-            {step === 1 && (
-              <Button type="primary" icon={<UploadOutlined />} disabled={!!busy || !actionable.length} onClick={confirmImport}>
-                导入 {actionable.length} 位
-              </Button>
-            )}
+            <Button size="small" icon={<UploadOutlined />} onClick={() => setImporting(true)}>
+              批量导入
+            </Button>
           </div>
-          {parseError ? (
-            <Alert type="error" showIcon message={parseError} />
-          ) : (
-            <Table<ImportRow>
-              rowKey="line"
-              size="small"
-              loading={!!busy}
-              columns={cols}
-              dataSource={shown}
-              pagination={false}
-              rowClassName={(r) => (r.errors.length ? "mem-row-err" : "")}
-              scroll={{ x: 1230, y: "calc(100vh - 300px)" }}
-            />
+          <Input allowClear prefix={<SearchOutlined style={{ color: "#8A8FA8" }} />} placeholder="姓名 / 手机号 / 房间 / 床位" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="seg">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={f.key === filter ? "on" : ""} onClick={() => setFilter(f.key)}>
+                {f.label} <b>{counts[f.key]}</b>
+              </button>
+            ))}
+          </div>
+          {lost > 0 && (
+            <button className={`mem-lost${filter === "lost" ? " on" : ""}`} onClick={() => setFilter(filter === "lost" ? "all" : "lost")}>
+              {lost} 位平台记着已入住、但床上没有他，点这里查看
+            </button>
           )}
         </div>
-      )}
+        <div className="dev-rows" ref={listRef} tabIndex={0} role="listbox" aria-label="长者">
+          {loading && !members.length ? (
+            <Spin style={{ margin: 40 }} />
+          ) : shown.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的长者" />
+          ) : (
+            shown.map((m) => {
+              const b = bedOfMember.get(m.id);
+              const s = states.get(m.id)!;
+              return (
+                <div key={m.id} data-id={m.id} role="option" aria-selected={m.id === selId} className={`dev-row${m.id === selId ? " on" : ""}`} onClick={() => pick(m.id)}>
+                  <span className="dev-row-main">
+                    <b>{m.realName}</b>
+                    <small>{[m.gender ? GENDER[m.gender] : undefined, m.age ? `${m.age} 岁` : undefined, m.phoneNumber].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <span className={`dev-row-last${s === "in" ? "" : " off"}${s === "lost" ? " err-text" : ""}`}>{b ? `${b.roomName} › ${b.bedName}` : STATE_TEXT[s]}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div className="dev-list-foot muted">
+          显示 {shown.length} / {members.length} · ↑↓ 切换
+        </div>
+      </section>
+      <section className="dev-detail">
+        {sel ? (
+          <MemberDetail
+            key={sel.id}
+            member={sel}
+            bed={bedOfMember.get(sel.id)}
+            dicts={dicts}
+            onEdit={() => setForm({ memberId: sel.id })}
+            onCheckIn={() => setBedDlg({ kind: "check-in", member: sel })}
+            onAdjust={() => setBedDlg({ kind: "adjust", member: sel, current: bedOfMember.get(sel.id) })}
+            onSwap={() => setSwapFor(sel)}
+            onCheckOut={() => setOutFor(sel)}
+            onDelete={() => askDelete(sel)}
+            onChanged={refresh}
+          />
+        ) : (
+          <Empty style={{ marginTop: 120 }} description="选择左侧的长者" />
+        )}
+      </section>
+
+      <MemberFormDialog
+        open={!!form}
+        memberId={form?.memberId}
+        beds={beds}
+        dicts={dicts}
+        onClose={() => setForm(undefined)}
+        onSaved={(id) => {
+          setForm(undefined);
+          setSelId(id);
+          refresh();
+        }}
+      />
+      <BedDialog
+        target={bedDlg}
+        beds={beds}
+        onClose={() => setBedDlg(undefined)}
+        onDone={() => {
+          setBedDlg(undefined);
+          refresh();
+        }}
+      />
+      <SwapDialog
+        member={swapFor}
+        others={checkedIn}
+        bedOf={bedOf}
+        onClose={() => setSwapFor(undefined)}
+        onDone={() => {
+          setSwapFor(undefined);
+          refresh();
+        }}
+      />
+      <CheckOutDialog
+        member={outFor}
+        onClose={() => setOutFor(undefined)}
+        onDone={() => {
+          setOutFor(undefined);
+          refresh();
+        }}
+      />
     </div>
   );
 }

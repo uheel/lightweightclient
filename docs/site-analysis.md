@@ -674,3 +674,36 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 - **平台按手机号识别长者**：`POST /api/member` 时手机号已存在（实测那位长者最后由别的机构编辑过），平台不新建、不改资料，直接返回已有长者的 id，而且这位长者随后出现在当前机构的列表里
 - 床位名常带房间号前缀（如"101房间-1床"）
+
+### 入住、调床、退住、设备关联、亲友（2026-10-19 读平台 `common` 模块 + 在李虎机构用临时楼栋和测试长者实测，测完已删除）
+
+| 接口 | 说明 |
+|---|---|
+| `PUT /api/member` | 改资料，整条记录带回（`GET /api/member?id=` 只返回有值的字段） |
+| `DELETE /api/member?id=&name=姓名` | 把长者从本机构移除（返回 1）。**不核对名字**；长者记录本身还在（按 id 还能取到） |
+| `PUT /api/member/bed-adjust {memberId, bedId, description}` | 调床 |
+| `PUT /api/member/bed-swap {memberId, swapMemberId, description}` | 两位已入住的长者对调床位 |
+| `PUT /api/member/check-out {memberId, checkOutReason, description}` | 退住；原因 1 回家、2 转院、3 死亡、4 其他。退住后 `checkType` = 3，可以再办入住 |
+| `GET /api/device-position/v3/member-devices?memberId=` | 关联在长者身上的设备 `[{deviceId, sn, deviceName, deviceType}]` |
+| `GET /api/device-position/v3/member-device-candidates?memberId=&keywords=` | 可关联的设备，带 `owners[{memberId, memberName}]`（已归属谁） |
+| `PUT /api/device-position/v3/bind-member-device {memberId, deviceId, confirmTransfer}` | 关联设备。一台设备只归属一位长者：已归属别人时报"设备当前归属 X，请确认后再转移关联"，`confirmTransfer: true` 才转过来 |
+| `PUT /api/device-position/v3/unbind-member-device {memberId, deviceId}` | 取消关联 |
+| `GET /api/device-position/bindable-devices?bedId=&keywords=&deviceType=` | 床位可绑的设备（全机构的，不限房间） |
+| `PUT /api/device-position/bind-bed-device {bedId, deviceId}` / `unbind-bed-device {bedId}` | 床位绑设备；一台设备只能绑一张床（"设备已绑定其他床位"） |
+| `GET /api/room/radars?roomId=` | 房间里的设备，带 `bedId / bedName`（床位绑定只能从这里或设备记录看到） |
+| `GET /api/member/relatives/pages?filter[memberId]=` | 亲友列表 `{memberId, realName, phoneNumber, relationshipType, isAdmin}`（不带 filter 报"请传入用户id"） |
+| `POST /api/member/relatives {memberId, realName, phoneNumber, relationshipType, userName?, password?, idNumber?, address?}` | 加亲友，关系字典 `FAMILY_RELATIONS`（1 儿子、2 女儿、15 妻子、16 丈夫、17 朋友、99 养老助理…）。修改时带 `relatedMemberId` |
+| `DELETE /api/member/relatives?memberId=&relatedMemberId=` | 解除亲友关系 |
+
+容易出事的地方：
+
+- **长者列表里的床位不可信**：`/api/member/pages` 的楼栋、房间、床位是**办入住时的那张床**，调床、对调之后不更新（实测调了两次还显示第一张床）。以床位一侧为准：`/api/bed/options-with-floor` 的 `memberId`、`/api/bed/pages` 的 `realName / bedStatus`、长者详情的 `bedId` 都是对的
+- **调床到有人的床不拦**：A 调到 B 的床返回成功，B 被挤掉——B 还是"已入住"，但床位上已经没有 B，之后和 B 对调报"被对调的用户没有可用的床位"。客户端调床只能选空床，换到有人的床要用对调
+- **删除还没退住的长者会在床上留下"幽灵"**：长者从机构里没了，床位仍显示"已入住"和他的名字。客户端要求先退住再删
+- **床位解绑设备会连房间绑定一起清掉**：`unbind-bed-device` 之后设备的 `roomId / floorId / buildingId / bedId` 全是空的，即使设备原来就绑在这个房间。绑床位时会把设备的房间改成床位所在的房间（房间布置不动）。客户端解绑床位后要再 `bind-room-device` 把设备放回房间
+- 床位绑设备不等于关联长者：床上住着的长者的 `member-devices` 仍为空，两种关联互不影响
+- **办入住会自动关联房间里的设备**：入住到哪个房间，那个房间绑定的设备就自动关联给他；同一房间住两个人，设备同时关联两个人（`/api/device-position/v2/device-members?deviceId=` 返回两位）。手动 `bind-member-device` 才有"一台设备只归属一位"的限制，转过来后只剩一位
+- **退住会去掉设备关联**（实测手动转过来的关联也一起去掉）；**调床、对调不改设备关联**：调到别的房间后仍关联原房间的设备
+- 删除长者后，他和亲友的关系还在（亲友列表里仍能取到），亲友那条记录也还在
+- **亲友也是长者记录**：加亲友会在本机构建一条"已登记"的长者（按手机号识别，和建档一样），所以长者列表里混着亲友。解除关系后那条记录还留着，要另外删
+- 入住时长者已入住会报"已入住不能重复办理"

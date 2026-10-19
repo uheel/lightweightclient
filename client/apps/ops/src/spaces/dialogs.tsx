@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Input, InputNumber, Modal, Progress, Segmented, Select, Space, Spin } from "antd";
+import { Alert, App, DatePicker, Input, InputNumber, Modal, Progress, Segmented, Select, Space, Spin } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 import { session } from "@radar/core";
+import { checkIn, getAllBeds, getMembers, type MemberRow } from "../api/member";
 import { getRoomDesign, radarElements, roomSize, type Room, type RoomDesign } from "../api/room";
 import { createFloor, createRoom, type Building, type Floor } from "../api/space";
 import { pool } from "../scenes/plan";
@@ -349,6 +351,72 @@ export function AddRoomsDialog({
           </div>
         </div>
       )}
+    </Modal>
+  );
+}
+
+// ---------- 从床位办入住 ----------
+
+/** 空床上直接办入住：选一位还没入住的长者（入住状态以床位一侧为准，打开时现取长者和床位） */
+export function BedCheckInDialog({ bed, place, onClose, onDone }: { bed?: { id: string; bedName: string }; place: string; onClose: () => void; onDone: (realName: string) => void }) {
+  const { message } = App.useApp();
+  const [list, setList] = useState<MemberRow[]>();
+  const [memberId, setMemberId] = useState<string>();
+  const [date, setDate] = useState<Dayjs>(dayjs());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!bed) return;
+    setMemberId(undefined);
+    setDate(dayjs());
+    setList(undefined);
+    let alive = true;
+    Promise.all([getMembers(), getAllBeds()]).then(
+      ([ms, bs]) => {
+        if (!alive) return;
+        const housed = new Set(bs.map((b) => b.memberId).filter(Boolean));
+        // 平台记着已入住（checkType 2）的长者即使床上没有他也办不了入住，先排除
+        setList(ms.filter((m) => !housed.has(m.id) && m.checkType !== 2).sort((a, b) => a.realName.localeCompare(b.realName, "zh-CN")));
+      },
+      (e) => alive && message.error(`读取长者失败：${errText(e)}`),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [bed, message]);
+
+  async function run() {
+    if (!bed || !memberId) return;
+    setBusy(true);
+    try {
+      await checkIn(memberId, bed.id, date.format("YYYY-MM-DD"));
+      message.success("已办理入住");
+      onDone(list?.find((m) => m.id === memberId)?.realName ?? "");
+    } catch (e) {
+      message.error(`入住失败：${errText(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={!!bed} title={`办理入住：${place} › ${bed?.bedName ?? ""}`} okText="入住" okButtonProps={{ disabled: !memberId }} confirmLoading={busy} onOk={run} onCancel={onClose} destroyOnHidden>
+      <div className="space-form">
+        <label>长者</label>
+        <Select
+          showSearch
+          autoFocus
+          loading={!list}
+          optionFilterProp="label"
+          placeholder="选一位还没入住的长者"
+          value={memberId}
+          onChange={setMemberId}
+          notFoundContent={list ? "没有未入住的长者，先到长者页新建" : <Spin size="small" />}
+          options={list?.map((m) => ({ value: m.id, label: [m.realName, m.age ? `${m.age} 岁` : "", m.phoneNumber].filter(Boolean).join(" · ") }))}
+        />
+        <label>入住日期</label>
+        <DatePicker value={date} onChange={(d) => d && setDate(d)} allowClear={false} />
+      </div>
     </Modal>
   );
 }

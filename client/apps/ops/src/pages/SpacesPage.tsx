@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Dropdown, Empty, Input, InputNumber, Spin } from "antd";
 import { CaretDownOutlined, CaretRightOutlined, DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
-import { getRadars } from "../api/device";
+import { bindBedDevice, getRadars, getRoomDevices, unbindBedKeepRoom, type RoomDevice } from "../api/device";
 import type { Room } from "../api/room";
 import {
   createBed,
@@ -23,7 +23,7 @@ import {
 } from "../api/space";
 import EditableText from "../spaces/EditableText";
 import RoomPanel from "../spaces/RoomPanel";
-import { AddFloorsDialog, AddRoomsDialog, DeleteDialog } from "../spaces/dialogs";
+import { AddFloorsDialog, AddRoomsDialog, BedCheckInDialog, DeleteDialog } from "../spaces/dialogs";
 import { indexSpaces, roomsOfBuilding, roomsOfFloor, tallyRooms, without, type Spaces, type Tally } from "../spaces/model";
 import { nextBedName } from "../spaces/names";
 
@@ -51,6 +51,9 @@ export default function SpacesPage() {
   const [floorsFor, setFloorsFor] = useState<Building>();
   const [roomsFor, setRoomsFor] = useState<{ building: Building; floor: Floor }>();
   const [del, setDel] = useState<DeleteTarget>();
+  const [checkInBed, setCheckInBed] = useState<BedRow>();
+  /** 选中房间里的设备和它们绑的床位（只有床位绑定要单独取） */
+  const [roomDevices, setRoomDevices] = useState<{ roomId: string; list: RoomDevice[] }>();
   const seq = useRef(0);
 
   const load = useCallback(
@@ -99,6 +102,18 @@ export default function SpacesPage() {
   const curFloor = sel?.kind === "floor" ? ix.floor.get(sel.id) : undefined;
   const curBuilding = sel ? (sel.kind === "building" ? ix.building.get(sel.id) : curFloor && ix.building.get(curFloor.buildingId)) : undefined;
   const curRoom = roomId ? ix.room.get(roomId) : undefined;
+
+  const loadRoomDevices = useCallback(
+    (id: string) =>
+      getRoomDevices(id).then(
+        (list) => setRoomDevices({ roomId: id, list }),
+        () => setRoomDevices({ roomId: id, list: [] }),
+      ),
+    [],
+  );
+  useEffect(() => {
+    if (roomId) loadRoomDevices(roomId);
+  }, [roomId, loadRoomDevices]);
 
   function pick(s: Sel) {
     setSel(s);
@@ -247,6 +262,19 @@ export default function SpacesPage() {
     setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, bedName: name } : x)) }));
   }
 
+  async function onBindBedDevice(r: Room, b: BedRow, deviceId: string) {
+    await act("绑设备", () => bindBedDevice(b.id, deviceId));
+    setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, deviceCount: (x.deviceCount ?? 0) + 1 } : x)) }));
+    await loadRoomDevices(r.id);
+  }
+
+  /** 平台解绑床位会连房间绑定一起清掉，解绑后再绑回本房间 */
+  async function onUnbindBedDevice(r: Room, b: BedRow, dev: RoomDevice) {
+    await act("解绑", () => unbindBedKeepRoom(b.id, r.id, dev.deviceId));
+    setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, deviceCount: Math.max(0, (x.deviceCount ?? 1) - 1) } : x)) }));
+    await loadRoomDevices(r.id);
+  }
+
   async function onDeleteBed(b: BedRow) {
     await act("删除床位", () => deleteBed(b));
     setData((d) => without(d, { beds: [b.id] }));
@@ -366,6 +394,10 @@ export default function SpacesPage() {
                   place={`${curBuilding.buildingName} › ${curFloor.floorName}`}
                   beds={ix.bedsOf.get(curRoom.id) ?? []}
                   radars={ix.radarsOf.get(curRoom.id) ?? []}
+                  roomDevices={roomDevices?.roomId === curRoom.id ? roomDevices.list : undefined}
+                  onCheckIn={setCheckInBed}
+                  onBindBedDevice={(b, id) => onBindBedDevice(curRoom, b, id)}
+                  onUnbindBedDevice={(b, dev) => onUnbindBedDevice(curRoom, b, dev)}
                   onClose={() => setRoomId(undefined)}
                   onRename={(n) => onRenameRoom(curRoom, n)}
                   onResize={(w, l) => onResize(curRoom, w, l)}
@@ -415,6 +447,16 @@ export default function SpacesPage() {
         roomLabel={roomLabel}
         onClose={() => setRoomsFor(undefined)}
         onDone={() => load(true)}
+      />
+      <BedCheckInDialog
+        bed={checkInBed}
+        place={curRoom ? roomLabel(curRoom) : ""}
+        onClose={() => setCheckInBed(undefined)}
+        onDone={(name) => {
+          const b = checkInBed;
+          setCheckInBed(undefined);
+          if (b) setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, bedStatus: 2, realName: name } : x)) }));
+        }}
       />
       <DeleteDialog
         target={del}
