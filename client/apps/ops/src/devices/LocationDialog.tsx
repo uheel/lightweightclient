@@ -62,8 +62,10 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
     planMove(d, target)
       .then((p) => alive && setPlan(p), () => {})
       .finally(() => alive && setPlanning(false));
+    // 没算完就关掉或改选：这次的结果作废，但 planning 要复位，否则再打开会一直转圈
     return () => {
       alive = false;
+      setPlanning(false);
     };
   }, [open, changed, target, d]);
 
