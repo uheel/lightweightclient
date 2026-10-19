@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { assetUrl } from "@radar/core";
 import type { PlanElement, RoomDesign } from "../api/room";
 import { boundRect, containerRect, facingOf, mountOf, radarInRoom, supervisionRect, ZONE_COLOR, ZONE_TYPE, zoneRect, zonesOf, type QlConfig, type QlRect } from "./qinglan";
@@ -56,32 +57,17 @@ export default function RoomPlan({
   const room = { x: 0, y: 0, ...size };
   const view = union([room, ...radars.flatMap((r) => (r.config ? [boundRect(r.config)] : []))]);
   const base = { x: view.x - PAD, y: view.y - PAD, w: view.width + PAD * 2, h: view.height + PAD * 2 };
-  const { v, svgRef, panning, onPointerDown, onPointerMove, onPointerUp, reset } = useZoom(base, zoomable);
+  const { v, svgRef, contentRef, panning, onPointerDown, onPointerMove, onPointerUp, reset } = useZoom(base, zoomable);
   const vb = `${v.x} ${v.y} ${v.w} ${v.h}`;
   const bg = design?.roomStyle;
   const others = (design?.elements ?? []).filter((e) => e.type !== 3);
   // 文字大小跟着图的尺寸走，保证缩放后还看得清；放大后按比例缩小，屏幕上保持一样大
   const fs = Math.max(11, Math.round(Math.max(view.width, view.height) / 34)) * (v.w / base.w);
 
-  return (
-    <svg
-      ref={svgRef}
-      className={`room-plan${className ? ` ${className}` : ""}${zoomable ? " zoomable" : ""}${panning ? " panning" : ""}`}
-      viewBox={vb}
-      preserveAspectRatio="xMidYMid meet"
-      role="img"
-      aria-label="房间平面图"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onDoubleClick={reset}
-    >
-      <defs>
-        <pattern id="plan-grid" width="50" height="50" patternUnits="userSpaceOnUse">
-          <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#EEF0F5" strokeWidth="1" />
-        </pattern>
-      </defs>
+  // 房间、家具、雷达、区域不随实时目标变：同一个元素对象 React 会整棵跳过，目标每 0.1 秒刷新时不用重画这些
+  const staticLayer = useMemo(
+    () => (
+      <>
       <rect x={room.x} y={room.y} width={room.width} height={room.height} fill="url(#plan-grid)" />
       {bg?.type === 4 && bg.src && <image href={assetUrl(bg.src)} x={0} y={0} width={room.width} height={room.height} preserveAspectRatio="none" opacity={0.55} />}
       {others.map((e, i) => (
@@ -136,7 +122,36 @@ export default function RoomPlan({
           </g>
         );
       })}
-      {typeof children === "function" ? children(fs) : children}
+      </>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [design, size.width, size.height, radars, focusSn, focusZone, fs],
+  );
+
+  return (
+    <svg
+      ref={svgRef}
+      className={`room-plan${className ? ` ${className}` : ""}${zoomable ? " zoomable" : ""}${panning ? " panning" : ""}`}
+      viewBox={vb}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="房间平面图"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={reset}
+    >
+      <defs>
+        <pattern id="plan-grid" width="50" height="50" patternUnits="userSpaceOnUse">
+          <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#EEF0F5" strokeWidth="1" />
+        </pattern>
+      </defs>
+      {/* 拖动时直接改这个 g 的 transform（不经过 React），松手再写回 viewBox */}
+      <g ref={contentRef}>
+        {staticLayer}
+        {typeof children === "function" ? children(fs) : children}
+      </g>
     </svg>
   );
 }
@@ -146,61 +161,97 @@ type Box = { x: number; y: number; w: number; h: number };
 const MAX_IN = 12;
 const MAX_OUT = 1.5;
 
-/** 平面图缩放 / 平移：viewBox 在 base 基础上变化；base 变了（换房间、布置变了）就复位 */
+/**
+ * 平面图缩放 / 平移：viewBox 在 base 基础上变化；base 变了（换房间、布置变了）就复位。
+ * 拖动时每帧最多改一次内容 g 的 transform，不触发 React 渲染（高回报率鼠标一秒几百个 move 事件）；松手才写回 viewBox。
+ * 滚轮同样攒到下一帧一起算
+ */
 function useZoom(base: Box, enabled?: boolean) {
   const [zoom, setZoom] = useState<Box | null>(null);
   const [panning, setPanning] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ x: number; y: number; v: Box; scale: number } | null>(null);
+  const contentRef = useRef<SVGGElement>(null);
+  const drag = useRef<{ x: number; y: number; v: Box; scale: number; dx: number; dy: number; raf: number } | null>(null);
   const baseKey = `${base.x},${base.y},${base.w},${base.h}`;
   const baseRef = useRef(base);
   baseRef.current = base;
 
   useEffect(() => setZoom(null), [baseKey]);
 
-  // 滚轮要 preventDefault（不然外层跟着滚），React 的 onWheel 是 passive 的，只能自己挂
   useEffect(() => {
     const el = svgRef.current;
     if (!enabled || !el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
+    let pending = 0;
+    let at = { x: 0, y: 0 };
+    let raf = 0;
+    const apply = () => {
+      raf = 0;
       const ctm = el.getScreenCTM();
+      const dy = pending;
+      pending = 0;
       if (!ctm) return;
-      const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
+      const p = new DOMPoint(at.x, at.y).matrixTransform(ctm.inverse());
       const b = baseRef.current;
       setZoom((cur) => {
         const v = cur ?? b;
-        const w = Math.min(b.w * MAX_OUT, Math.max(b.w / MAX_IN, v.w * Math.exp(e.deltaY * 0.0015)));
+        const w = Math.min(b.w * MAX_OUT, Math.max(b.w / MAX_IN, v.w * Math.exp(dy * 0.0015)));
         const k = w / v.w;
         return { x: p.x - (p.x - v.x) * k, y: p.y - (p.y - v.y) * k, w, h: v.h * k };
       });
     };
+    // 滚轮要 preventDefault（不然外层跟着滚），React 的 onWheel 是 passive 的，只能自己挂
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (drag.current) return;
+      pending += e.deltaY;
+      at = { x: e.clientX, y: e.clientY };
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      cancelAnimationFrame(raf);
+    };
   }, [enabled]);
 
   const v = (enabled && zoom) || base;
+  const end = () => {
+    const d = drag.current;
+    if (!d) return;
+    cancelAnimationFrame(d.raf);
+    drag.current = null;
+    // 先同步写回 viewBox 再去掉临时 transform，中间不会闪回原位
+    flushSync(() => {
+      if (d.dx || d.dy) setZoom({ ...d.v, x: d.v.x - d.dx, y: d.v.y - d.dy });
+      setPanning(false);
+    });
+    contentRef.current?.removeAttribute("transform");
+  };
   return {
     v,
     svgRef,
+    contentRef,
     panning,
     onPointerDown: (e: PointerEvent<SVGSVGElement>) => {
       if (!enabled || e.button !== 0) return;
       const ctm = e.currentTarget.getScreenCTM();
       if (!ctm) return;
       e.currentTarget.setPointerCapture(e.pointerId);
-      drag.current = { x: e.clientX, y: e.clientY, v, scale: ctm.a };
+      drag.current = { x: e.clientX, y: e.clientY, v, scale: ctm.a, dx: 0, dy: 0, raf: 0 };
       setPanning(true);
     },
     onPointerMove: (e: PointerEvent<SVGSVGElement>) => {
       const d = drag.current;
       if (!d) return;
-      setZoom({ ...d.v, x: d.v.x - (e.clientX - d.x) / d.scale, y: d.v.y - (e.clientY - d.y) / d.scale });
+      d.dx = (e.clientX - d.x) / d.scale;
+      d.dy = (e.clientY - d.y) / d.scale;
+      if (!d.raf)
+        d.raf = requestAnimationFrame(() => {
+          d.raf = 0;
+          contentRef.current?.setAttribute("transform", `translate(${d.dx} ${d.dy})`);
+        });
     },
-    onPointerUp: () => {
-      drag.current = null;
-      setPanning(false);
-    },
+    onPointerUp: end,
     reset: () => enabled && setZoom(null),
   };
 }
