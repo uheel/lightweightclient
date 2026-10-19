@@ -63,7 +63,7 @@ export default memo(ReplayView);
  * 任选时间段（可跨天，最多 7 天）复现房间里的人员轨迹与姿态，时间轴可缩放，事件 / 告警可逐个跳转。
  * 回放以房间为单位，默认只选当前设备，同房间的其他雷达可以勾选一起看。
  */
-function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
+function ReplayView({ roomId, sn, dark, fill }: { roomId?: string; sn: string; /** 深色（监控模式） */ dark?: boolean; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
   const stage = useRef<HTMLDivElement>(null);
   const roomBase = useRef<HTMLCanvasElement>(null);
   const roomDyn = useRef<HTMLCanvasElement>(null);
@@ -97,6 +97,7 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
       () => optsRef.current,
       { onTime: clock.set, onPlaying: setPlaying, onView: setSpan },
       [dayjs().startOf("day").valueOf(), Date.now()],
+      dark,
     );
     engine.current = e;
     return () => {
@@ -197,7 +198,7 @@ function ReplayView({ roomId, sn }: { roomId?: string; sn: string }) {
   const en = engine.current;
 
   return (
-    <div className="replay">
+    <div className={`replay${dark ? " dark" : ""}${fill ? " fill" : ""}`}>
       <div className="toolbar">
         <DatePicker.RangePicker
           showTime

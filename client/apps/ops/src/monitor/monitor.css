@@ -1,0 +1,151 @@
+/* 监控模式：深色值守界面（设计稿"监控模式"画板），盖在整个窗口上 */
+.monitor {
+  position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column;
+  background: #0A0E27; color: #E6E8F5; font-size: 13px; line-height: 1.5;
+}
+.monitor .mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.mon-spacer { flex: 1; }
+
+.mon-head { height: 44px; flex: none; display: flex; align-items: center; gap: 12px; padding-left: 12px; background: #0E1336; border-bottom: 1px solid #1F2652; }
+.mon-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.mon-pill { height: 20px; padding: 0 8px; border-radius: 4px; background: #232B6B; color: #AEB8FF; font-size: 11px; line-height: 20px; font-weight: 500; }
+.mon-org { color: #8E95BF; font-size: 12px; }
+.mon-clock { font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; color: #C9CDE6; }
+.mon-live { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 12px; background: #10331F; color: #5BD68C; font-size: 12px; }
+.mon-live i { width: 7px; height: 7px; border-radius: 50%; }
+.mon-live.bad { background: #3D2A08; color: #FFC266; }
+.mon-win { align-self: stretch; }
+.mon-win button { color: #8E95BF; }
+.mon-stale { flex: none; padding: 6px 16px; background: #5A3A06; color: #FFD9A0; font-size: 12px; }
+
+.mon-btn {
+  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2D3570; background: transparent; color: #C9CDE6;
+  font: inherit; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.mon-btn:hover { border-color: #4A55A0; color: #fff; }
+.mon-btn.small { height: 26px; }
+.mon-btn.danger { border: 0; background: #E5484D; color: #fff; }
+.mon-btn.danger:hover { background: #F0585D; }
+.mon-btn.warn { border: 0; background: #B7791F; color: #fff; }
+.mon-link { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: #9DAAFF; cursor: pointer; }
+.mon-link:hover { color: #C7CEFF; }
+
+.mon-kpis { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px 16px 0; }
+.mon-kpi { padding: 10px 16px; border-radius: 10px; background: #121842; border: 1px solid #1F2652; }
+.mon-kpi-label { color: #8E95BF; font-size: 12px; }
+.mon-kpi-value { font-family: "Cascadia Mono", Consolas, monospace; font-size: 26px; font-weight: 500; line-height: 1.3; }
+.mon-kpi-value .ok { color: #5BD68C; }
+.mon-kpi-value small { color: #5A6196; font-size: 16px; }
+.mon-kpi.alert { background: #3A0F18; border-color: #7A1F2C; }
+.mon-kpi.alert .mon-kpi-label { color: #FF9AA2; }
+.mon-kpi.alert .mon-kpi-value { color: #FF6B75; }
+
+.mon-body { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 12px 16px 16px; }
+.mon-sec-head { display: flex; justify-content: space-between; align-items: baseline; flex: none; }
+.mon-sec-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: #E6E8F5; }
+.mon-sec-head > span { font-size: 11px; color: #8E95BF; }
+.mon-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; color: #8E95BF; text-align: center; flex: 1; }
+
+/* 左：房间 */
+.mon-rooms { flex: none; width: 340px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.mon-room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; overflow-y: auto; padding-right: 4px; align-content: start; }
+.mon-room {
+  position: relative; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid #2D3570; background: #121842; color: #E6E8F5;
+  display: flex; flex-direction: column; gap: 2px; min-height: 84px; font: inherit; cursor: pointer;
+}
+.mon-room:hover { border-color: #4A55A0; }
+/* 选中框画在卡片里面：外面是可滚动的列表，画在外面会被裁掉 */
+.mon-room-grid .mon-room.sel { border-color: #7B8CFF; box-shadow: inset 0 0 0 1px #7B8CFF; }
+.mon-room-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.mon-room-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #3DCB75; }
+.mon-room-state { font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-room-meta { font-size: 11px; color: #8E95BF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-room.alert { background: #3A0F18; border-color: #8A2433; animation: mon-blink 1.6s ease-in-out infinite; }
+.mon-room.alert .mon-dot { background: #FF5A64; }
+.mon-room.alert .mon-room-state { color: #FF8A93; }
+.mon-room.empty { background: #0F1436; border-color: #1F2652; }
+.mon-room.empty .mon-room-state { color: #8E95BF; }
+.mon-room.offline, .mon-room.none { background: #0D1130; border-color: #1A2048; }
+.mon-room.offline .mon-dot, .mon-room.none .mon-dot { background: #4A5080; }
+.mon-room.offline .mon-room-state, .mon-room.none .mon-room-state { color: #5A6196; }
+.mon-room.none .mon-dot { background: transparent; border: 1.5px solid #4A5080; }
+/* 告警房间闪烁：只变底色，不往外发光（同样会被列表裁掉） */
+@keyframes mon-blink { 0%, 100% { background-color: #3A0F18; } 50% { background-color: #5A1420; } }
+
+/* 中：选中房间 */
+.mon-live-room { flex: 1; min-width: 0; display: flex; flex-direction: column; border-radius: 12px; background: #0F1436; border: 1px solid #1F2652; overflow: hidden; }
+.mon-live-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #1F2652; flex-wrap: wrap; }
+.mon-live-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.mon-live-title h2 { margin: 0; font-size: 16px; font-weight: 700; color: #E6E8F5; }
+.mon-sub { font-size: 12px; color: #8E95BF; }
+.mon-tag { align-self: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 12px; line-height: 22px; background: #232B6B; color: #AEB8FF; }
+.mon-tag.alert { background: #5A1420; color: #FF9AA2; }
+.mon-tag.empty, .mon-tag.offline, .mon-tag.none { background: #1A2048; color: #8E95BF; }
+.mon-actions { display: flex; gap: 8px; }
+.mon-plan-wrap { flex: 1; min-height: 0; display: flex; padding: 16px; }
+.mon-live-foot { display: flex; gap: 8px 20px; padding: 8px 16px; border-top: 1px solid #1F2652; font-size: 12px; color: #8E95BF; flex-wrap: wrap; }
+.mon-dev { display: inline-flex; gap: 10px; }
+.mon-dev b { font-weight: 400; color: #C9CDE6; }
+.mon-warn { color: #FFC266; }
+
+/* 平面图深色（RoomPlan 的样式在 styles.css，这里覆盖；CSS 的 stroke / fill 比 SVG 属性优先） */
+.room-plan.dark { width: 100%; height: 100%; background: #121842; border-radius: 6px; }
+.room-plan.dark pattern path { stroke: #1A2150; }
+.room-plan.dark .plan-room { stroke: #5A64A8; }
+.room-plan.dark .plan-container { stroke: #3A4380; }
+.room-plan.dark .plan-bound { fill: #7B8CFF; fill-opacity: 0.05; stroke: #4A55A0; }
+.room-plan.dark .plan-radar { fill: #7B8CFF; stroke: #0A0E27; }
+.room-plan.dark .plan-look { stroke: #7B8CFF; }
+.room-plan.dark .plan-label { fill: #AEB8FF; stroke: #121842; }
+.room-plan.dark .plan-zone-text { stroke: #121842; }
+.room-plan.dark rect[stroke="#B3B7C9"] { stroke: #3A4380; }
+.room-plan.dark text[fill="#5B6078"] { fill: #8E95BF; }
+
+.mon-trail { fill: none; stroke: #7B8CFF; stroke-opacity: 0.55; stroke-dasharray: 6 6; stroke-linecap: round; }
+.mon-dot-t { fill: #7B8CFF; stroke: #fff; }
+.mon-target-label { fill: #E6E8F5; font-weight: 600; paint-order: stroke; stroke: #121842; stroke-width: 4px; }
+.mon-target.alarm .mon-trail { stroke: #FF6B75; }
+.mon-target.alarm .mon-dot-t { fill: #FF5A64; }
+.mon-target.alarm .mon-target-label { fill: #FFD3D7; }
+.mon-ring { fill: #E5484D; transform-box: fill-box; transform-origin: center; animation: mon-ring 1.6s ease-out infinite; }
+@keyframes mon-ring { 0% { transform: scale(0.6); opacity: 0.9; } 100% { transform: scale(2.2); opacity: 0; } }
+
+/* 右：告警流 */
+.mon-alerts { flex: none; width: 320px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.mon-alert-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; }
+.mon-alert { padding: 10px 12px; border-radius: 10px; background: #121842; border: 1px solid #1F2652; display: flex; flex-direction: column; gap: 6px; }
+.mon-alert-main { border: 0; background: none; padding: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.mon-alert-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mon-alert-top b { font-weight: 700; color: #C9CDE6; }
+.mon-alert-top .mono { font-size: 11px; color: #8E95BF; flex: none; }
+.mon-alert-where { font-size: 12px; color: #C9CDE6; }
+.mon-alert-actions { display: flex; gap: 6px; }
+.mon-alert-actions:empty { display: none; }
+.mon-alert.high { background: #3A0F18; border-color: #8A2433; }
+.mon-alert.high .mon-alert-top b { color: #FF8A93; }
+.mon-alert.mid { background: #2E2209; border-color: #6B4A12; }
+.mon-alert.mid .mon-alert-top b { color: #FFC266; }
+.mon-alert.done { opacity: 0.75; }
+.mon-alert.done .mon-alert-where { color: #8E95BF; }
+.mon-process-what { margin: 0 0 12px; color: #C9CDE6; }
+
+/* 窄窗口：告警流挪到下面 */
+@media (max-width: 1180px) {
+  .mon-body { flex-wrap: wrap; overflow-y: auto; }
+  .mon-rooms { width: 300px; max-height: 70vh; }
+  .mon-live-room { min-height: 480px; }
+  .mon-alerts { width: 100%; }
+}
+
+/* 深色滚动条（系统默认的是白的）；回溯弹窗渲染在 body 下，不在 .monitor 里，单独带上 */
+.monitor, .monitor *, .mon-modal, .mon-modal * { scrollbar-width: thin; scrollbar-color: #2D3570 transparent; }
+.monitor *:hover, .mon-modal *:hover { scrollbar-color: #4A55A0 transparent; }
+
+/* 平面图缩放：线宽按屏幕像素算，放大后不会变粗 */
+.room-plan.zoomable { cursor: grab; touch-action: none; user-select: none; }
+.room-plan.zoomable.panning { cursor: grabbing; }
+.room-plan.zoomable * { vector-effect: non-scaling-stroke; }
+
+/* 实时目标：位置之间匀速补间（时长由组件按上报间隔设置） */
+.mon-target-pos { transition-property: transform; transition-timing-function: linear; will-change: transform; }

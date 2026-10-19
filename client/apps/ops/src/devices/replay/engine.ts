@@ -37,7 +37,8 @@ const TICK_STEPS = [1e3, 2e3, 5e3, 1e4, 15e3, 3e4, 6e4, 12e4, 3e5, 6e5, 9e5, 18e
 const TL = { GUTTER: 112, RIGHT: 12, OV_Y: 4, OV_H: 10, AXIS_Y: 18, AXIS_H: 30, DENS_H: 18, LANE_H: 16, LANE_GAP: 4, EV_H: 14 };
 const MIN_VIEW_SPAN = 5000;
 const FONT = '12px "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
-const C = {
+/** 画布配色：设备详情里是浅色，监控模式里是深色 */
+const LIGHT = {
   text: "#1B1D2E",
   muted: "#8A8FA8",
   line: "#E8EAF2",
@@ -47,6 +48,33 @@ const C = {
   density: "#8C9BF5",
   overview: "#B8C2FA",
   head: "#D93036",
+  /** 房间底色、1m 网格、区域文字、房间外框、平面图文字默认色 */
+  roomBg: "#fff",
+  roomGrid: "rgba(17,20,65,.06)",
+  zoneText: "rgba(27,29,46,.6)",
+  roomStroke: "#C9CDDC",
+  elText: "#000",
+  /** 时间轴网格线、悬停线 */
+  tlGrid: "rgba(17,20,65,.04)",
+  hover: "rgba(27,29,46,.35)",
+};
+const DARK: typeof LIGHT = {
+  text: "#E6E8F5",
+  muted: "#8E95BF",
+  line: "#2D3570",
+  lane: "#161D4F",
+  run: "#3A4380",
+  primary: "#7B8CFF",
+  density: "#6C7BE0",
+  overview: "#4A55A0",
+  head: "#FF5A64",
+  roomBg: "#121842",
+  roomGrid: "rgba(123,140,255,.10)",
+  zoneText: "rgba(230,232,245,.75)",
+  roomStroke: "#5A64A8",
+  elText: "#C9CDE6",
+  tlGrid: "rgba(123,140,255,.06)",
+  hover: "rgba(230,232,245,.4)",
 };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -77,13 +105,16 @@ export class ReplayEngine {
   private hover: { x: number; y: number } | null = null;
   private ro: ResizeObserver;
   private off: (() => void)[] = [];
+  private C: typeof LIGHT;
 
   constructor(
     private els: ReplayEls,
     private opts: () => ReplayOptions,
     private cb: ReplayCallbacks,
     range: [number, number],
+    dark = false,
   ) {
+    this.C = dark ? DARK : LIGHT;
     [this.q0, this.q1] = range;
     this.v0 = this.q0;
     this.v1 = this.q1;
@@ -228,7 +259,7 @@ export class ReplayEngine {
     if (el.type === 1) {
       for (const child of el.children ?? []) this.drawElement(ctx, child, s);
     } else if (el.type === 5) {
-      ctx.fillStyle = el.fill || "#000";
+      ctx.fillStyle = el.fill || this.C.elText;
       ctx.font = `${el.fontSize || 14}px sans-serif`;
       ctx.textBaseline = "top";
       ctx.fillText(el.text || "", 0, 0);
@@ -273,7 +304,8 @@ export class ReplayEngine {
     const b = this.roomBounds();
     this.worldTransform(ctx);
     // 房间底色；背景为图片时是户型底图，否则画 1m 网格
-    ctx.fillStyle = bg.fill || "#fff";
+    // 深色时不用布置里的底色（多半是白色）
+    ctx.fillStyle = this.C === DARK ? this.C.roomBg : bg.fill || this.C.roomBg;
     ctx.beginPath();
     ctx.rect(b.x, b.y, b.w, b.h);
     ctx.fill();
@@ -283,7 +315,7 @@ export class ReplayEngine {
     } else if (!bg.src) {
       ctx.save();
       ctx.clip();
-      ctx.strokeStyle = "rgba(17,20,65,.06)";
+      ctx.strokeStyle = this.C.roomGrid;
       ctx.lineWidth = 1 / s;
       for (let x = 100; x < b.w; x += 100) {
         ctx.beginPath();
@@ -312,7 +344,7 @@ export class ReplayEngine {
         ctx.fillRect(x, y, rg.width, rg.height);
         ctx.globalAlpha = 1;
         if (rg.text) {
-          ctx.fillStyle = "rgba(27,29,46,.6)";
+          ctx.fillStyle = this.C.zoneText;
           ctx.font = `${12 / s}px sans-serif`;
           ctx.textBaseline = "top";
           ctx.fillText(rg.text, x + 4 / s, y + 4 / s);
@@ -321,7 +353,7 @@ export class ReplayEngine {
     }
     for (const el of elements) this.drawElement(ctx, el, s);
     ctx.lineWidth = bg.strokeWidth || 2;
-    ctx.strokeStyle = bg.stroke || "#C9CDDC";
+    ctx.strokeStyle = bg.stroke || this.C.roomStroke;
     ctx.strokeRect(b.x, b.y, b.w, b.h);
   }
 
@@ -565,12 +597,12 @@ export class ReplayEngine {
     const d = this.data;
 
     // 全局导航条
-    ctx.fillStyle = C.lane;
+    ctx.fillStyle = this.C.lane;
     ctx.fillRect(TL.GUTTER, TL.OV_Y, pw, TL.OV_H);
     if (d?.allTs.length) {
       const bins = Math.max(1, Math.floor(pw / 2));
       const binMs = (this.q1 - this.q0) / bins;
-      ctx.fillStyle = C.overview;
+      ctx.fillStyle = this.C.overview;
       for (let i = 0; i < bins; i++) {
         const a = lowerBound(d.allTs, this.q0 + i * binMs);
         const b = lowerBound(d.allTs, this.q0 + (i + 1) * binMs);
@@ -586,10 +618,10 @@ export class ReplayEngine {
     const vx1 = Math.max(this.xOv(this.v1), vx0 + 3);
     ctx.fillStyle = "rgba(59,79,216,.12)";
     ctx.fillRect(vx0, TL.OV_Y - 2, vx1 - vx0, TL.OV_H + 4);
-    ctx.strokeStyle = C.primary;
+    ctx.strokeStyle = this.C.primary;
     ctx.lineWidth = 1;
     ctx.strokeRect(vx0 + 0.5, TL.OV_Y - 1.5, vx1 - vx0 - 1, TL.OV_H + 3);
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = this.C.muted;
     ctx.fillText("全局", 8, TL.OV_Y + TL.OV_H / 2);
 
     // 刻度
@@ -598,7 +630,7 @@ export class ReplayEngine {
     const off = new Date(this.v0).getTimezoneOffset() * 60000;
     let tick = Math.ceil((this.v0 - off) / step) * step + off;
     const axisLine = TL.AXIS_Y + TL.AXIS_H;
-    ctx.strokeStyle = C.line;
+    ctx.strokeStyle = this.C.line;
     ctx.beginPath();
     ctx.moveTo(TL.GUTTER, axisLine + 0.5);
     ctx.lineTo(TL.GUTTER + pw, axisLine + 0.5);
@@ -607,22 +639,22 @@ export class ReplayEngine {
     for (; tick <= this.v1; tick += step) {
       const x = Math.round(this.xOf(tick)) + 0.5;
       const dt = new Date(tick);
-      ctx.strokeStyle = C.line;
+      ctx.strokeStyle = this.C.line;
       ctx.beginPath();
       ctx.moveTo(x, axisLine - 5);
       ctx.lineTo(x, axisLine);
       ctx.stroke();
-      ctx.strokeStyle = "rgba(17,20,65,.04)";
+      ctx.strokeStyle = this.C.tlGrid;
       ctx.beginPath();
       ctx.moveTo(x, axisLine);
       ctx.lineTo(x, L.evTop + TL.EV_H);
       ctx.stroke();
-      ctx.fillStyle = C.text;
+      ctx.fillStyle = this.C.text;
       ctx.textAlign = "center";
       ctx.fillText(step < 6e4 ? fmtTime(dt) : fmtTime(dt).slice(0, 5), x, axisLine - 12);
       const day = `${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
       if (day !== lastDay) {
-        ctx.fillStyle = C.muted;
+        ctx.fillStyle = this.C.muted;
         ctx.fillText(day, x, axisLine - 25);
         lastDay = day;
       }
@@ -630,7 +662,7 @@ export class ReplayEngine {
     ctx.textAlign = "left";
 
     // 轨迹点密度
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = this.C.muted;
     ctx.fillText("轨迹点", 8, L.densTop + TL.DENS_H / 2 + 2);
     if (d?.allTs.length) {
       const bins = Math.max(1, Math.floor(pw / 2));
@@ -643,7 +675,7 @@ export class ReplayEngine {
         counts[i] = b - a;
         if (counts[i] > max) max = counts[i];
       }
-      ctx.fillStyle = C.density;
+      ctx.fillStyle = this.C.density;
       for (let i = 0; i < bins; i++) {
         if (!counts[i]) continue;
         const h = Math.max(2, (counts[i] / max) * (TL.DENS_H - 2));
@@ -659,13 +691,13 @@ export class ReplayEngine {
       ctx.beginPath();
       ctx.arc(12, y + TL.LANE_H / 2, 4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = C.text;
+      ctx.fillStyle = this.C.text;
       let label = tr.label;
       while (ctx.measureText(label).width > TL.GUTTER - 28 && label.length > 2) label = label.slice(0, -2) + "…";
       ctx.fillText(label, 20, y + TL.LANE_H / 2 + 1);
-      ctx.fillStyle = C.lane;
+      ctx.fillStyle = this.C.lane;
       ctx.fillRect(TL.GUTTER, y, pw, TL.LANE_H);
-      ctx.fillStyle = C.run;
+      ctx.fillStyle = this.C.run;
       for (const [a, b] of tr.runs) {
         if (b < this.v0 || a > this.v1) continue;
         const x0 = Math.max(TL.GUTTER, this.xOf(a));
@@ -682,14 +714,14 @@ export class ReplayEngine {
       }
     });
     if (!tracks.length) {
-      ctx.fillStyle = C.muted;
+      ctx.fillStyle = this.C.muted;
       ctx.fillText(d ? "这段时间没有轨迹和姿态数据" : "查询后显示", TL.GUTTER + 8, L.lanesTop + TL.LANE_H / 2);
     }
 
     // 事件：进出房间 / 区域、姿态事件、离床告警；告警画在上层、加宽
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = this.C.muted;
     ctx.fillText("事件", 8, L.evTop + TL.EV_H / 2 + 1);
-    ctx.fillStyle = C.lane;
+    ctx.fillStyle = this.C.lane;
     ctx.fillRect(TL.GUTTER, L.evTop, pw, TL.EV_H);
     if (d) {
       for (const alarm of [false, true])
@@ -710,7 +742,7 @@ export class ReplayEngine {
     ctx.setTransform(r, 0, 0, r, 0, 0);
     ctx.clearRect(0, 0, W, L.height);
     if (hoverX != null) {
-      ctx.strokeStyle = "rgba(27,29,46,.35)";
+      ctx.strokeStyle = this.C.hover;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(hoverX + 0.5, TL.AXIS_Y + TL.AXIS_H);
@@ -719,18 +751,18 @@ export class ReplayEngine {
       ctx.setLineDash([]);
     }
     // 全局导航条上的播放头
-    ctx.fillStyle = C.head;
+    ctx.fillStyle = this.C.head;
     ctx.fillRect(this.xOv(this.t) - 1, TL.OV_Y - 2, 2, TL.OV_H + 4);
     if (!this.inView(this.t)) return;
     const x = Math.round(this.xOf(this.t)) + 0.5;
     const top = TL.AXIS_Y + TL.AXIS_H;
-    ctx.strokeStyle = C.head;
+    ctx.strokeStyle = this.C.head;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x, top);
     ctx.lineTo(x, L.height);
     ctx.stroke();
-    ctx.fillStyle = C.head;
+    ctx.fillStyle = this.C.head;
     ctx.beginPath();
     ctx.moveTo(x - 6, top - 7);
     ctx.lineTo(x + 6, top - 7);

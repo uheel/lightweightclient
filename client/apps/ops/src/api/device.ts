@@ -311,6 +311,16 @@ export async function getAlertPage(q: { group: number; status?: 1 | 2; sn?: stri
   return { list: res.data ?? [], total: res.total ?? 0 };
 }
 
+/** 处理类型（各机构在"告警处理类型"里自定义，例如：有效告警 / 家属走动 / 误报 / 其他） */
+export async function getProcessTypes() {
+  return (await api.get<{ label: string; value: string }[]>("/api/alert-process-type/options")).data ?? [];
+}
+
+/** 处理告警（写操作，与网页端、用户端"处理告警"提交的内容一致）；处理后 alertStatus = 2，平台记下处理人和时间 */
+export async function processAlert(id: string, alertProcessTypeId: string, processingResults: string) {
+  await api.put("/api/alert/process", { id, alertProcessTypeId, processingResults });
+}
+
 // ---------- 设备属性（读取 / 下发） ----------
 
 /** 1 String，2 Short，3 Int，4 Long，5 Float，6 Double，7 Bool，8 Array，9 Json */

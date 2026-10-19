@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { App } from "antd";
-import { AlertOutlined, DeploymentUnitOutlined, HddOutlined, LogoutOutlined, MedicineBoxOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, LogoutOutlined, MedicineBoxOutlined, NotificationOutlined, TeamOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session, type ShellNavItem } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import RoomsPage from "./pages/RoomsPage";
@@ -8,8 +8,11 @@ import AlertsPage from "./pages/AlertsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
+import MonitorMode from "./monitor/MonitorMode";
 
 type NavKey = "devices" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
+/** 侧栏上的"监控"不是一个页面，而是打开全屏的监控模式 */
+type RailKey = NavKey | "monitor";
 
 async function logout() {
   await stopRealtime();
@@ -23,6 +26,7 @@ export default function Shell({ s }: { s: Session }) {
   const [nav, setNav] = useState<NavKey>("devices");
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
+  const [monitor, setMonitor] = useState(false);
 
   const onEvent = useCallback(
     (e: RealtimeEvent) => {
@@ -38,7 +42,8 @@ export default function Shell({ s }: { s: Session }) {
   );
   const rt = useRealtime(s.orgId, onEvent);
 
-  const items: ShellNavItem<NavKey>[] = [
+  const items: ShellNavItem<RailKey>[] = [
+    { key: "monitor", label: "监控", icon: <FundProjectionScreenOutlined /> },
     { key: "devices", label: "设备", icon: <HddOutlined /> },
     { key: "rooms", label: "诊断", icon: <MedicineBoxOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
@@ -47,7 +52,8 @@ export default function Shell({ s }: { s: Session }) {
     { key: "realtime", label: "推送", icon: <NotificationOutlined />, badge: nav === "realtime" ? 0 : unread },
   ];
 
-  const go = (k: NavKey) => {
+  const go = (k: RailKey) => {
+    if (k === "monitor") return setMonitor(true);
     setNav(k);
     if (k === "realtime") setUnread(0);
   };
@@ -89,6 +95,17 @@ export default function Shell({ s }: { s: Session }) {
           <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
         )}
       </div>
+      {monitor && (
+        <MonitorMode
+          key={`monitor-${s.orgId}`}
+          s={s}
+          rt={rt}
+          onExit={(to) => {
+            setMonitor(false);
+            if (to) go(to);
+          }}
+        />
+      )}
     </AppShell>
   );
 }

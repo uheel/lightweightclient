@@ -151,6 +151,35 @@ function splitRange(start: number, end: number, maxMs = 864e5) {
 
 // ---------- 数据 ----------
 
+/** 间隔在这个时长内的轨迹点算同一次上报 */
+const BURST_MS = 300;
+
+/**
+ * 合并一次上报里的多个点（取平均位置和时间）。
+ * Ultra 跌倒监测终端每 2 秒存两个相隔约 2 ms、位置差 10–30 cm 的点（2026-10-19 藕塘社区 11 房实测，几千对都是这样），
+ * 不合并的话回放时每 2 秒瞬移一下再滑 2 秒，看着一顿一顿的；一体化终端约 1 秒一个点，不受影响
+ */
+function mergeBursts(pts: Track["points"]): Track["points"] {
+  const out: Track["points"] = [];
+  let group: Track["points"] = [];
+  const flush = () => {
+    if (!group.length) return;
+    const n = group.length;
+    out.push({
+      t: Math.round(group.reduce((a, p) => a + p.t, 0) / n),
+      x: group.reduce((a, p) => a + p.x, 0) / n,
+      y: group.reduce((a, p) => a + p.y, 0) / n,
+    });
+    group = [];
+  };
+  for (const p of pts) {
+    if (group.length && p.t - group[0].t > BURST_MS) flush();
+    group.push(p);
+  }
+  flush();
+  return out;
+}
+
 export interface Track {
   key: string;
   sn: string;
@@ -305,7 +334,7 @@ export async function loadReplayData(
   const tracks: Track[] = [...trackMap.values()]
     .sort((a, b) => (a.sn === b.sn ? a.uid - b.uid : a.sn < b.sn ? -1 : 1))
     .map((tr, i) => {
-      tr.points.sort((a, b) => a.t - b.t);
+      tr.points = mergeBursts(tr.points.sort((a, b) => a.t - b.t));
       tr.postures.sort((a, b) => a.s - b.s);
       const runs: [number, number][] = [];
       for (const p of tr.points) {
