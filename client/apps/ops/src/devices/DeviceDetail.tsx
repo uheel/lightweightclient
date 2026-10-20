@@ -129,7 +129,7 @@ export default function DeviceDetail({
           <b>{live?.posture !== undefined ? (POSTURE[live.posture] ?? live.posture) : live?.presence === 0 ? "无人" : "—"}</b>
         </div>
         <div>
-          <small>房间人数</small>
+          <small>检测到人数</small>
           <b>{live?.targets ?? (live?.presence === 0 ? 0 : "—")}</b>
         </div>
         <div>

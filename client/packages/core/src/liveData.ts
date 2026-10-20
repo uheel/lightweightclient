@@ -128,7 +128,8 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
       };
     case 5: {
       if (!a) return null;
-      const targets = a.filter(Array.isArray) as unknown[][];
+      // 帧格式 [[人数, x, y, z, 姿态, 目标序号, 区域名, 区域序号], ...]；没人时也会报一行人数为 0 的占位，不算目标
+      const targets = (a.filter(Array.isArray) as unknown[][]).filter((x) => (num(x[0]) ?? 0) > 0);
       // 房间里有多人时（例如护理员在床边），优先取在床上的那个人：先看姿态（在床 / 床上坐起），
       // 再看最近进入的区域是监护床（区域名会一直保留到进入下一个区域，所以只作为第二依据）；
       // 没人在床再取需要处理的姿态，最后取第一个目标
@@ -137,7 +138,7 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
         targets.find((x) => typeof x[6] === "string" && x[6].includes("床")) ??
         targets.find((x) => ALARM_POSTURES.has(Number(x[4]))) ??
         targets[0];
-      const someone = targets.length > 0 && (num(targets[0][0]) ?? 0) > 0;
+      const someone = targets.length > 0;
       return {
         presence: someone ? 1 : 0,
         ...seen(someone, at),
