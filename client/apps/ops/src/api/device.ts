@@ -136,6 +136,16 @@ export async function renameRadar(deviceId: string, deviceName: string, roomId?:
   if ((after?.properties?.roomId ?? null) !== (p.roomId ?? null)) throw new Error("改名后房间绑定变了，请到安装位置里检查");
 }
 
+/**
+ * 删除设备，和平台雷达设备页右键"删除"一样：DELETE /api/device/v3?id=。
+ * 平台会一起清掉房间绑定、床位绑定和长者关联，但房间布置里的雷达位置不会跟着清（2026-10-20 实测），调用方自己处理，见 devices/deleteRadar.ts。
+ * 删除后同一个 SN 可以重新添加，但会是新的 deviceId，平台上的属性记录、场景记录不会带过去
+ */
+export async function deleteRadar(deviceId: string) {
+  const res = await api.del<number | boolean>("/api/device/v3", { params: { id: deviceId } });
+  if (res.data === 0 || res.data === false) throw new Error("平台没有删除，可能已经被删掉了，刷新一下再看");
+}
+
 /** 绑在房间上的设备（平台房间设计左侧的设备列表），带床位绑定 */
 export interface RoomDevice {
   deviceId: string;

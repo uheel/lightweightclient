@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Tabs, Tooltip } from "antd";
-import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import { DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, POSTURE, type LiveData } from "@radar/core";
 import { getHeartbeats, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, WORKING_TYPE, type Heartbeat, type Radar, type RoomInfo } from "../api/device";
@@ -12,6 +12,7 @@ import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
 import PropertyTab from "./PropertyTab";
 import LocationDialog from "./LocationDialog";
+import DeleteDeviceDialog from "./DeleteDeviceDialog";
 import NameEdit from "./NameEdit";
 import { radarInRoom, type QlConfig } from "../rooms/qinglan";
 
@@ -24,6 +25,7 @@ export default function DeviceDetail({
   listHidden,
   onToggleList,
   onMoved,
+  onDeleted,
 }: {
   d: Radar;
   /** 这台设备的实时推送（由设备列表统一订阅） */
@@ -33,9 +35,12 @@ export default function DeviceDetail({
   onToggleList: () => void;
   /** 改了安装位置，设备列表要重新取 */
   onMoved?: () => void;
+  /** 设备删掉了，列表要去掉它 */
+  onDeleted?: () => void;
 }) {
   const [room, setRoom] = useState<RoomInfo>();
   const [moving, setMoving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [hb, setHb] = useState<Heartbeat>();
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
@@ -179,6 +184,12 @@ export default function DeviceDetail({
           )}
         </div>
       </div>
+      <div className="dev-danger">
+        <Button danger icon={<DeleteOutlined />} onClick={() => setDeleting(true)}>
+          删除设备
+        </Button>
+        <span className="muted small">房间、床位、长者上的绑定会一起解除</span>
+      </div>
     </div>
   );
 
@@ -227,6 +238,17 @@ export default function DeviceDetail({
         onMoved={() => {
           setMoving(false);
           onMoved?.();
+        }}
+      />
+      <DeleteDeviceDialog
+        d={d}
+        open={deleting}
+        online={link.online && !d.isDisabled}
+        place={room?.place}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => {
+          setDeleting(false);
+          onDeleted?.();
         }}
       />
     </div>

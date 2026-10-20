@@ -49,10 +49,10 @@ export default function Shell({ s }: { s: Session }) {
     { key: "monitor", label: "监控", icon: <FundProjectionScreenOutlined /> },
     { key: "devices", label: "设备", icon: <HddOutlined /> },
     { key: "spaces", label: "楼宇", icon: <HomeOutlined /> },
-    { key: "rooms", label: "诊断", icon: <MedicineBoxOutlined /> },
     { key: "scenes", label: "场景", icon: <DeploymentUnitOutlined /> },
     { key: "members", label: "长者", icon: <TeamOutlined /> },
     { key: "alerts", label: "告警", icon: <AlertOutlined /> },
+    { key: "rooms", label: "诊断", icon: <MedicineBoxOutlined /> },
     { key: "realtime", label: "推送", icon: <NotificationOutlined />, badge: nav === "realtime" ? 0 : unread },
   ];
 

@@ -522,6 +522,10 @@
 /* 更改安装位置：连带处理的选项 */
 .move-plan { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .move-plan .ant-checkbox-wrapper { margin-inline-start: 0; }
+.dev-delete { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.dev-delete p, .dev-delete ul { margin: 0; }
+.dev-delete ul { padding-left: 20px; }
+.dev-danger { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
 
 /* 设备属性 › 安装区域：按房间布置下发 */
 .pp-layout { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; background: var(--ops-subtle, #F4F5FA); font-size: 12.5px; }

@@ -137,6 +137,30 @@
 | `/api/device-config/*` | 读写设备配置：`basic`、`network`、`audio`、`call`、`switch`、`working-time`、`scene`、`restart`、`status` 等（带 `/read` 的是读取） |
 | `/api/device-property/read`、`write`、`raw-values` | 读写设备属性 |
 | `/api/device/v4/organization-transfer` | 设备转移到其他机构 |
+| `DELETE /api/device/v3?id=` | 删除设备（雷达设备页右键"删除"，通用 CRUD 的 genDelete），返回 `data: 1` |
+
+#### 删除设备会连带清掉什么（2026-10-20 在李虎机构用临时房间 + 两台假 SN 雷达实测，测完已删除）
+
+两台都绑了房间、床位、长者"测试老人"，并放进房间布置。一台只发平台的删除请求，一台走客户端的删除对话框：
+
+| 记录 | 平台删除后 |
+|---|---|
+| 设备记录、雷达列表 | 没了；`GET /api/device/v3?id=` 返回 `succeeded` 但没有 `data` |
+| 房间绑定 | 清掉（`/api/room/radars` 里没了） |
+| 床位绑定 | 清掉（床位可以直接再绑别的设备） |
+| 长者关联 | 清掉（`device-members` 为空，长者的 `deviceCount` 减 1） |
+| **房间布置里的雷达位置** | **不动**：槽位还写着已删设备的 sn / deviceId |
+
+所以删除前不用另外解绑床位和长者，删完要自己处理布置里的槽位。客户端删除对话框默认清掉槽位上的设备、留下安装方式和区域，也可以选连槽位一起删（`devices/deleteRadar.ts`）。
+
+删除用的是本机构账号 `leehu`（`isAdmin: true, isSa: false`），`DELETE /api/device/v3` 正常，不需要超管。
+
+**长者一侧的设备关联接口只有超管能用**（和机构有没有开 V3 无关）：
+- 李虎机构 `GET /api/settings/org` 里 `enableV3: true`（平台判断 V3 的函数：有 `enableV3` 用它，没有时看 `enableV2RoomTypeDesign || enableV2PropertySettings`）
+- `leehu` 调 `/api/device-position/v3/member-devices`、`v3/member-device-candidates`、`v3/bind-member-device` 都是 403（空响应体）；同为 v3 的 `v3/device-member-candidates`、`/api/device/v3`、`/api/room/v3/*` 都正常
+- 平台长者页的"关联设备"列写着 `accessible: isSa`，本来就只给超管看；后端对这几个接口按超管拦
+- 机构账号能用的是房间页（v3 房间视图）那套：`bindDeviceMember` → `POST /api/device/bind {deviceId, memberId}`，`unbindDeviceMember` → `POST /api/device/unbind {deviceId, memberId}`，`getDeviceMembers` → `GET /api/device-position/v2/device-members?deviceId=`（批量 `v2/batch-device-members?deviceIds=`）。路径里的 v2 是接口版本，V3 机构的平台前端现在也在用
+- 2026-10-19 那次长者关联实测用的应该是超管账号，所以当时没碰到 403
 
 ### 告警 / 日志
 

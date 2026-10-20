@@ -137,6 +137,16 @@ export default function DevicesPage() {
     guide?.refresh(true);
   }
 
+  /** 删除后：从列表去掉，选中原来位置的下一台，再静默重取 */
+  function onDeleted(id: string) {
+    const i = shown.findIndex((d) => d.id === id);
+    const rest = shown.filter((d) => d.id !== id);
+    setSelId(rest[Math.min(Math.max(i, 0), rest.length - 1)]?.id);
+    setList((l) => l.filter((d) => d.id !== id));
+    load();
+    guide?.refresh(true);
+  }
+
   // 从快速开始清单跳过来：选中设备或打开添加
   useGuideFocus("devices", (f) => {
     if (f.id) focusDevice(f.id);
@@ -281,7 +291,7 @@ export default function DevicesPage() {
             </Button>
           </GuideEmpty>
         ) : sel ? (
-          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} />
+          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} onDeleted={() => onDeleted(sel.id)} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
