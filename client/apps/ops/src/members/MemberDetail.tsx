@@ -255,7 +255,9 @@ export default function MemberDetail({
           <h2>
             关联设备 <span className="muted">{devices?.length ?? ""}</span>
           </h2>
-          <p className="muted small">办入住时平台会把房间里的设备自动关联给入住的人，退住时去掉；手动关联时一台设备只归属一位长者。和床位上绑的设备是两回事（床位设备在楼宇页管）。</p>
+          <p className="muted small">
+            房间里的雷达按床位自动关联：床位上的雷达关联床上的人；卫生间这类只绑房间的雷达，房间只住一人时关联他，住两人以上不关联（分不出是谁）。入住、调床、退住后自动整理。这里手动关联的是不装在房间里的设备（戒指、手表等），一台设备只归属一位长者。
+          </p>
           {devices === undefined ? (
             <Spin />
           ) : (

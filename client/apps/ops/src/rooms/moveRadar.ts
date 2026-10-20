@@ -1,5 +1,6 @@
 import { getRoomDevices, setRadarLocation, unbindBedDevice, type Radar, type RoomDevice } from "../api/device";
 import { getRoomDesign } from "../api/room";
+import { clearDeviceMembers, syncDeviceMembers } from "../members/deviceSync";
 import type { InstallArea } from "./installArea";
 import { clearSlot, findRadar, placeInLayout, slotSource, type SlotSource } from "./radarSlot";
 
@@ -65,6 +66,13 @@ export async function moveRadar(
     } catch (e) {
       failed.push(`放进新房间布置失败：${err(e)}`);
     }
+  }
+  // 长者关联跟着房间走：挪出房间就不再关联任何人，挪进新房间按床位重新关联
+  try {
+    if (!loc?.roomId) await clearDeviceMembers(d.id);
+    await syncDeviceMembers({ roomIds: [plan.oldRoomId, loc?.roomId] });
+  } catch (e) {
+    failed.push(`长者关联没整理完：${err(e)}`);
   }
   return failed;
 }

@@ -3,6 +3,7 @@ import { Alert, App, DatePicker, Input, InputNumber, Modal, Progress, Segmented,
 import dayjs, { type Dayjs } from "dayjs";
 import { session } from "@radar/core";
 import { checkIn, getAllBeds, getMembers, type MemberRow } from "../api/member";
+import { syncAfter } from "../members/deviceSync";
 import { getRoomDesign, radarElements, roomSize, type Room, type RoomDesign } from "../api/room";
 import { createFloor, createRoom, type Building, type Floor } from "../api/space";
 import { pool } from "../scenes/plan";
@@ -433,6 +434,7 @@ export function BedCheckInDialog({ bed, place, onClose, onDone }: { bed?: { id: 
     try {
       await checkIn(memberId, bed.id, date.format("YYYY-MM-DD"));
       message.success("已办理入住");
+      await syncAfter(message, { bedIds: [bed.id] });
       onDone(list?.find((m) => m.id === memberId)?.realName ?? "");
     } catch (e) {
       message.error(`入住失败：${errText(e)}`);

@@ -28,6 +28,7 @@ import { indexSpaces, roomsOfBuilding, roomsOfFloor, tallyRooms, without, type S
 import { nextBedName } from "../spaces/names";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import { GuideEmpty } from "../guide/GuideEmpty";
+import { syncAfter } from "../members/deviceSync";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMPTY: Spaces = { buildings: [], floors: [], rooms: [], beds: [], radars: [] };
@@ -277,6 +278,7 @@ export default function SpacesPage() {
     await act("绑设备", () => bindBedDevice(b.id, deviceId));
     setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, deviceCount: (x.deviceCount ?? 0) + 1 } : x)) }));
     await loadRoomDevices(r.id);
+    await syncAfter(message, { roomIds: [r.id] });
   }
 
   /** 平台解绑床位会连房间绑定一起清掉，解绑后再绑回本房间 */
@@ -284,6 +286,7 @@ export default function SpacesPage() {
     await act("解绑", () => unbindBedKeepRoom(b.id, r.id, dev.deviceId));
     setData((d) => ({ ...d, beds: d.beds.map((x) => (x.id === b.id ? { ...x, deviceCount: Math.max(0, (x.deviceCount ?? 1) - 1) } : x)) }));
     await loadRoomDevices(r.id);
+    await syncAfter(message, { roomIds: [r.id] });
   }
 
   async function onDeleteBed(b: BedRow) {

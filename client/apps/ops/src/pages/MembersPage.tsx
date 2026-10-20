@@ -273,6 +273,7 @@ export default function MembersPage() {
       />
       <CheckOutDialog
         member={outFor}
+        bed={outFor && bedOf(outFor.id)}
         onClose={() => setOutFor(undefined)}
         onDone={() => {
           setOutFor(undefined);

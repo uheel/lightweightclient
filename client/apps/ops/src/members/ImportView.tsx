@@ -8,6 +8,7 @@ import { checkIn, createMember, findMemberByPhone, getAllBeds, getCodes, getMemb
 import { applyExisting, bedPath, COLUMNS, headerTitle, parseRows, templateSheets, type Dicts, type ImportRow } from "./importPlan";
 import { readTable, saveBlob, writeXlsx } from "./xlsx";
 import { pool } from "../scenes/plan";
+import { syncAfter } from "./deviceSync";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -116,6 +117,7 @@ export default function ImportView({ onBack }: { onBack: (changed: boolean) => v
     setStep(2);
     const set = (line: number, r: Result) => setResults((m) => ({ ...m, [line]: r }));
     setResults(Object.fromEntries(actionable.map((r) => [r.line, { status: "waiting", text: "排队中" } as Result])));
+    const housedBeds: string[] = [];
     await pool(actionable, 3, async (r) => {
       set(r.line, { status: "running", text: "处理中" });
       let memberId = r.existing?.memberId;
@@ -133,6 +135,7 @@ export default function ImportView({ onBack }: { onBack: (changed: boolean) => v
         } else notes.push("已有档案");
         if (r.bed) {
           await checkIn(memberId, r.bed.bedId, r.checkInDate!);
+          housedBeds.push(r.bed.bedId);
           notes.push(`已入住 ${r.bed.roomName} ${r.bed.bedName}`);
         }
         set(r.line, { status: "ok", text: notes.join("，") });
@@ -140,6 +143,8 @@ export default function ImportView({ onBack }: { onBack: (changed: boolean) => v
         set(r.line, { status: "fail", text: `${notes.length ? notes.join("，") + "；" : ""}${r.bed && notes.length ? "入住失败" : "失败"}：${errText(e)}` });
       }
     });
+    // 入住都办完再按房间整理一次设备关联（同一间房住进几个人时逐个整理会来回改）
+    if (housedBeds.length) await syncAfter(message, { bedIds: housedBeds });
     setRunning(false);
   }
 

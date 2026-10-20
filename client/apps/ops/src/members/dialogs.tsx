@@ -17,6 +17,7 @@ import {
   type MemberRow,
   type NewMember,
 } from "../api/member";
+import { syncAfter } from "./deviceSync";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
@@ -164,6 +165,7 @@ export function MemberFormDialog({
           onSaved(id);
           return;
         }
+        await syncAfter(message, { bedIds: [v.bedId] });
       }
       message.success(v.bedId ? "已建档并办理入住" : "已建档");
       onSaved(id);
@@ -265,6 +267,7 @@ export function BedDialog({
       if (adjust) await adjustBed(target.member.id, bedId, note.trim() || undefined);
       else await checkIn(target.member.id, bedId, date.format("YYYY-MM-DD"));
       message.success(adjust ? "已调床" : "已办理入住");
+      await syncAfter(message, { bedIds: [target.current?.bedId, bedId], memberIds: [target.member.id] });
       onDone();
     } catch (e) {
       message.error(`${adjust ? "调床" : "入住"}失败：${errText(e)}`);
@@ -330,6 +333,7 @@ export function SwapDialog({
     try {
       await swapBed(member.id, other, "运维端对调");
       message.success("已对调");
+      await syncAfter(message, { bedIds: [mine?.bedId, bedOf(other)?.bedId], memberIds: [member.id, other] });
       onDone();
     } catch (e) {
       message.error(`对调失败：${errText(e)}`);
@@ -363,7 +367,7 @@ export function SwapDialog({
   );
 }
 
-export function CheckOutDialog({ member, onClose, onDone }: { member?: MemberRow; onClose: () => void; onDone: () => void }) {
+export function CheckOutDialog({ member, bed, onClose, onDone }: { member?: MemberRow; bed?: Bed; onClose: () => void; onDone: () => void }) {
   const { message } = App.useApp();
   const [reason, setReason] = useState<number>();
   const [note, setNote] = useState("");
@@ -380,6 +384,7 @@ export function CheckOutDialog({ member, onClose, onDone }: { member?: MemberRow
     try {
       await checkOut(member.id, reason, note.trim() || undefined);
       message.success("已办理退住");
+      await syncAfter(message, { bedIds: [bed?.bedId], memberIds: [member.id] });
       onDone();
     } catch (e) {
       message.error(`退住失败：${errText(e)}`);

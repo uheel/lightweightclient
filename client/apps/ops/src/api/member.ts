@@ -1,5 +1,5 @@
 import { api, session } from "@radar/core";
-import { getAllDevices } from "./device";
+import { getAllDevices, getRadars } from "./device";
 
 /**
  * 长者（平台界面叫"用户"）建档与入住。
@@ -215,10 +215,18 @@ async function getDeviceOwners(deviceIds: string[]) {
   return out;
 }
 
-/** 可关联的设备：本机构全部设备（各类型），带当前归属 */
+/**
+ * 可关联的设备：本机构全部设备（各类型），带当前归属。
+ * 装在房间里的雷达不在里面：它们按床位自动关联（members/deviceSync.ts），手动改了下次入住、调床时也会被改回去
+ */
 export async function getMemberDeviceCandidates(memberId: string): Promise<MemberDevice[]> {
-  if (isSa()) return (await api.get<MemberDevice[]>("/api/device-position/v3/member-device-candidates", { params: { memberId } })).data ?? [];
-  const devices = await getAllDevices();
+  const inRoom = getRadars().then((list) => new Set(list.filter((r) => r.roomId).map((r) => r.id)));
+  if (isSa()) {
+    const [list, skip] = await Promise.all([api.get<MemberDevice[]>("/api/device-position/v3/member-device-candidates", { params: { memberId } }).then((r) => r.data ?? []), inRoom]);
+    return list.filter((d) => !skip.has(d.deviceId));
+  }
+  const [all, skip] = await Promise.all([getAllDevices(), inRoom]);
+  const devices = all.filter((d) => !skip.has(d.id));
   const owners = await getDeviceOwners(devices.map((d) => d.id));
   return devices.map((d) => ({
     deviceId: d.id,
