@@ -81,7 +81,10 @@ bump(join(appDir, "src-tauri", "Cargo.toml"), /(^version\s*=\s*")([^"]+)(")/m);
 console.log(`版本 ${cur} → ${version}`);
 
 // ---- 2. 打包 + 签名 ----
-const sh = (cmd, cmdArgs, opts = {}) => execFileSync(cmd, cmdArgs, { stdio: "inherit", shell: process.platform === "win32", ...opts });
+// Windows 下走 shell 时参数是直接拼起来的，带空格的（产品名 "Radar Config"）要自己加引号
+const win = process.platform === "win32";
+const sh = (cmd, cmdArgs, opts = {}) =>
+  execFileSync(cmd, win ? cmdArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : cmdArgs, { stdio: "inherit", shell: win, ...opts });
 const env = {
   ...process.env,
   TAURI_SIGNING_PRIVATE_KEY: process.env.TAURI_SIGNING_PRIVATE_KEY ?? readFileSync(keyPath, "utf8"),
@@ -97,13 +100,15 @@ const exeName = `${conf.productName}_${version}_x64-setup.exe`;
 const exe = join(nsisDir, exeName);
 const sig = `${exe}.sig`;
 if (!existsSync(exe) || !existsSync(sig)) throw new Error(`没找到安装包或签名：${exe}(.sig)`);
+// R2 上的文件名不带空格，下载链接不用转义
+const pubName = exeName.replaceAll(" ", "-");
 
 const latest = {
   version,
   notes,
   pub_date: new Date().toISOString(),
   platforms: {
-    "windows-x86_64": { signature: readFileSync(sig, "utf8").trim(), url: `${publicBase}/${version}/${exeName}` },
+    "windows-x86_64": { signature: readFileSync(sig, "utf8").trim(), url: `${publicBase}/${version}/${pubName}` },
   },
 };
 const outDir = join(root, "target", "release", "updater", app);
@@ -115,9 +120,9 @@ console.log(`\n安装包：${exe}\n清单：${latestPath}`);
 // ---- 3. 上传 ----
 const put = (key, file, extra) => sh("npx", ["wrangler@4", "r2", "object", "put", `${bucket}/${key}`, "--file", file, "--remote", ...extra]);
 if (dryRun) {
-  console.log(`\n--dry-run：没有上传。将上传到 ${bucket}/${prefix}/${version}/${exeName} 和 ${bucket}/${prefix}/latest.json`);
+  console.log(`\n--dry-run：没有上传。将上传到 ${bucket}/${prefix}/${version}/${pubName} 和 ${bucket}/${prefix}/latest.json`);
 } else {
-  put(`${prefix}/${version}/${exeName}`, exe, ["--content-type", "application/octet-stream"]);
+  put(`${prefix}/${version}/${pubName}`, exe, ["--content-type", "application/octet-stream"]);
   // 清单不能被 CDN 缓存，否则客户端要很久才看到新版本
   put(`${prefix}/latest.json`, latestPath, ["--content-type", "application/json", "--cache-control", "no-cache"]);
   console.log(`\n已发布 ${app} v${version}：${endpoint}`);
