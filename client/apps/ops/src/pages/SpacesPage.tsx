@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Dropdown, Empty, Input, InputNumber, Spin } from "antd";
-import { CaretDownOutlined, CaretRightOutlined, DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { CaretDownOutlined, CaretRightOutlined, DeleteOutlined, HomeOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
 import { bindBedDevice, getRadars, getRoomDevices, unbindBedKeepRoom, type RoomDevice } from "../api/device";
 import type { Room } from "../api/room";
@@ -26,6 +26,8 @@ import RoomPanel from "../spaces/RoomPanel";
 import { AddFloorsDialog, AddRoomsDialog, BedCheckInDialog, DeleteDialog } from "../spaces/dialogs";
 import { indexSpaces, roomsOfBuilding, roomsOfFloor, tallyRooms, without, type Spaces, type Tally } from "../spaces/model";
 import { nextBedName } from "../spaces/names";
+import { useGuide, useGuideFocus } from "../guide/GuideContext";
+import { GuideEmpty } from "../guide/GuideEmpty";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMPTY: Spaces = { buildings: [], floors: [], rooms: [], beds: [], radars: [] };
@@ -55,6 +57,9 @@ export default function SpacesPage() {
   /** 选中房间里的设备和它们绑的床位（只有床位绑定要单独取） */
   const [roomDevices, setRoomDevices] = useState<{ roomId: string; list: RoomDevice[] }>();
   const seq = useRef(0);
+  const guide = useGuide();
+  const guideRefresh = useRef(guide?.refresh);
+  guideRefresh.current = guide?.refresh;
 
   const load = useCallback(
     async (quiet = false) => {
@@ -65,6 +70,8 @@ export default function SpacesPage() {
         const [s, radars] = await Promise.all([getSpaces(), getRadars()]);
         if (my !== seq.current) return;
         setData({ ...s, radars });
+        // 新建之后的静默刷新：快速开始清单跟着重新检查
+        if (quiet) guideRefresh.current?.(true);
         pt.info("rooms", s.rooms.length);
         pt.info("beds", s.beds.length);
         pt.endAfterPaint();
@@ -98,6 +105,18 @@ export default function SpacesPage() {
   useEffect(() => {
     if (roomId && !ix.room.has(roomId)) setRoomId(undefined);
   }, [ix, roomId]);
+
+  // 从快速开始清单跳过来：选中那间房所在的楼层并打开房间（页面可能还在加载，等数据到了再选）
+  const [focusRoom, setFocusRoom] = useState<string>();
+  useGuideFocus("spaces", (f) => f.id && setFocusRoom(f.id));
+  useEffect(() => {
+    const r = focusRoom ? ix.room.get(focusRoom) : undefined;
+    if (!r) return;
+    setFocusRoom(undefined);
+    if (r.floorId) setSel({ kind: "floor", id: r.floorId });
+    if (r.buildingId) setExpanded((x) => new Set(x).add(r.buildingId!));
+    setRoomId(r.id);
+  }, [focusRoom, ix]);
 
   const curFloor = sel?.kind === "floor" ? ix.floor.get(sel.id) : undefined;
   const curBuilding = sel ? (sel.kind === "building" ? ix.building.get(sel.id) : curFloor && ix.building.get(curFloor.buildingId)) : undefined;
@@ -422,11 +441,15 @@ export default function SpacesPage() {
         ) : loading ? (
           <Spin style={{ margin: 80 }} />
         ) : (
-          <Empty style={{ marginTop: 120 }} description="先在左下角新建一栋楼">
+          <GuideEmpty
+            icon={<HomeOutlined />}
+            title="先建一栋楼"
+            desc="雷达、床位、长者都挂在房间上。顺序是：新建楼栋 → 批量加楼层 → 批量加房间（写 301-310 这样的范围，每间可以带几张床）。"
+          >
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddingBuilding(true)}>
               新建楼栋
             </Button>
-          </Empty>
+          </GuideEmpty>
         )}
       </section>
 

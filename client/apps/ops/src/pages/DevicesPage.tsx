@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin } from "antd";
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { HddOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
 import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
 import { useLiveMap } from "../devices/useLiveMap";
+import { useGuide, useGuideFocus } from "../guide/GuideContext";
+import { GuideEmpty } from "../guide/GuideEmpty";
 
 type Filter = "all" | "online" | "offline" | "disabled";
 
@@ -54,6 +56,7 @@ export default function DevicesPage() {
   const [listW, setListW] = useState(savedListW);
   const [dragging, setDragging] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const guide = useGuide();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,19 +119,29 @@ export default function DevicesPage() {
     if (!selId && shown.length) setSelId(shown[0].id);
   }, [selId, shown]);
 
-  /** 添加成功后刷新列表，清掉筛选并选中新设备 */
+  /** 清掉筛选并选中某台设备 */
+  function focusDevice(id: string) {
+    setFilter("all");
+    setQ("");
+    setSelId(id);
+    setListHidden(false);
+    requestAnimationFrame(() => listRef.current?.querySelector(`[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" }));
+  }
+
+  /** 添加成功后刷新列表并选中新设备 */
   async function onCreated(sn: string) {
     setAdding(false);
     const l = await load();
     const d = l?.find((x) => x.sn === sn);
-    if (d) {
-      setFilter("all");
-      setQ("");
-      setSelId(d.id);
-      setListHidden(false);
-      requestAnimationFrame(() => listRef.current?.querySelector(`[data-id="${d.id}"]`)?.scrollIntoView({ block: "nearest" }));
-    }
+    if (d) focusDevice(d.id);
+    guide?.refresh(true);
   }
+
+  // 从快速开始清单跳过来：选中设备或打开添加
+  useGuideFocus("devices", (f) => {
+    if (f.id) focusDevice(f.id);
+    if (f.action === "add") setAdding(true);
+  });
 
   function saveListW(w: number) {
     setListW(w);
@@ -255,7 +268,19 @@ export default function DevicesPage() {
         onDoubleClick={() => saveListW(LIST_W_DEFAULT)}
       />
       <section className="dev-detail">
-        {sel ? (
+        {!loading && !list.length ? (
+          <GuideEmpty
+            icon={<HddOutlined />}
+            title="添加第一台雷达"
+            desc="录入雷达的 SN，选好装在哪个房间。通电联网后它会自动上线，之后在这里看安装角度、画区域。"
+            need="spaces"
+            needText="还没有房间，建议先建楼宇，添加雷达时就能直接选房间"
+          >
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setAdding(true)}>
+              添加雷达
+            </Button>
+          </GuideEmpty>
+        ) : sel ? (
           <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />

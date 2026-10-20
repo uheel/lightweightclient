@@ -24,6 +24,7 @@ export function AppShell<K extends string>({
   nav,
   active,
   onNav,
+  railFooter,
   children,
 }: {
   appName: string;
@@ -36,6 +37,8 @@ export function AppShell<K extends string>({
   nav?: ShellNavItem<K>[];
   active?: K;
   onNav?: (key: K) => void;
+  /** 模块栏底部的额外入口（自己带 margin-top: auto 贴底） */
+  railFooter?: ReactNode;
   children: ReactNode;
 }) {
   // 版本号和检查更新统一加在用户菜单里（放在"退出登录"之前），两个客户端不用各自处理
@@ -83,6 +86,7 @@ export function AppShell<K extends string>({
                 {n.label}
               </button>
             ))}
+            {railFooter}
           </nav>
         )}
         <main className="shell-content">{children}</main>

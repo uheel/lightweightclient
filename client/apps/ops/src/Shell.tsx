@@ -10,6 +10,8 @@ import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 import MonitorMode from "./monitor/MonitorMode";
+import { GuideProvider } from "./guide/GuideContext";
+import { GuideBanner, GuideDrawer, GuideRailEntry } from "./guide/GuideDrawer";
 
 type NavKey = "devices" | "spaces" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
 /** 侧栏上的"监控"不是一个页面，而是打开全屏的监控模式 */
@@ -64,52 +66,62 @@ export default function Shell({ s }: { s: Session }) {
   const st = STATE_TEXT[rt];
 
   return (
-    <AppShell
-      appName="雷达运维"
-      org={<OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
-      live={{ text: `实时${st.text}`, color: st.dot, title: "SignalR /hub/message" }}
-      user={{
-        name: displayName,
-        sub: s.isSa ? "超管" : undefined,
-        menu: [
-          { key: "info", label: s.userName, disabled: true },
-          { type: "divider" },
-          { key: "logout", label: "退出登录", icon: <LogoutOutlined />, danger: true, onClick: logout },
-        ],
-      }}
-      nav={items}
-      active={nav}
-      onNav={go}
-    >
-      {/* 以 orgId 作为 key：切换机构时页面整体重新挂载、重新请求 */}
-      <div key={s.orgId} style={{ height: "100%" }}>
-        {nav === "devices" ? (
-          <DevicesPage />
-        ) : nav === "spaces" ? (
-          <SpacesPage />
-        ) : nav === "rooms" ? (
-          <RoomsPage />
-        ) : nav === "scenes" ? (
-          <ScenesPage />
-        ) : nav === "members" ? (
-          <MembersPage />
-        ) : nav === "alerts" ? (
-          <AlertsPage />
-        ) : (
-          <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
+    // 以 orgId 作为 key：切换机构时快速开始的检查结果和本机记录都换成新机构的
+    <GuideProvider key={s.orgId} orgId={s.orgId} nav={nav} onNav={go}>
+      <AppShell
+        appName="雷达运维"
+        org={<OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
+        live={{ text: `实时${st.text}`, color: st.dot, title: "SignalR /hub/message" }}
+        user={{
+          name: displayName,
+          sub: s.isSa ? "超管" : undefined,
+          menu: [
+            { key: "info", label: s.userName, disabled: true },
+            { type: "divider" },
+            { key: "logout", label: "退出登录", icon: <LogoutOutlined />, danger: true, onClick: logout },
+          ],
+        }}
+        nav={items}
+        active={nav}
+        onNav={go}
+        railFooter={<GuideRailEntry />}
+      >
+        {/* 以 orgId 作为 key：切换机构时页面整体重新挂载、重新请求。快速开始清单在右侧和页面并排，不遮页面 */}
+        <div key={s.orgId} className="guide-layout">
+          <div className="guide-page">
+            <GuideBanner />
+            <div className="guide-page-body">
+              {nav === "devices" ? (
+                <DevicesPage />
+              ) : nav === "spaces" ? (
+                <SpacesPage />
+              ) : nav === "rooms" ? (
+                <RoomsPage />
+              ) : nav === "scenes" ? (
+                <ScenesPage />
+              ) : nav === "members" ? (
+                <MembersPage />
+              ) : nav === "alerts" ? (
+                <AlertsPage />
+              ) : (
+                <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
+              )}
+            </div>
+          </div>
+          <GuideDrawer orgName={s.orgName} />
+        </div>
+        {monitor && (
+          <MonitorMode
+            key={`monitor-${s.orgId}`}
+            s={s}
+            rt={rt}
+            onExit={(to) => {
+              setMonitor(false);
+              if (to) go(to);
+            }}
+          />
         )}
-      </div>
-      {monitor && (
-        <MonitorMode
-          key={`monitor-${s.orgId}`}
-          s={s}
-          rt={rt}
-          onExit={(to) => {
-            setMonitor(false);
-            if (to) go(to);
-          }}
-        />
-      )}
-    </AppShell>
+      </AppShell>
+    </GuideProvider>
   );
 }

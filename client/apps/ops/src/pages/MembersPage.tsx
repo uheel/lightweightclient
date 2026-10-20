@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin } from "antd";
-import { PlusOutlined, ReloadOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined, TeamOutlined, UploadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
 import { deleteMember, getAllBeds, getCodes, getMembers, type Bed, type MemberRow } from "../api/member";
 import ImportView from "../members/ImportView";
 import MemberDetail, { memberState, STATE_TEXT, type MemberState } from "../members/MemberDetail";
 import { BedDialog, CheckOutDialog, MemberFormDialog, SwapDialog, type MemberDicts } from "../members/dialogs";
+import { useGuide } from "../guide/GuideContext";
+import { GuideEmpty } from "../guide/GuideEmpty";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
@@ -109,8 +111,12 @@ export default function MembersPage() {
     if (next) pick(next.id);
   }
 
-  /** 写操作之后：静默重取长者和床位 */
-  const refresh = () => load(true);
+  const guide = useGuide();
+  /** 写操作之后：静默重取长者和床位，快速开始清单跟着重新检查 */
+  const refresh = () => {
+    load(true);
+    guide?.refresh(true);
+  };
 
   function askDelete(m: MemberRow) {
     modal.confirm({
@@ -200,7 +206,22 @@ export default function MembersPage() {
         </div>
       </section>
       <section className="dev-detail">
-        {sel ? (
+        {!loading && !members.length ? (
+          <GuideEmpty
+            icon={<TeamOutlined />}
+            title="录入第一位长者"
+            desc="长者入住床位后，雷达的告警和体征才能对应到具体的人。可以逐个新建（顺便选床入住），人多时用 Excel 批量导入。"
+            need="spaces"
+            needText="楼宇里还没有床位，建议先建楼宇"
+          >
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setForm({})}>
+              新建长者
+            </Button>
+            <Button icon={<UploadOutlined />} onClick={() => setImporting(true)}>
+              批量导入
+            </Button>
+          </GuideEmpty>
+        ) : sel ? (
           <MemberDetail
             key={sel.id}
             member={sel}

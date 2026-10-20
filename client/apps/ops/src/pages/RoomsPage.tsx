@@ -9,6 +9,7 @@ import { checkRoom, ZONE_TYPES, type Level, type RadarReport, type RoomReport } 
 import RoomDetail, { IssueItem, LEVEL_TEXT, type DeviceRead } from "../rooms/RoomDetail";
 import { pool } from "../scenes/plan";
 import { placeInLayout, slotSource } from "../rooms/radarSlot";
+import { useGuideFocus } from "../guide/GuideContext";
 
 type Filter = "all" | "radar" | "problem";
 
@@ -176,6 +177,9 @@ export default function RoomsPage() {
       alive = false;
     };
   }, [selId, loading, designs, devices, values, loadDeviceData]);
+
+  // 从快速开始清单跳过来：打开那间房
+  useGuideFocus("rooms", (f) => f.id && pick(f.id));
 
   function pick(id: string) {
     setSelId(id);
