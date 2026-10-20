@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Dropdown, Empty, Input, InputNumber, Spin } from "antd";
+import { App, Button, Dropdown, Empty, InputNumber, Spin } from "antd";
 import { CaretDownOutlined, CaretRightOutlined, DeleteOutlined, HomeOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
 import { bindBedDevice, getRadars, getRoomDevices, unbindBedKeepRoom, type RoomDevice } from "../api/device";
@@ -23,7 +23,7 @@ import {
 } from "../api/space";
 import EditableText from "../spaces/EditableText";
 import RoomPanel from "../spaces/RoomPanel";
-import { AddFloorsDialog, AddRoomsDialog, BedCheckInDialog, DeleteDialog } from "../spaces/dialogs";
+import { AddBuildingDialog, AddFloorsDialog, AddRoomsDialog, BedCheckInDialog, DeleteDialog } from "../spaces/dialogs";
 import { indexSpaces, roomsOfBuilding, roomsOfFloor, tallyRooms, without, type Spaces, type Tally } from "../spaces/model";
 import { nextBedName } from "../spaces/names";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
@@ -49,7 +49,6 @@ export default function SpacesPage() {
   const [roomId, setRoomId] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [addingBuilding, setAddingBuilding] = useState(false);
-  const [newBuilding, setNewBuilding] = useState("");
   const [floorsFor, setFloorsFor] = useState<Building>();
   const [roomsFor, setRoomsFor] = useState<{ building: Building; floor: Floor }>();
   const [del, setDel] = useState<DeleteTarget>();
@@ -151,22 +150,15 @@ export default function SpacesPage() {
 
   // ---------- 楼栋 ----------
 
-  async function addBuilding() {
-    const name = newBuilding.trim();
-    if (!name) return setAddingBuilding(false);
-    try {
-      const id = await act("新建楼栋", () => createBuilding(name));
-      const b: Building = { id, buildingName: name };
-      setData((d) => ({ ...d, buildings: [...d.buildings, b] }));
-      setNewBuilding("");
-      setAddingBuilding(false);
-      setExpanded((s) => new Set(s).add(id));
-      pick({ kind: "building", id });
-      // 新楼栋紧接着加楼层
-      setFloorsFor(b);
-    } catch {
-      // 已提示
-    }
+  async function addBuilding(name: string) {
+    const id = await act("新建楼栋", () => createBuilding(name));
+    const b: Building = { id, buildingName: name };
+    setData((d) => ({ ...d, buildings: [...d.buildings, b] }));
+    setAddingBuilding(false);
+    setExpanded((s) => new Set(s).add(id));
+    pick({ kind: "building", id });
+    // 新楼栋紧接着加楼层
+    setFloorsFor(b);
   }
 
   const onRenameBuilding = (b: Building) => async (name: string) => {
@@ -366,26 +358,12 @@ export default function SpacesPage() {
               );
             })
           )}
-          {!loading && !data.buildings.length && !addingBuilding && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有楼栋" />}
+          {!loading && !data.buildings.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有楼栋" />}
         </div>
         <div className="space-tree-foot">
-          {addingBuilding ? (
-            <Input
-              autoFocus
-              size="small"
-              placeholder="楼栋名称，回车新建"
-              maxLength={32}
-              value={newBuilding}
-              onChange={(e) => setNewBuilding(e.target.value)}
-              onPressEnter={addBuilding}
-              onBlur={() => !newBuilding.trim() && setAddingBuilding(false)}
-              onKeyDown={(e) => e.key === "Escape" && setAddingBuilding(false)}
-            />
-          ) : (
-            <Button type="text" size="small" icon={<PlusOutlined />} onClick={() => setAddingBuilding(true)}>
-              新建楼栋
-            </Button>
-          )}
+          <Button type="text" size="small" icon={<PlusOutlined />} onClick={() => setAddingBuilding(true)}>
+            新建楼栋
+          </Button>
         </div>
       </section>
 
@@ -453,6 +431,7 @@ export default function SpacesPage() {
         )}
       </section>
 
+      <AddBuildingDialog open={addingBuilding} names={data.buildings.map((b) => b.buildingName)} onClose={() => setAddingBuilding(false)} onCreate={addBuilding} />
       <AddFloorsDialog
         building={floorsFor}
         floors={floorsFor ? ix.floorsOf.get(floorsFor.id) ?? [] : []}

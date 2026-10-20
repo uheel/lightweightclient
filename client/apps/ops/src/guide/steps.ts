@@ -146,7 +146,7 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
   // 1 建楼宇
   const s1 = ((): Step => {
     const base = { key: "spaces" as const, title: "建楼宇", why: "雷达、床位、长者都挂在房间上，先把楼栋 → 楼层 → 房间 → 床位建好。", action: { label: "去楼宇", target: { nav: "spaces" as const } } };
-    const hint = "楼宇页左下角新建楼栋，再批量加楼层、批量加房间（写 301-310 这样的范围，可以顺便加床位）";
+    const hint = "楼宇页点“新建楼栋”，再批量加楼层、批量加房间（写 301-310 这样的范围，可以顺便加床位）";
     if (!rooms.length) return { ...base, status: buildings.length ? "doing" : "todo", summary: buildings.length ? `${buildings.length} 栋楼，还没有房间` : "还没有楼栋", items: [{ text: hint, tip: true }] };
     if (!beds.length) return { ...base, status: "doing", summary: `${rooms.length} 间房，还没有床位`, items: [{ text: "在楼宇页点开房间加床位，批量加房间时也能每间带几张床", tip: true }] };
     const noBed = rooms.filter((r) => !bedsOf.has(r.id));

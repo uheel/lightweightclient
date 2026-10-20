@@ -56,6 +56,8 @@ interface GuideState {
   refresh: (force?: boolean) => void;
   go: (t: Target) => void;
   focus?: Focus;
+  /** 已经被页面处理过的 focus.seq：记在这里而不是页面里，页面重新挂载时不会再处理一遍 */
+  handled: { current: number };
   banner?: Banner;
   closeBanner: () => void;
 }
@@ -70,14 +72,14 @@ export function useGuide() {
 export function useGuideFocus(nav: NavKey, handle: (f: Focus) => void) {
   const g = useContext(Ctx);
   const f = g?.focus;
-  const seen = useRef(0);
+  const handled = g?.handled;
   const ref = useRef(handle);
   ref.current = handle;
   useEffect(() => {
-    if (!f || f.nav !== nav || f.seq === seen.current) return;
-    seen.current = f.seq;
+    if (!f || !handled || f.nav !== nav || f.seq <= handled.current) return;
+    handled.current = f.seq;
     ref.current(f);
-  }, [f, nav]);
+  }, [f, handled, nav]);
 }
 
 export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; nav: NavKey; onNav: (k: NavKey) => void; children: ReactNode }) {
@@ -88,6 +90,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
   const [error, setError] = useState<string>();
   const [open, setOpenState] = useState(false);
   const [focus, setFocus] = useState<Focus>();
+  const handled = useRef(0);
   const [banner, setBanner] = useState<Banner>();
   const running = useRef(false);
   const lastAt = useRef(0);
@@ -212,6 +215,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
     refresh: (force) => run(!!force),
     go,
     focus,
+    handled,
     banner,
     closeBanner: () => setBanner(undefined),
   };

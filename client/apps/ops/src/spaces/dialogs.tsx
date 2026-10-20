@@ -84,6 +84,48 @@ export function DeleteDialog({
   );
 }
 
+// ---------- 新建楼栋 ----------
+
+/** 新建楼栋：只填名称；建好后页面接着打开"加楼层" */
+export function AddBuildingDialog({ open, names, onClose, onCreate }: { open: boolean; names: string[]; onClose: () => void; onCreate: (name: string) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) setName("");
+  }, [open]);
+  const n = name.trim();
+  const dup = names.includes(n);
+
+  async function run() {
+    if (!n || dup || busy) return;
+    setBusy(true);
+    try {
+      await onCreate(n);
+    } catch {
+      // 页面已提示，留在对话框里可以改了再试
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title="新建楼栋" okText="新建" okButtonProps={{ disabled: !n || dup }} confirmLoading={busy} onOk={run} onCancel={onClose} destroyOnHidden>
+      <Input
+        autoFocus
+        placeholder="楼栋名称，例如 1 号楼"
+        maxLength={32}
+        value={name}
+        status={dup ? "warning" : undefined}
+        onChange={(e) => setName(e.target.value)}
+        onPressEnter={run}
+      />
+      <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
+        {dup ? "已有同名楼栋" : "建好后接着加楼层"}
+      </p>
+    </Modal>
+  );
+}
+
 // ---------- 批量加楼层 ----------
 
 export function AddFloorsDialog({ building, floors, onClose, onDone }: { building?: Building; floors: Floor[]; onClose: () => void; onDone: () => void }) {
