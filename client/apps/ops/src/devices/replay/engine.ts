@@ -1,4 +1,5 @@
 import { assetUrl } from "@radar/core";
+import { boundRect, containerRect, type QlConfig } from "../../rooms/qinglan";
 import { clamp, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
 
 /**
@@ -54,6 +55,9 @@ const LIGHT = {
   zoneText: "rgba(27,29,46,.6)",
   roomStroke: "#C9CDDC",
   elText: "#000",
+  /** 雷达最大探测范围的虚线框、监测边界（和房间页的图例一致） */
+  cover: "#B3B7C9",
+  bound: "#3B4FD8",
   /** 时间轴网格线、悬停线 */
   tlGrid: "rgba(17,20,65,.04)",
   hover: "rgba(27,29,46,.35)",
@@ -75,6 +79,8 @@ const DARK: ReplayPalette = {
   zoneText: "rgba(230,232,245,.75)",
   roomStroke: "#5A64A8",
   elText: "#C9CDE6",
+  cover: "#3A4380",
+  bound: "#7B8CFF",
   tlGrid: "rgba(123,140,255,.06)",
   hover: "rgba(230,232,245,.4)",
 };
@@ -90,6 +96,7 @@ export function fmtSpan(ms: number) {
 
 export class ReplayEngine {
   detail: RoomDetail | null = null;
+  private radars: string[] | null = null;
   data: ReplayData | null = null;
   q0: number;
   q1: number;
@@ -164,6 +171,12 @@ export class ReplayEngine {
     this.resizeRoom();
   }
 
+  /** 勾选的雷达：它们的探测范围正常画，其他的淡一些；null = 全部 */
+  setRadars(sns: string[] | null) {
+    this.radars = sns;
+    this.drawRoomBase();
+  }
+
   setData(data: ReplayData, q0: number, q1: number) {
     this.pause();
     this.data = data;
@@ -199,7 +212,16 @@ export class ReplayEngine {
     const W = this.els.stage.clientWidth;
     const H = this.els.stage.clientHeight;
     const m = 32;
-    const b = this.roomBounds();
+    // 视图 = 房间 + 各雷达的监测边界（边界可能伸出房间，和房间页一样都要看得到）
+    const r = this.roomBounds();
+    let [x0, y0, x1, y1] = [r.x, r.y, r.x + r.w, r.y + r.h];
+    for (const el of this.detail?.elements ?? []) {
+      const qc = el.qingLanConfig as QlConfig | undefined;
+      if (!qc?.container) continue;
+      const bd = boundRect(qc);
+      [x0, y0, x1, y1] = [Math.min(x0, bd.x), Math.min(y0, bd.y), Math.max(x1, bd.x + bd.width), Math.max(y1, bd.y + bd.height)];
+    }
+    const b = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     const scale = Math.max(0.05, Math.min((W - 2 * m) / b.w, (H - 2 * m) / b.h));
     this.room = { scale, ox: (W - b.w * scale) / 2 - b.x * scale, oy: (H - b.h * scale) / 2 - b.y * scale };
     this.drawRoomBase();
@@ -336,6 +358,29 @@ export class ReplayEngine {
       ctx.restore();
     }
     const elements = this.detail.elements ?? [];
+    // 雷达覆盖范围：最大探测范围（灰虚线）+ 监测边界（淡蓝底、蓝虚线），房间坐标
+    for (const el of elements) {
+      const qc = el.qingLanConfig as QlConfig | undefined;
+      if (!qc?.container) continue;
+      const c = containerRect(qc);
+      const bd = boundRect(qc);
+      ctx.save();
+      const a = !this.radars || (el.sn && this.radars.includes(el.sn)) ? 1 : 0.35;
+      ctx.globalAlpha = a;
+      ctx.lineWidth = 1 / s;
+      ctx.setLineDash([3 / s, 5 / s]);
+      ctx.strokeStyle = this.C.cover;
+      ctx.strokeRect(c.x, c.y, c.width, c.height);
+      ctx.fillStyle = this.C.bound;
+      ctx.globalAlpha = a * 0.05;
+      ctx.fillRect(bd.x, bd.y, bd.width, bd.height);
+      ctx.globalAlpha = a;
+      ctx.lineWidth = 1.5 / s;
+      ctx.setLineDash([10 / s, 6 / s]);
+      ctx.strokeStyle = this.C.bound;
+      ctx.strokeRect(bd.x, bd.y, bd.width, bd.height);
+      ctx.restore();
+    }
     // 雷达区域（门、监护床等），坐标在雷达 container 坐标系内
     for (const el of elements) {
       const qc = el.qingLanConfig;

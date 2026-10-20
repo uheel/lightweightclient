@@ -188,5 +188,6 @@ export function replayPalette(s: Scheme) {
   return {
     text: c.text, muted: c.muted, line: c.border2, lane: c.hover, run: c.border2, primary: c.accent, density: c.accent, overview: c.borderHover, head: c.alert,
     roomBg: c.plan, roomGrid: c.planGrid, zoneText: c.text2, roomStroke: c.planWall, elText: c.text2, tlGrid: c.planGrid, hover: c.muted,
+    cover: c.planLine, bound: c.accent,
   };
 }

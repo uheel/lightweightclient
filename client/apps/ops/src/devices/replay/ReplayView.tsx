@@ -100,12 +100,17 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
       dark && palette ? palette : !!dark,
     );
     engine.current = e;
+    e.setRadars(sns);
     return () => {
       e.destroy();
       engine.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStage]);
+
+  useEffect(() => {
+    engine.current?.setRadars(sns);
+  }, [sns]);
 
   useEffect(() => {
     try {
