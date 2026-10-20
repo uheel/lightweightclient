@@ -1,6 +1,6 @@
 [package]
 name = "radar-user"
-version = "0.1.2"
+version = "0.1.3"
 description = "雷达平台用户端"
 authors = ["lihu"]
 edition = "2024"
