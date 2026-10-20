@@ -1,7 +1,7 @@
 {
   "name": "@radar/user",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "用户端客户端（护理 / 家属 / 管理者）",
   "scripts": {
