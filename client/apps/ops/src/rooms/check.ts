@@ -2,6 +2,7 @@ import type { Radar, StoredProperty } from "../api/device";
 import { radarElements, type PlanElement, type Room, type RoomDesign } from "../api/room";
 import type { Scene } from "../api/scene";
 import { AREA_NEED, templateAreaValues } from "../scenes/plan";
+import { installAreaOf, type InstallArea } from "./installArea";
 import { describeDiff, sameArray, toDeviceArrays, validate, ZONE_TYPE, zonesOf, type DeviceArrays, type Issue, type QlConfig } from "./qinglan";
 
 /**
@@ -33,6 +34,8 @@ export interface RadarReport {
   /** 房间布置里的雷达元素（设备绑了房间却没画进布置时没有） */
   element?: PlanElement;
   config?: QlConfig;
+  /** 安装区域（卧室、卫生间…），布置里的雷达元素上存的 */
+  area?: InstallArea;
   /** 按房间布置算出来、应该在设备上的数组 */
   expected?: DeviceArrays;
   record?: { state: RecordState; config?: StoredProperty; area?: StoredProperty };
@@ -118,12 +121,21 @@ export function checkRoom(opts: {
   const issues: Issue[] = designError ? [{ level: "error", text: `房间布置读取失败：${designError}` }] : [];
   const radars: RadarReport[] = [];
   const drawn = new Set<string>();
+  // 房间里在用的雷达（绑在这个房间的）不止一台、而且装在不同地方时（卧室一台、卫生间一台，型号常常也不同），每台都要有安装区域，
+  // 告警、长者页、"进入卫生间"这类场景才分得清。看不出装在不同地方（同型号、都没设区域，例如一床一台）时不提醒
+  const roomDevs = devices.filter((d) => d.roomId === room.id && !d.isDisabled);
+  const roomEls = radarElements(design).filter((e) => e.sn && roomDevs.some((d) => d.sn === e.sn));
+  const mixed = new Set(roomDevs.map((d) => d.deviceType)).size > 1 || roomEls.some((e) => installAreaOf(e)?.type);
+  const areaIssue = (e: PlanElement, device?: Radar): Issue | undefined =>
+    roomDevs.length > 1 && mixed && device?.roomId === room.id && !installAreaOf(e)?.type
+      ? { level: "warn", text: `房间里有 ${roomDevs.length} 台雷达，这台没设安装区域（卧室、卫生间…），分不清它装在哪` }
+      : undefined;
 
   for (const e of radarElements(design)) {
     const sn = e.sn ?? "";
     if (sn) drawn.add(sn);
     const device = sn ? bySn.get(sn) : undefined;
-    const r: RadarReport = { sn, device, element: e, issues: [], level: "ok" };
+    const r: RadarReport = { sn, device, element: e, area: installAreaOf(e), issues: [], level: "ok" };
     // 设备在哪个房间以绑定（device.roomId）为准，布置里的雷达只是写着一个 sn，删设备、换绑都不会清理（docs/room-device-model.md）
     if (!sn) r.issues.push({ level: "warn", text: "布置里有一个没绑设备的雷达位置" });
     else if (!device) r.issues.push({ level: "warn", text: "布置里的雷达在本机构的设备里找不到（设备删了或转到别的机构，布置没清理）" });
@@ -133,9 +145,11 @@ export function checkRoom(opts: {
     const others = sn ? (layoutRooms?.get(sn) ?? []).filter((x) => x.id !== room.id) : [];
     if (others.length) r.issues.push({ level: "warn", text: `这台雷达还出现在 ${others.map((x) => `"${x.roomName}"`).join("、")} 的布置里，同一台雷达只该在一个房间` });
 
+    const ai = areaIssue(e, device);
+    if (ai) r.issues.push(ai);
     const type = device?.deviceType ?? e.deviceType;
     if (type !== undefined && !ZONE_TYPES.has(type)) {
-      r.level = "none";
+      r.level = ai ? "warn" : "none";
       radars.push(r);
       continue;
     }

@@ -127,7 +127,7 @@ export default function Shell({ s }: { s: Session }) {
   return (
     <>
       <AppShell
-        appName="康养看护"
+        appName="Health Guardian"
         org={role !== "family" ? <OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} /> : undefined}
         live={live}
         user={{ name: displayName, sub: ROLE_LABEL[role], menu: menuItems }}

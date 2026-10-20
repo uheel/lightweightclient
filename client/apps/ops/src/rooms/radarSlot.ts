@@ -1,5 +1,6 @@
 import type { Radar } from "../api/device";
 import { getRoomDesign, getRoomTypeDesignOf, roomSize, saveRoomDesign, type PlanElement, type RoomDesign } from "../api/room";
+import { installAreaOf, withArea, type InstallArea } from "./installArea";
 import { containerSize, radarInContainer, radarInRoom, supervisionSize, type QlConfig } from "./qinglan";
 
 /**
@@ -7,13 +8,20 @@ import { containerSize, radarInContainer, radarInRoom, supervisionSize, type QlC
  * - 设备离开房间时，布置里的雷达只清掉设备、留下空位置，下次装新设备直接沿用（clearSlot）
  * - 房间里没有雷达位置时（平台"移除设备"会连位置一起删），按"空位置 → 户型里的雷达 → 空白默认"找一个（slotSource）
  * 这样装设备不用回平台房间设计里重新放雷达。
+ * 一个房间可以装几台雷达（卧室一台、卫生间一台，型号也可以不同），每台各占一个位置，靠安装区域分清（rooms/installArea.ts）。
  */
 
-export type SlotSource =
+export type SlotSource = {
+  /** 这个位置原来的安装区域（空位置、户型里的雷达上带的） */
+  area?: InstallArea;
+  /** 房间布置里已经装着别的设备的雷达位置数 */
+  peers: number;
+} & (
   | { kind: "has" }
   | { kind: "placeholder"; el: PlanElement }
   | { kind: "roomType"; el: PlanElement; typeName?: string }
-  | { kind: "blank" };
+  | { kind: "blank" }
+);
 
 export const SLOT_TEXT: Record<SlotSource["kind"], string> = {
   has: "布置里已有这台雷达",
@@ -72,21 +80,36 @@ export function blankRadarConfig(room: { width: number; height: number }): QlCon
 /** 把设备放到雷达元素上（位置、配置不变） */
 const withDevice = (e: PlanElement, d: Radar): PlanElement => ({ ...e, sn: d.sn, deviceId: d.id, deviceName: d.deviceName, deviceType: d.deviceType ?? e.deviceType });
 
-/** 新房间里这台雷达该放在哪：已有 > 空位置 > 户型里的雷达 > 空白默认 */
-export async function slotSource(d: Radar, roomId: string, design?: RoomDesign): Promise<SlotSource> {
-  const cur = design ?? (await getRoomDesign(roomId));
-  if (findRadar(cur?.elements, (e) => e.sn === d.sn)) return { kind: "has" };
-  const ph = findRadar(cur?.elements, isPlaceholder(d));
-  if (ph) return { kind: "placeholder", el: ph };
-  // 户型里同型号、配过区域的雷达（id 和房间里冲突时 placeInLayout 会换一个）
-  const type = await getRoomTypeDesignOf(roomId).catch(() => undefined);
-  const t = findRadar(type?.elements, (e) => !!e.qingLanConfig && fits(d)(e));
-  if (t) return { kind: "roomType", el: t, typeName: type?.roomTypeName };
-  return { kind: "blank" };
+/** 布置里全部雷达元素（含组合里的） */
+function allRadars(list?: PlanElement[]): PlanElement[] {
+  return (list ?? []).flatMap((e) => [...(e.type === 3 ? [e] : []), ...allRadars(e.children)]);
 }
 
-/** 按 slotSource 的结果把设备放进房间布置并保存 */
-export async function placeInLayout(d: Radar, roomId: string, src: SlotSource) {
+/** 两个雷达元素差不多在同一个地方（户型里的雷达已经拷进房间、改过 id 的也认得出来） */
+const near = (a: PlanElement, b: PlanElement) => Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.y ?? 0) - (b.y ?? 0)) < 50;
+
+/** 新房间里这台雷达该放在哪：已有 > 空位置 > 户型里的雷达（房间里还没用上的） > 空白默认 */
+export async function slotSource(d: Radar, roomId: string, design?: RoomDesign): Promise<SlotSource> {
+  const cur = design ?? (await getRoomDesign(roomId));
+  const radars = allRadars(cur?.elements);
+  const peers = radars.filter((e) => (e.sn || e.deviceId) && e.sn !== d.sn).length;
+  const has = d.sn ? radars.find((e) => e.sn === d.sn) : undefined;
+  if (has) return { kind: "has", area: installAreaOf(has), peers };
+  const ph = findRadar(cur?.elements, isPlaceholder(d));
+  if (ph) return { kind: "placeholder", el: ph, area: installAreaOf(ph), peers };
+  // 户型里同型号、配过区域的雷达，跳过房间里已经有的（户型有卧室、卫生间两台时，第二台设备拿到的是卫生间那台；id 和房间里冲突时 placeInLayout 会换一个）
+  const type = await getRoomTypeDesignOf(roomId).catch(() => undefined);
+  const ids = new Set(radars.map((e) => e.id).filter(Boolean));
+  const t = allRadars(type?.elements).find((e) => !!e.qingLanConfig && fits(d)(e) && !(e.id && ids.has(e.id)) && !radars.some((r) => near(r, e)));
+  if (t) return { kind: "roomType", el: t, typeName: type?.roomTypeName, area: installAreaOf(t), peers };
+  return { kind: "blank", peers };
+}
+
+/**
+ * 按 slotSource 的结果把设备放进房间布置并保存。
+ * area：这台雷达的安装区域；不传时沿用位置上原有的（户型里存在 qingLanConfig.extra 的，拷过来时写成房间布置用的 rangeType）
+ */
+export async function placeInLayout(d: Radar, roomId: string, src: SlotSource, area?: InstallArea | null) {
   if (src.kind === "has") return;
   const design = await getRoomDesign(roomId);
   if (!design) throw new Error("房间布置读不到");
@@ -96,7 +119,7 @@ export async function placeInLayout(d: Radar, roomId: string, src: SlotSource) {
     elements = mapRadars(design.elements, (e) => {
       if (done || (src.el.id ? e.id !== src.el.id : !isPlaceholder(d)(e))) return e;
       done = true;
-      return withDevice(e, d);
+      return area !== undefined ? withArea(withDevice(e, d), area) : withDevice(e, d);
     });
     if (!done) throw new Error("布置里的空雷达位置已经不在了，请刷新后重试");
   } else if (src.kind === "roomType") {
@@ -106,14 +129,13 @@ export async function placeInLayout(d: Radar, roomId: string, src: SlotSource) {
       return [e.id ?? "", ...(e.children ?? []).flatMap(all)];
     }));
     if (!el.id || ids.has(el.id)) el.id = newId();
-    elements = [...(design.elements ?? []), withDevice(el, d)];
+    const a = area !== undefined ? area : installAreaOf(el) ?? null;
+    elements = [...(design.elements ?? []), withArea(withDevice(el, d), a)];
   } else {
     const cfg = blankRadarConfig(roomSize(design));
     const at = radarInRoom(cfg);
-    elements = [
-      ...(design.elements ?? []),
-      withDevice({ id: newId(), type: 3, width: 24, height: 24, x: Math.round(at.x), y: Math.round(at.y), src: "/images/plan/qinglan-radar.png", qingLanConfig: cfg }, d),
-    ];
+    const el = withDevice({ id: newId(), type: 3, width: 24, height: 24, x: Math.round(at.x), y: Math.round(at.y), src: "/images/plan/qinglan-radar.png", qingLanConfig: cfg }, d);
+    elements = [...(design.elements ?? []), area ? withArea(el, area) : el];
   }
   await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements });
 }
@@ -139,5 +161,13 @@ export async function syncSlotName(roomId: string, sn: string, deviceName: strin
   const design = await getRoomDesign(roomId);
   if (!design || !findRadar(design.elements, (e) => e.sn === sn && e.deviceName !== deviceName)) return false;
   await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements: mapRadars(design.elements, (e) => (e.sn === sn ? { ...e, deviceName } : e)) });
+  return true;
+}
+
+/** 改布置里这台雷达的安装区域（只保存布置；设备上没有这一项，不用下发）。返回 false = 布置里没有这台 */
+export async function setSlotArea(roomId: string, sn: string, area: InstallArea | null) {
+  const design = await getRoomDesign(roomId);
+  if (!design || !findRadar(design.elements, (e) => e.sn === sn)) return false;
+  await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements: mapRadars(design.elements, (e) => (e.sn === sn ? withArea(e, area) : e)) });
   return true;
 }

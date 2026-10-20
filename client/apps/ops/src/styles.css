@@ -461,6 +461,10 @@
 .lg.container { border: 1px dashed #B3B7C9; background: transparent; opacity: 1; }
 .lg.supervision { border: 1.5px dotted #E5484D; background: transparent; opacity: 1; }
 .radar-card h2 small { font-weight: 400; font-size: 12px; }
+/* 一个房间几台雷达时标题里还有安装区域下拉：窄窗口时换行，名字不被挤成竖排 */
+.radar-card h2 { flex-wrap: wrap; row-gap: 4px; }
+.radar-card h2 > span:not(.grow), .radar-card h2 > .grade { white-space: nowrap; }
+.radar-card h2 .ant-select { font-weight: 400; }
 .radar-kv { grid-template-columns: 48px 1fr; margin-bottom: 10px; }
 .zone-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .zone-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid #E8EAF2; border-radius: 4px; font-size: 12px; cursor: default; }
@@ -512,6 +516,9 @@
 .zc-grip { fill: #fff; stroke: #3B4FD8; stroke-width: 0.15; cursor: pointer; }
 .zc-label { font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 0.35px; pointer-events: none; }
 .zc-radar { fill: #111441; stroke: #fff; stroke-width: 0.2; pointer-events: none; }
+.zc-radar.movable { pointer-events: auto; cursor: grab; }
+.zc-radar.movable:hover, .zc-radar.on { fill: #3B4FD8; }
+.zc svg.dragging .zc-radar.movable { cursor: grabbing; }
 .zc-radar-text { fill: #111441; font-weight: 600; pointer-events: none; }
 .zc-info { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 13px; }
 .zc-id { font-size: 12px; color: #5B6078; background: #F1F2F7; border-radius: 4px; padding: 1px 6px; }
@@ -625,3 +632,5 @@
 .space-bed-pick .ant-select-selection-placeholder { color: #3B4FD8; font-size: 12px; }
 .space-radars li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-radars li > .mono { flex: none; max-width: 45%; }
+.slot-area { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 0 24px; }
+.area-dd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

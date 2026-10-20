@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Empty, Skeleton } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import type { LiveData } from "@radar/core";
 import type { CareAlert, Member } from "../care/api";
 import { attentionReasons, useAttentionRules } from "../care/attention";
 import NightTimeline from "../care/NightTimeline";
+import { awayDevices, type MemberLive } from "../care/devices";
 import { careState, sinceText, TONE_STYLE } from "../care/state";
 import {
   getMemberSleepReport,
@@ -40,7 +40,7 @@ export default function ElderDetail({
 }: {
   orgId: string;
   member: Member;
-  live?: LiveData;
+  live?: MemberLive;
   alert?: CareAlert;
   now: number;
   onBack: () => void;
@@ -113,6 +113,7 @@ export default function ElderDetail({
     };
   }, [report, member.memberId, member.devices]);
 
+  const away = useMemo(() => awayDevices(member.devices), [member.devices]);
   const st = careState(member, live, alert, now);
   const tone = TONE_STYLE[st.tone];
   const showVitals = live && (live.heartRate || live.respiratoryRate) && st.tone !== "unknown";
@@ -197,7 +198,7 @@ export default function ElderDetail({
           {report === undefined || (report && vitals === undefined) ? (
             <Skeleton active paragraph={{ rows: 4 }} />
           ) : report && (report.sleepDetails?.length || report.heartRateTrend?.some((v) => v > 0) || report.breathingTrend?.some((v) => v > 0) || vitals?.length) ? (
-            <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} postures={postures} />
+            <NightTimeline r={report} codes={stageCodesOf(report)} vitals={vitals} postures={postures} away={away} />
           ) : (
             <Empty description="没有夜间睡眠与体征数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           )}

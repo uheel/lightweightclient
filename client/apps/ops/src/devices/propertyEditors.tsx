@@ -4,7 +4,7 @@ import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-desig
 import dayjs, { type Dayjs } from "dayjs";
 import { getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
 import ZoneCanvas, { limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
-import { switchMount } from "./mountSwitch";
+import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 
 /**
  * 数组 / JSON 类属性的结构化编辑器：把 [24,90,8,50] 这类数组拆成运维看得懂的一项项设置。
@@ -560,6 +560,18 @@ const QL_RADAR_AREA: Structured = {
       onError(checkAreas(next));
       onChange(writeAreas(next));
     };
+    // 拖雷达到实际安装的位置（不一定是墙的中间 / 房间正中）：区域在房间里不动，监测范围按新位置裁到墙内，下发成功后连雷达位置一起写回房间布置
+    const room = plan.room;
+    const moveRadar = (to: { x: number; y: number }) => {
+      if (!cfg || !setOther || !setPlan || !room) return;
+      const at = clampRadar(installType, facing, room, to);
+      if (at.x === room.radar.x && at.y === room.radar.y) return;
+      const res = moveRadarTo({ config: cfg, area: writeAreas(list), facing, room, to: at });
+      setOther("QL_radar_config", res.config);
+      onError(checkAreas(readAreas(res.area)));
+      onChange(res.area);
+      setPlan({ facing, room: { ...room, radar: res.radar } });
+    };
     const setBound = (b: DmRect) => {
       if (!cfg || !setOther) return;
       const n = [...cfg];
@@ -579,7 +591,9 @@ const QL_RADAR_AREA: Structured = {
             onChange={(v) => setFacing(Number(v))}
             options={(installType === 1 ? ["上墙", "右墙", "下墙", "左墙"] : ["朝上", "朝右", "朝下", "朝左"]).map((label, i) => ({ value: i + 1, label }))}
           />
-          <small className="muted">{installType === 1 ? "按平面图的上下左右；雷达装在墙的中间，朝房间里看" : "设备正面（箭头）朝平面图的哪一边"}</small>
+          <small className="muted">
+            {installType === 1 ? "按平面图的上下左右，朝房间里看；换墙时雷达先放到墙的中间，再沿墙拖到实际位置" : "设备正面（箭头）朝平面图的哪一边；雷达可以拖到实际吊装的位置"}
+          </small>
         </div>
         <ZoneCanvas
           installType={installType}
@@ -593,6 +607,7 @@ const QL_RADAR_AREA: Structured = {
           disabled={disabled}
           onZones={update}
           onBound={setOther ? setBound : undefined}
+          onRadar={cfg && setOther && setPlan && room ? moveRadar : undefined}
         />
         {plan.mountNotes && plan.mountNotes.length > 0 && (
           <p className="pp-note warn">改了安装方式或朝向：区域在房间里的位置不变，{plan.mountNotes.join("；")}。请确认高度和监测范围后再下发。</p>

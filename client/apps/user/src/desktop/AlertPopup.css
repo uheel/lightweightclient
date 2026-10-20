@@ -1,0 +1,36 @@
+/* 告警弹窗（alert-popup 窗口）。窗口本身透明，四周留 10px 给卡片阴影 */
+html.popup-root, html.popup-root body, html.popup-root #root, html.popup-root #root > .ant-app {
+  background: transparent; height: auto; overflow: hidden;
+}
+html.popup-root body { padding: 10px; }
+
+.popup {
+  background: #fff; border: 1px solid #E8EAF2; border-left: 4px solid #D93036; border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(17, 20, 65, 0.18), 0 1px 3px rgba(17, 20, 65, 0.08);
+  padding: 12px 12px 10px 14px; display: flex; flex-direction: column; gap: 8px;
+  animation: popup-in 0.22s ease-out;
+}
+@keyframes popup-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+.popup-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.popup-head b { color: #B4232A; }
+.popup-dot { width: 8px; height: 8px; border-radius: 50%; background: #D93036; flex: none; animation: care-pulse 1.4s ease-out infinite; }
+.popup-app { margin-left: auto; font-size: 12px; color: #8A8FA8; }
+.popup-close {
+  border: 0; background: transparent; color: #8A8FA8; width: 24px; height: 24px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px;
+}
+.popup-close:hover { background: #F1F2F7; color: #1B1D2E; }
+
+.popup-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.popup-list li { padding: 8px 10px; border-radius: 6px; background: #FDECEC; cursor: pointer; line-height: 1.4; }
+.popup-list li:hover { background: #FAD9DA; }
+.popup-top { display: flex; justify-content: space-between; gap: 8px; }
+.popup-top b { color: #B4232A; font-size: 14px; }
+.popup-top span { font-size: 12px; color: #B4232A; white-space: nowrap; }
+.popup-who { font-size: 13px; font-weight: 500; color: #1B1D2E; }
+.popup-where { font-size: 12px; color: #5B6078; }
+.popup-more { font-size: 12px; color: #5B6078; }
+.popup-foot { display: flex; justify-content: flex-end; gap: 6px; }
+
+@keyframes care-pulse { 0% { box-shadow: 0 0 0 0 rgba(217, 48, 54, 0.45); } 100% { box-shadow: 0 0 0 8px rgba(217, 48, 54, 0); } }

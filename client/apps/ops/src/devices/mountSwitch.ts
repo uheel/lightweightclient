@@ -128,3 +128,53 @@ export function switchMount(opts: {
   }
   return { config: [to, height, ...corners(bound), mode], area: newArea, facing: nf, radar, notes };
 }
+
+/** 雷达在房间里能放的位置：侧装只能沿着它那面墙挪，顶装在房间里随便放；对齐到 10 cm（设备坐标的精度） */
+export function clampRadar(installType: number, facing: number, room: MountRoom, to: { x: number; y: number }) {
+  const snap = (v: number, ref: number) => ref + Math.round((v - ref) / 10) * 10;
+  const cx = (v: number) => Math.min(room.width, Math.max(0, v));
+  const cy = (v: number) => Math.min(room.height, Math.max(0, v));
+  // 从当前位置按 10 cm 的整数倍挪，挪完设备坐标还是整数分米
+  let x = snap(cx(to.x), room.radar.x);
+  let y = snap(cy(to.y), room.radar.y);
+  if (x > room.width) x -= 10;
+  if (x < 0) x += 10;
+  if (y > room.height) y -= 10;
+  if (y < 0) y += 10;
+  if (installType === SIDE) {
+    if (facing === 1 || facing === 3) y = room.radar.y;
+    else x = room.radar.x;
+  }
+  return { x, y };
+}
+
+/**
+ * 挪雷达（装法、朝向不变）：雷达装的地方不一定是墙的中间 / 房间正中，卧室、卫生间各一台时要放到实际位置。
+ * 区域在房间里不动，相对雷达反着挪；监测范围原来是"最大范围裁到墙内"的，按新位置重新裁，用户自己缩过的保持在房间里的位置不变。
+ */
+export function moveRadarTo(opts: { config: number[]; area: number[][]; facing: number; room: MountRoom; to: { x: number; y: number } }): { config: number[]; area: number[][]; radar: { x: number; y: number } } {
+  const { config, area, facing, room } = opts;
+  const it = config[0] === SIDE ? SIDE : TOP;
+  const mode = config[10] ?? 15;
+  const radar = clampRadar(it, facing, room, opts.to);
+  // 区域相对雷达的位移（平面图，分米）
+  const dx = (room.radar.x - radar.x) / 10;
+  const dy = (room.radar.y - radar.y) / 10;
+  const shift = (x0: number, y0: number, x1: number, y1: number) => {
+    const [ax, ay] = toPlan(it, facing, x0, y0);
+    const [bx, by] = toPlan(it, facing, x1, y1);
+    return toDevice(it, facing, Math.min(ax, bx) + dx, Math.min(ay, by) + dy, Math.max(ax, bx) + dx, Math.max(ay, by) + dy);
+  };
+  const newArea = area.map((row) => [row[0]!, row[1]!, ...corners(shift(row[2]!, row[3]!, row[8]!, row[9]!))]);
+
+  const limit = limitOf(it, mode);
+  const wallsAt = (r: { x: number; y: number }) => toDevice(it, facing, -r.x / 10, -r.y / 10, (room.width - r.x) / 10, (room.height - r.y) / 10);
+  const xs = [config[2]!, config[4]!, config[6]!, config[8]!];
+  const ys = [config[3]!, config[5]!, config[7]!, config[9]!];
+  const cur: DmRect = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+  const dflt = intersect(limit, wallsAt(room.radar)) ?? limit;
+  const isDefault = cur.x0 === dflt.x0 && cur.x1 === dflt.x1 && cur.y0 === dflt.y0 && cur.y1 === dflt.y1;
+  const fresh = intersect(limit, wallsAt(radar)) ?? limit;
+  const bound = isDefault ? fresh : (intersect(limit, shift(cur.x0, cur.y0, cur.x1, cur.y1)) ?? fresh);
+  return { config: [config[0]!, config[1]!, ...corners(bound), mode, ...config.slice(11)], area: newArea, radar };
+}

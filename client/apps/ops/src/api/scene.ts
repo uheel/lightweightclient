@@ -1,5 +1,7 @@
 import { api, realtime } from "@radar/core";
 import { isResponseOk, type DeviceResponse } from "./device";
+import type { PlanElement } from "./room";
+import { installAreaOf } from "../rooms/installArea";
 
 /** 场景模板与设备场景（接口说明见 docs/site-analysis.md"场景模板与设备场景"） */
 
@@ -173,7 +175,7 @@ export interface LayoutRange {
 }
 
 export interface RadarLayout {
-  /** 雷达安装区域（字典 RADAR_INSTALL_AREA）：1 卧室，2 客厅，3 卫生间，4 厨房，5 其他 */
+  /** 雷达安装区域（字典 RADAR_INSTALL_AREA）：1 卧室，2 客厅，3 厨房，7 卫生间，9 其他 */
   installArea?: number;
   ranges: LayoutRange[];
 }
@@ -181,8 +183,9 @@ export interface RadarLayout {
 interface LayoutElement {
   type: number;
   sn?: string;
-  rangeType?: number;
-  qingLanConfig?: { ranges?: { index?: number; type: number; text?: string; spaceType?: number }[] };
+  rangeType?: number | null;
+  rangeName?: string | null;
+  qingLanConfig?: { ranges?: { index?: number; type: number; text?: string; spaceType?: number }[]; extra?: { installArea?: string | number | null; installAreaAlias?: string | null } };
   children?: LayoutElement[];
 }
 
@@ -194,7 +197,7 @@ export async function getRoomLayouts(roomId: string) {
     for (const e of list ?? []) {
       if (e.type === 3 && e.sn) {
         out.set(e.sn, {
-          installArea: e.rangeType,
+          installArea: installAreaOf(e as PlanElement)?.type,
           // 区域号 = 位置（平台下发按位置编号，存的 index 可能有空号），见 rooms/qinglan.ts zonesOf
           ranges: (e.qingLanConfig?.ranges ?? []).map((r, i) => ({ index: i, type: r.type, text: r.text, spaceType: r.spaceType })),
         });
@@ -210,4 +213,4 @@ export const SPACE_TYPE: Record<number, string> = {
   51: "床", 52: "沙发", 53: "过道", 54: "会客", 55: "餐厅", 56: "马桶", 57: "淋浴", 58: "洗漱", 59: "更衣", 60: "阅读",
 };
 export const RANGE_TYPE: Record<number, string> = { 2: "普通床", 3: "干扰区", 4: "门", 5: "监护床", 6: "感应区", 7: "家具" };
-export const INSTALL_AREA: Record<number, string> = { 1: "卧室", 2: "客厅", 3: "卫生间", 4: "厨房", 5: "其他" };
+export { INSTALL_AREA } from "../rooms/installArea";

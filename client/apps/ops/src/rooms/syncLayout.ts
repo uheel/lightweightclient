@@ -64,7 +64,8 @@ export function applyDeviceArrays(c: QlConfig, written: { config?: unknown; area
     // 在设备属性里切换过装法（哪怕又切回来）雷达位置都可能变了，按新位置重摆
     const remount = g[0] !== mountOf(c) || mount !== undefined;
     if (remount && !mount) return { note: "改了安装方式（顶装 / 侧装），但不知道雷达挪到了哪里，没有写回房间布置，请在房间布置里重新画" };
-    if (remount && written.area === undefined) return { note: "改了安装方式，但这次没有下发区域，没有写回房间布置" };
+    // 没有区域的雷达挪位置时区域数组不变、不会下发，照样能写回
+    if (remount && written.area === undefined && zonesOf(c).length) return { note: "改了安装方式或雷达位置，但这次没有下发区域，没有写回房间布置" };
     next.installHeight = g[1]! / 10;
     next.workingType = g[10];
     if (remount) {

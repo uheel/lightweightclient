@@ -63,7 +63,7 @@ export default memo(ReplayView);
  * 任选时间段（可跨天，最多 7 天）复现房间里的人员轨迹与姿态，时间轴可缩放，事件 / 告警可逐个跳转。
  * 回放以房间为单位，默认只选当前设备，同房间的其他雷达可以勾选一起看。
  */
-function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; sn: string; /** 深色（监控模式） */ dark?: boolean; /** 深色时画布用的配色（监控模式的配色方案），不传用默认深色 */ palette?: ReplayPalette; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
+function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 先看哪台设备；不传 = 房间里全部设备一起看（卧室、卫生间各一台时人在两台之间走动） */ sn?: string; /** 深色（监控模式） */ dark?: boolean; /** 深色时画布用的配色（监控模式的配色方案），不传用默认深色 */ palette?: ReplayPalette; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
   const stage = useRef<HTMLDivElement>(null);
   const roomBase = useRef<HTMLCanvasElement>(null);
   const roomDyn = useRef<HTMLCanvasElement>(null);
@@ -79,7 +79,7 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; sn: 
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().startOf("day"), dayjs()]);
   const [detail, setDetail] = useState<RoomDetail | null>(null);
   const [roomError, setRoomError] = useState<string>();
-  const [sns, setSns] = useState<string[]>([sn]);
+  const [sns, setSns] = useState<string[]>(sn ? [sn] : []);
   const [data, setData] = useState<ReplayData | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; err?: boolean }>();
@@ -153,8 +153,8 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; sn: 
       (d) => {
         setDetail(d);
         engine.current?.setDetail(d);
-        const has = (d.devices ?? []).some((x) => x.sn === sn);
-        const list = has ? [sn] : (d.devices ?? []).map((x) => x.sn);
+        const has = !!sn && (d.devices ?? []).some((x) => x.sn === sn);
+        const list = has ? [sn!] : (d.devices ?? []).map((x) => x.sn);
         setSns(list);
         query(undefined, d, list);
       },
@@ -190,7 +190,7 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; sn: 
     return keys.filter((k) => POSTURES[k]);
   }, [data]);
 
-  if (!roomId) return <Empty style={{ marginTop: 60 }} description="这台设备没有绑定房间，姿态回放按房间查询，绑定房间后才能使用" />;
+  if (!roomId) return <Empty style={{ marginTop: 60 }} description="这台设备没有绑定房间，时间回溯按房间查询，绑定房间后才能使用" />;
   if (roomError) return <Empty style={{ marginTop: 60 }} description={`加载房间失败：${roomError}`} />;
 
   const devices = detail?.devices?.filter((d) => d.sn) ?? [];

@@ -11,6 +11,8 @@ import {
   type Radar,
 } from "../api/device";
 import { placeInLayout, SLOT_TEXT, slotSource, type SlotSource } from "../rooms/radarSlot";
+import { SlotAreaLine } from "../rooms/AreaSelect";
+import type { InstallArea } from "../rooms/installArea";
 
 interface Values {
   sn: string;
@@ -44,6 +46,8 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
   /** 选了房间时，布置里放哪（平台新增设备只绑房间，不动布置） */
   const [slot, setSlot] = useState<SlotSource>();
   const [place, setPlace] = useState(true);
+  /** 放进布置时这台雷达的安装区域（默认沿用位置上原有的） */
+  const [area, setArea] = useState<InstallArea | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -65,7 +69,14 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     setSlot(undefined);
     if (!roomId) return;
     let alive = true;
-    slotSource({ sn: "", deviceType } as Radar, roomId).then((x) => alive && setSlot(x), () => {});
+    slotSource({ sn: "", deviceType } as Radar, roomId).then(
+      (x) => {
+        if (!alive) return;
+        setSlot(x);
+        setArea(x.area ?? null);
+      },
+      () => {},
+    );
     return () => {
       alive = false;
     };
@@ -83,7 +94,7 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
         try {
           // 新增接口应返回设备 id；没返回时按 SN 查一下（布置里的雷达要带 deviceId）
           const devId = typeof id === "string" && id ? id : (await getRadars()).find((x) => x.sn === sn)?.id;
-          await placeInLayout({ id: devId ?? "", sn, deviceName, deviceType: v.deviceType } as Radar, v.roomId, slot);
+          await placeInLayout({ id: devId ?? "", sn, deviceName, deviceType: v.deviceType } as Radar, v.roomId, slot, area);
         } catch (e) {
           note = `，但放进房间布置失败（${e instanceof Error ? e.message : String(e)}），可到"诊断"页补上`;
         }
@@ -163,6 +174,7 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
             <Checkbox checked={place} onChange={(e) => setPlace(e.target.checked)}>
               {slot.kind === "roomType" && slot.typeName ? `从户型"${slot.typeName}"拷一个雷达位置（沿用户型里的安装方式和区域）` : SLOT_TEXT[slot.kind]}
             </Checkbox>
+            {place && <SlotAreaLine slot={slot} area={area} onChange={setArea} />}
           </Form.Item>
         )}
         <Form.Item name="description" label="备注">
@@ -172,3 +184,4 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     </Modal>
   );
 }
+

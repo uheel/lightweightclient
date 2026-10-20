@@ -46,6 +46,9 @@ export interface PlanElement {
   deviceName?: string;
   deviceType?: number;
   qingLanConfig?: QlConfig;
+  /** 雷达安装区域编号和别名（字典 RADAR_INSTALL_AREA），见 rooms/installArea.ts */
+  rangeType?: number | null;
+  rangeName?: string | null;
   isBedSlot?: boolean;
   children?: PlanElement[];
 }

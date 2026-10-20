@@ -1,4 +1,5 @@
 import type { Radar } from "../api/device";
+import { BATHROOM, BEDROOM } from "../rooms/installArea";
 import { INSTALL_AREA, type LayoutRange, type RadarLayout, type Scene, type SceneTemplate } from "../api/scene";
 
 /**
@@ -30,7 +31,7 @@ export const AREA_NEED: Record<string, AreaNeed> = {
 };
 
 /** 只适合某类房间的场景：雷达安装区域要对得上 */
-export const INSTALL_NEED: Record<string, number> = { 进入卧室: 1, 进入客厅: 2, 进入卫生间: 3 };
+export const INSTALL_NEED: Record<string, number> = { 进入卧室: BEDROOM, 进入客厅: 2, 进入卫生间: BATHROOM };
 
 const AREA_PROPS = new Set(["QL_event_area_ID", "QL_event_area"]);
 /** 表达式里的区域条件，例如 COUNT_2D(QL_event_area_ID_data,"==",1,">=",1,0,5) */

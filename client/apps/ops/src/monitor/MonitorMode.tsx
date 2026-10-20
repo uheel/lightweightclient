@@ -119,7 +119,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
   const shownTiles = showUnbound ? tiles : tiles.filter((t) => t.kind !== "none");
 
   const [processing, setProcessing] = useState<OpsAlert | null>(null);
-  const [replay, setReplay] = useState<{ roomId?: string; sn: string; title?: string } | null>(null);
+  const [replay, setReplay] = useState<{ roomId?: string; sn?: string; title?: string } | null>(null);
 
   const [fullscreen, setFullscreen] = useState(false);
   async function toggleFullscreen() {
@@ -343,7 +343,8 @@ function RoomLive({
   live: Record<string, LiveData | undefined>;
   now: number;
   onProcess: (a: OpsAlert) => void;
-  onReplay: (sn: string) => void;
+  /** 不传 sn = 房间里全部雷达一起回溯 */
+  onReplay: (sn?: string) => void;
 }) {
   const { room, devices, alert } = tile;
   const [design, setDesign] = useState<{ roomId: string; d?: RoomDesign; error?: string }>();
@@ -401,7 +402,7 @@ function RoomLive({
         </div>
         <div className="mon-actions">
           {devices.length > 0 && (
-            <button className="mon-btn" onClick={() => onReplay(devices[0].sn)}>
+            <button className="mon-btn" onClick={() => onReplay(devices.length > 1 ? undefined : devices[0].sn)}>
               时间回溯
             </button>
           )}
@@ -498,16 +499,28 @@ function VitalsTag({ c, v, fs }: { c: QlConfig; v: BedVitals; fs: number }) {
   if (!z) return null;
   const r = zoneRect(c, z);
   const breath = v.respiratoryRate ? Math.min(10, Math.max(1.5, 60 / v.respiratoryRate)) : undefined;
+  // 心跳同理：按实际心率跳（一拍的时长 = 60 / 心率 秒）
+  const beat = v.heartRate ? Math.min(2, Math.max(0.3, 60 / v.heartRate)) : undefined;
   return (
     <foreignObject x={r.x + fs * 0.3} y={r.y + r.height - fs * 2.1} width={Math.max(r.width, fs * 16)} height={fs * 2} className="mon-vt-fo">
       <div className={`mon-vt ${v.state} ${v.level}`} style={{ fontSize: fs * 0.85 }}>
         <b>{v.state === "in" ? (v.issue ?? v.text) : v.text}</b>
         {v.state === "in" && (
           <>
-            <span>{`\u2665 ${v.heartRate ?? "\u2014"}`}</span>
             <span>
-              <i className="mon-breath" style={breath ? { animationDuration: `${breath}s` } : { animation: "none" }} />
-              {`\u224B ${v.respiratoryRate ?? "\u2014"}`}
+              <i className="mon-heart" style={beat ? { animationDuration: `${beat}s` } : { animation: "none" }}>
+                {"\u2665"}
+              </i>
+              {` ${v.heartRate ?? "\u2014"}`}
+            </span>
+            <span>
+              {/* \u4E09\u6761\u6CE2\u6D6A\u6309\u547C\u5438\u8282\u594F\u4ECE\u4E0B\u5F80\u4E0A\u4F9D\u6B21\u4EAE\u8D77\uFF0C\u4E00\u6B21\u547C\u5438\u4E00\u4E2A\u6765\u56DE */}
+              <svg className={`mon-wave${breath ? "" : " still"}`} viewBox="0 0 16 12" aria-hidden="true" style={breath ? ({ "--d": `${breath}s` } as React.CSSProperties) : undefined}>
+                <path d="M1 3q2-2 4 0t4 0t4 0" />
+                <path d="M1 6.5q2-2 4 0t4 0t4 0" />
+                <path d="M1 10q2-2 4 0t4 0t4 0" />
+              </svg>
+              {` ${v.respiratoryRate ?? "\u2014"}`}
             </span>
           </>
         )}

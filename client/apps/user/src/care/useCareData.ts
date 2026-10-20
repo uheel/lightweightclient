@@ -11,6 +11,7 @@ import dayjs from "dayjs";
 import { getMembers, type CareAlert, type Member } from "./api";
 import { getOrgSleepReports, type SleepReport } from "./health";
 import { buildAttention, useAttentionRules } from "./attention";
+import { mergeLive, type MemberLive } from "./devices";
 
 /**
  * 护理值守首页的数据：
@@ -99,15 +100,8 @@ export function useCareData(orgId: string, pendingAlerts: CareAlert[]) {
     return () => window.clearInterval(t);
   }, []);
 
-  /** 一位长者可能绑了多台设备：按时间先后合并，后到的数据覆盖先到的 */
-  const liveOf = useCallback(
-    (m: Member): LiveData | undefined => {
-      const list = (m.devices ?? []).map((d) => liveBySn[d.sn]).filter(Boolean) as LiveData[];
-      if (!list.length) return undefined;
-      return list.sort((a, b) => a.updatedAt - b.updatedAt).reduce((acc, x) => ({ ...acc, ...x }), {} as LiveData);
-    },
-    [liveBySn],
-  );
+  /** 一位长者可能绑了几台设备（卧室一台、卫生间一台）：按人现在在哪台那边合成一份，见 care/devices.ts */
+  const liveOf = useCallback((m: Member): MemberLive | undefined => mergeLive(m.devices, liveBySn, now), [liveBySn, now]);
 
   /** 每位长者最新的一条待处理告警 */
   const alertByMember = useMemo(() => {

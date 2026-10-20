@@ -7,9 +7,16 @@ export interface MemberDevice {
   sn: string;
   /** 设备类型：6 AIO，12 Ultra 呼吸睡眠，13 UltraFall，15 Ultra Plus …（决定睡眠报告来源） */
   deviceType?: number;
+  deviceName?: string;
   isOnline?: boolean;
-  /** 设备监测的区域，例如"房间""卫生间" */
+  /**
+   * 设备装在哪，例如"卧室""卫生间"（v3 房间布置里雷达的安装区域；居家机构里一个空间建一个房间，是房间名）。
+   * 一位长者常有几台设备：卧室一台看床、卫生间一台看跌倒，型号也不一样
+   */
   rangeName?: string;
+  /** 雷达工作模式：3 人员跟踪，7 跌倒监测，11 呼吸睡眠，15 床位监护 */
+  qlWorkingType?: number;
+  sortOrder?: number;
 }
 
 export interface Member {

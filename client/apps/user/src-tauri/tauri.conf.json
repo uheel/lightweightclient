@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "RadarCare",
-  "version": "0.1.0",
+  "productName": "LightClient_Care",
+  "version": "0.1.1",
   "identifier": "com.igoodlife.radar.care",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "康养看护",
+        "title": "Health Guardian",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

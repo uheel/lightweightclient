@@ -8,7 +8,8 @@ import { getDeviceScenes, type Scene } from "../api/scene";
 import { checkRoom, ZONE_TYPES, type Level, type RadarReport, type RoomReport } from "../rooms/check";
 import RoomDetail, { IssueItem, LEVEL_TEXT, type DeviceRead } from "../rooms/RoomDetail";
 import { pool } from "../scenes/plan";
-import { placeInLayout, slotSource } from "../rooms/radarSlot";
+import { placeInLayout, setSlotArea, slotSource } from "../rooms/radarSlot";
+import { areaText, type InstallArea } from "../rooms/installArea";
 import { useGuideFocus } from "../guide/GuideContext";
 
 type Filter = "all" | "radar" | "problem";
@@ -153,7 +154,7 @@ export default function RoomsPage() {
       (r) =>
         test(r) &&
         (!kw ||
-          [r.room.roomName, r.room.buildingName, r.room.floorName, ...r.radars.flatMap((x) => [x.sn, x.device?.deviceName])].some((v) => v?.toLowerCase().includes(kw))),
+          [r.room.roomName, r.room.buildingName, r.room.floorName, ...r.radars.flatMap((x) => [x.sn, x.device?.deviceName, x.area?.name])].some((v) => v?.toLowerCase().includes(kw))),
     );
   }, [all, filter, q]);
 
@@ -247,6 +248,18 @@ export default function RoomsPage() {
     }
   }
 
+  /** 改雷达的安装区域：只保存布置（设备上没有这一项） */
+  async function setArea(roomId: string, r: RadarReport, a: InstallArea | null) {
+    try {
+      if (!(await setSlotArea(roomId, r.sn, a))) throw new Error("布置里已经没有这台雷达了，请刷新");
+      const fresh = await getRoomDesign(roomId);
+      setDesigns((m) => new Map(m).set(roomId, { design: fresh }));
+      message.success(a ? `${r.device?.deviceName || r.sn} 装在${areaText(a)}` : "已清除安装区域");
+    } catch (e) {
+      message.error(`保存安装区域失败：${errText(e)}`);
+    }
+  }
+
   const levelDot = (l: Level) => (l === "error" ? "bad" : l === "warn" ? "warn" : l === "ok" ? "good" : "none");
 
   return (
@@ -297,6 +310,7 @@ export default function RoomsPage() {
                     <small>
                       {[r.room.buildingName, r.room.floorName].filter(Boolean).join(" · ")}
                       {r.radars.length > 0 && ` · ${r.radars.length} 台雷达`}
+                      {r.radars.length > 1 && r.radars.some((x) => x.area) && `（${[...new Set(r.radars.map((x) => areaText(x.area) ?? "未设区域"))].join("、")}）`}
                     </small>
                   </span>
                   {r.level === "error" || r.level === "warn" ? (
@@ -316,7 +330,7 @@ export default function RoomsPage() {
           <Report reports={all} loading={loading} progress={progress} onPick={pick} />
         ) : sel ? (
           designs.has(sel.room.id) || sel.radars.length ? (
-            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} onFix={(i, r) => (i.fix === "add-slot" ? r.device && addSlot(sel.room.id, r.device) : renumber(sel.room.id))} fixing={fixing === sel.room.id} />
+            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} onFix={(i, r) => (i.fix === "add-slot" ? r.device && addSlot(sel.room.id, r.device) : renumber(sel.room.id))} fixing={fixing === sel.room.id} onArea={(r, a) => setArea(sel.room.id, r, a)} />
           ) : (
             <Spin style={{ margin: 80 }} />
           )

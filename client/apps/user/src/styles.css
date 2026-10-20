@@ -221,3 +221,7 @@
 .mgr-alert b { font-size: 14px; }
 .attention-list li.clickable { cursor: pointer; border-radius: 8px; }
 .attention-list li.clickable:hover { background: #F6F7FB; }
+
+/* 应用内告警提醒的图标：红色呼吸点，和屏幕右下角的告警弹窗（AlertPopup.css 的 .popup-dot）一致 */
+.notice-pulse { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+.notice-pulse i { width: 10px; height: 10px; border-radius: 50%; background: #D93036; animation: care-pulse 1.4s ease-out infinite; }

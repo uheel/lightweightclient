@@ -313,7 +313,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/room/member-panoramic?pageSize&pageIndex` | 实时监护页的长者列表：`memberId, realName, age, gender, bedName, focusLevel, devices[{deviceId, sn, isOnline, rangeName, qlWorkingType}]` |
+| `GET /api/room/member-panoramic?pageSize&pageIndex` | 实时监护页的长者列表：`memberId, realName, age, gender, bedName, focusLevel, devices[{deviceId, deviceName, sn, deviceType, isOnline, lastActivityTime, rangeName, qlWorkingType, sortOrder}]`。一位长者可以有几台设备，例如"我的房间"机构的长者：卧室 AIO（`rangeName` 卧室，`qlWorkingType` 15）+ 卫生间 UltraFall（卫生间，7）（2026-10-20） |
 | `GET /api/statistics/member-and-alert` | `{memberCount, alertCount}` |
 | `GET /api/alert/member-alerts` | 按长者分组的告警（返回对象，key 为 memberId） |
 | `GET /api/cockpit/elder/attention?limit=` | 今日需关注：`{total, items[{memberId, realName, buildingName, floorName, roomName, bedName, attentionConclusion, attentionReasons[]}]}`，原因代码有 pendingFall / effectiveFall / nightFallRisk / lowSleepScore / shortSleep / frequentLeaveBed / highAhi |
@@ -551,7 +551,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 - `type`：2 普通床，3 干扰区，4 门，5 监护床（只能有一个），6 感应区（自定义），7 家具。前端枚举里家具写成 6，但"区域type检测"户型实际保存为 7，以数据为准
 - `spaceType`（空间区域类型，干扰区和门没有）、`spaceTypeOut`（门的"出区域类型"）：字典 `GET /sapi/code/options?codeType=ROOM_SPACE_TYPE`，51 床、52 沙发、53 过道、54 会客、55 餐厅、56 马桶、57 淋浴、58 洗漱、59 更衣、60 阅读
-- 雷达元素的 `rangeType`（安装区域）：字典 `RADAR_INSTALL_AREA`，1 卧室、2 客厅、3 卫生间、4 厨房、5 其他
+- 雷达元素的 `rangeType` / `rangeName`（安装区域编号 / 别名，没填别名时是区域名）：字典 `GET /sapi/code/options?codeType=RADAR_INSTALL_AREA`，**1 卧室、2 客厅、3 厨房、7 卫生间、8 室外、9 其他**（2026-10-20 取字典核对；8 室外的说明是"只在门的出区域类型使用，不能在雷达安装区域中使用"）。之前这里记成 3 卫生间、4 厨房、5 其他，是错的。v3 房间设计里选中雷达时出现"雷达安装区域"下拉和别名输入框，写的是元素上这两个字段；户型设计写的是 `qingLanConfig.extra.installArea / installAreaAlias`，建房拷过来的元素可能只有 extra（李虎"13型离床测试"）
 - 下发给设备的 `QL_radar_para_area` 只带 `[index, type, 坐标]`，`spaceType` 不下发，只在平台侧使用
 
 ## 房间户型与雷达区域下发（2026-10-16 读平台前端代码 + 在李虎机构实测）

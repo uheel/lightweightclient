@@ -1,7 +1,7 @@
 {
   "name": "@radar/user",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "用户端客户端（护理 / 家属 / 管理者）",
   "scripts": {
@@ -16,7 +16,6 @@
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@radar/core": "*",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-notification": "^2.6.0",
     "antd": "^5.29.3",
     "dayjs": "^1.11.23",
     "react": "^19.1.0",

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Segmented, Spin } from "antd";
 import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, QuestionCircleFilled } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { getHeartbeats, type Heartbeat } from "../api/device";
+import { getHeartbeats, getHeartbeatsSince, RECENT_HB_MS, type Heartbeat } from "../api/device";
 import { ANGLE_STD, AXES, AXIS_COLOR, deg, evaluate, GRADE_COLOR, heartbeatInterval, signed, type Axis } from "./angle";
 import { BubbleLevel, PitchView } from "./angleviews/Gauges";
 import AttitudeView from "./angleviews/AttitudeView";
@@ -60,7 +60,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
   const type = override ?? installType ?? 1;
   const std = ANGLE_STD[type];
 
-  // 加载时间窗内的心跳；窗内没有时取最近一次上报
+  // 加载时间窗内的心跳；窗不到 2 小时且窗内没有时，取最近 2 小时里的最后几次上报
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -69,7 +69,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
     (async () => {
       try {
         let hist = await getHeartbeats(sn, [dayjs().subtract(minutes, "minute").format(FMT), dayjs().add(1, "minute").format(FMT)], Math.min(30000, minutes * 2 + 20));
-        if (!hist.length) hist = await getHeartbeats(sn, undefined, 8);
+        if (!hist.length && minutes * 60e3 < RECENT_HB_MS) hist = await getHeartbeatsSince(sn);
         if (alive) {
           setList(hist);
           setWindowEnd(Date.now());
@@ -85,23 +85,30 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
     };
   }, [sn, minutes]);
 
-  // 每 5 秒拉最新几条心跳，追加新的
+  // 每 5 秒拉上一条之后的新心跳，追加新的。上一次返回后才排下一次：平台慢的时候不会越堆越多、占满连接名额
   useEffect(() => {
     if (loading) return;
-    const poll = setInterval(async () => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
-        const rows = await getHeartbeats(sn, undefined, 8);
         const last = listRef.current[listRef.current.length - 1];
+        const rows = await getHeartbeatsSince(sn, last?.t ?? Date.now() - 10 * 60e3);
         const fresh = rows.filter((p) => !last || p.t > last.t);
-        if (fresh.length) {
+        if (alive && fresh.length) {
           setList((l) => [...l, ...fresh]);
           setWindowEnd(Date.now());
         }
       } catch {
         /* 下次再试 */
       }
-    }, POLL_MS);
-    return () => clearInterval(poll);
+      if (alive) timer = setTimeout(poll, POLL_MS);
+    };
+    timer = setTimeout(poll, POLL_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
   }, [sn, loading]);
 
   const latest = list[list.length - 1];

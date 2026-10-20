@@ -69,7 +69,7 @@ export default function Shell({ s }: { s: Session }) {
     // 以 orgId 作为 key：切换机构时快速开始的检查结果和本机记录都换成新机构的
     <GuideProvider key={s.orgId} orgId={s.orgId} nav={nav} onNav={go}>
       <AppShell
-        appName="雷达运维"
+        appName="Radar Config"
         org={<OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
         live={{ text: `实时${st.text}`, color: st.dot, title: "SignalR /hub/message" }}
         user={{

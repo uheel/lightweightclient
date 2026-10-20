@@ -1,5 +1,5 @@
 /**
- * 监控模式的配色方案（2026-10-20 定的六套，默认深海蓝）。
+ * 监控模式的配色方案（2026-10-20 定的六套，默认浅色云白）。
  * 每套是一组颜色变量：MonitorMode 把它写成 .monitor / .mon-modal 上的 CSS 变量（--m-xxx），monitor.css 只读变量；
  * tone 决定 antd 弹窗用深色还是浅色、时间回溯画布用哪套底色。
  * 告警红、提醒橙、正常绿在每套里都保留，只按底色调深浅保证对比度。
@@ -153,7 +153,7 @@ export const SCHEMES: Scheme[] = [
   },
 ];
 
-export const DEFAULT_SCHEME = "navy";
+export const DEFAULT_SCHEME = "cloud";
 const KEY = "RC_MONITOR_SCHEME";
 
 export function savedScheme(): Scheme {

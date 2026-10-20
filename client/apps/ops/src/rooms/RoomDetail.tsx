@@ -6,6 +6,8 @@ import { RECORD_TEXT, type Level, type RadarReport, type RoomReport } from "./ch
 import type { Issue } from "./qinglan";
 import { describeDiff, facingText, MODE, modeOf, MOUNT, mountOf, parseArray, sameArray, ZONE_COLOR, ZONE_TYPE, zonesOf } from "./qinglan";
 import RoomPlan from "./RoomPlan";
+import AreaSelect from "./AreaSelect";
+import { areaText, type InstallArea } from "./installArea";
 
 /** 从设备读回的区域数组；6 型应答里是报文别名 */
 export interface DeviceRead {
@@ -63,6 +65,7 @@ export default function RoomDetail({
   onRead,
   onFix,
   fixing,
+  onArea,
 }: {
   report: RoomReport;
   typeName: (t?: number) => string;
@@ -71,12 +74,16 @@ export default function RoomDetail({
   /** 一键修复（重排编号、放进布置），保存布置 */
   onFix?: (i: Issue, r: RadarReport) => void;
   fixing?: boolean;
+  /** 改这台雷达的安装区域（保存布置） */
+  onArea?: (r: RadarReport, a: InstallArea | null) => Promise<void>;
 }) {
   const { room, design, radars } = report;
   const [focus, setFocus] = useState<{ sn?: string; zone?: number }>({});
   const size = roomSize(design, room);
   const place = [room.buildingName, room.floorName].filter(Boolean).join(" / ");
   const label = (r: RadarReport) => r.device?.deviceName || r.element?.deviceName || r.sn || "未绑设备";
+  // 房间里不止一台雷达时，平面图上写上装在哪（卫生间 · 1201 卫）
+  const planLabel = (r: RadarReport) => (radars.length > 1 && r.area ? `${areaText(r.area)} · ${label(r)}` : label(r));
 
   return (
     <div className="detail room-detail">
@@ -106,7 +113,7 @@ export default function RoomDetail({
         <RoomPlan
           design={design}
           size={size}
-          radars={radars.map((r) => ({ sn: r.sn, label: label(r), config: r.config, element: r.element }))}
+          radars={radars.map((r) => ({ sn: r.sn, label: planLabel(r), config: r.config, element: r.element }))}
           focusSn={focus.sn}
           focusZone={focus.zone}
         />
@@ -141,6 +148,7 @@ export default function RoomDetail({
           onFocus={(zone) => setFocus({ sn: r.sn, zone })}
           onFix={onFix ? (i) => onFix(i, r) : undefined}
           fixing={fixing}
+          onArea={onArea && r.element && r.sn ? (a) => onArea(r, a) : undefined}
         />
       ))}
     </div>
@@ -156,6 +164,7 @@ function RadarCard({
   onFocus,
   onFix,
   fixing,
+  onArea,
 }: {
   r: RadarReport;
   label: string;
@@ -165,7 +174,9 @@ function RadarCard({
   onFocus: (zone?: number) => void;
   onFix?: (i: Issue) => void;
   fixing?: boolean;
+  onArea?: (a: InstallArea | null) => Promise<void>;
 }) {
+  const [savingArea, setSavingArea] = useState(false);
   const c = r.config;
   const d = r.device;
   const type = d?.deviceType ?? r.element?.deviceType;
@@ -185,6 +196,25 @@ function RadarCard({
           <Tag bordered={false} className="small">
             {typeName(type)}
           </Tag>
+        )}
+        {onArea ? (
+          <AreaSelect
+            size="small"
+            value={r.area}
+            loading={savingArea}
+            disabled={savingArea}
+            placeholder="安装区域"
+            onChange={(a) => {
+              setSavingArea(true);
+              onArea(a).finally(() => setSavingArea(false));
+            }}
+          />
+        ) : (
+          r.area && (
+            <Tag bordered={false} className="small">
+              {areaText(r.area)}
+            </Tag>
+          )
         )}
         <span className="grow" />
         {r.level !== "none" && <span className={`grade ${LEVEL_CLASS[r.level]}`}>{LEVEL_TEXT[r.level]}</span>}

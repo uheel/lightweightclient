@@ -57,7 +57,7 @@ interface Grip {
   y?: EdgeY;
 }
 
-type Target = { kind: "zone"; index: number } | { kind: "bound" };
+type Target = { kind: "zone"; index: number } | { kind: "bound" } | { kind: "radar" };
 
 interface Drag {
   target: Target;
@@ -160,6 +160,7 @@ export default function ZoneCanvas({
   disabled,
   onZones,
   onBound,
+  onRadar,
 }: {
   installType: number;
   facing: number;
@@ -176,6 +177,8 @@ export default function ZoneCanvas({
   disabled?: boolean;
   onZones: (z: CanvasZone[]) => void;
   onBound?: (b: DmRect) => void;
+  /** 拖雷达到房间里的新位置（cm，平面图坐标）；侧装只能沿墙挪，限制由调用方做。不在房间布置里时不能拖 */
+  onRadar?: (to: { x: number; y: number }) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [sel, setSel] = useState<Target>();
@@ -184,6 +187,9 @@ export default function ZoneCanvas({
   // 拖动状态放在 ref 里：快速拖动时 pointermove 可能比重新渲染先到，读 state 会丢掉这些移动
   const dragRef = useRef<Drag>(undefined);
   const [dragging, setDragging] = useState(false);
+  /** 拖雷达时：按下时的视图范围和雷达位置（cm）。拖动中视图跟着雷达平移，房间在屏幕上不动 */
+  const [radarView, setRadarView] = useState<{ view: [number, number, number, number]; radar0: { x: number; y: number } }>();
+  const canMoveRadar = !!room && !!onRadar && !disabled;
   const P = (x: number, y: number) => toPlan(installType, facing, x, y);
   const planRect = (r: DmRect) => {
     const [ax, ay] = P(r.x0, r.y0);
@@ -211,10 +217,15 @@ export default function ZoneCanvas({
   const roomRect = room && { x: -room.radar.x / 10, y: -room.radar.y / 10, w: room.width / 10, h: room.height / 10 };
   const all = [planRect(limit), ...(roomRect ? [roomRect] : []), ...zones.map(planRect)];
   const pad = 4;
-  const vx = Math.min(...all.map((r) => r.x)) - pad;
-  const vy = Math.min(...all.map((r) => r.y)) - pad;
-  const vw = Math.max(...all.map((r) => r.x + r.w)) + pad - vx;
-  const vh = Math.max(...all.map((r) => r.y + r.h)) + pad - vy;
+  const fitX = Math.min(...all.map((r) => r.x)) - pad;
+  const fitY = Math.min(...all.map((r) => r.y)) - pad;
+  const fitW = Math.max(...all.map((r) => r.x + r.w)) + pad - fitX;
+  const fitH = Math.max(...all.map((r) => r.y + r.h)) + pad - fitY;
+  // 拖雷达时画面以雷达为原点，雷达挪了多少视图就反着平移多少，房间看起来不动；松手后再按新位置重新取景
+  const [vx, vy, vw, vh] =
+    radarView && room
+      ? [radarView.view[0] - (room.radar.x - radarView.radar0.x) / 10, radarView.view[1] - (room.radar.y - radarView.radar0.y) / 10, radarView.view[2], radarView.view[3]]
+      : [fitX, fitY, fitW, fitH];
   const fs = Math.max(vw, vh) / 42;
 
   /** 指针位置 → 平面图坐标（分米） */
@@ -232,6 +243,13 @@ export default function ZoneCanvas({
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     setSel(target);
+    if (target.kind === "radar") {
+      if (!canMoveRadar) return;
+      dragRef.current = { target, start: planPoint(e), rect: { x0: 0, x1: 0, y0: 0, y1: 0 } };
+      setRadarView({ view: [vx, vy, vw, vh], radar0: { ...room!.radar } });
+      setDragging(true);
+      return;
+    }
     const rect = target.kind === "zone" ? zones[target.index]! : bound!;
     dragRef.current = { target, grip, start: planPoint(e), rect };
     setDragging(true);
@@ -241,6 +259,15 @@ export default function ZoneCanvas({
     const drag = dragRef.current;
     if (!drag) return;
     const [px, py] = planPoint(e);
+    if (drag.target.kind === "radar") {
+      // 平面图坐标以当前雷达为原点，start 是按下时指针相对雷达的位置（抓住的那一点）：
+      // 雷达的新位置 = 当前位置 + (指针相对当前雷达 − 抓住的那一点)，按 10 cm 取整；能不能放、侧装只能沿墙，由调用方限制
+      if (!room || !onRadar) return;
+      const nx = Math.round(px - drag.start[0]);
+      const ny = Math.round(py - drag.start[1]);
+      if (nx || ny) onRadar({ x: room.radar.x + nx * 10, y: room.radar.y + ny * 10 });
+      return;
+    }
     if (drag.target.kind === "bound") {
       if (!drag.grip || !onBound) return;
       const [dx, dy] = fromPlan(installType, facing, px, py);
@@ -266,6 +293,7 @@ export default function ZoneCanvas({
   function end() {
     dragRef.current = undefined;
     setDragging(false);
+    setRadarView(undefined);
   }
 
   /** 离 want 最近、和现有区域都不重叠的位置（按 10 cm 一圈圈往外找） */
@@ -316,6 +344,12 @@ export default function ZoneCanvas({
   }
 
   function onKey(e: React.KeyboardEvent) {
+    if (sel?.kind === "radar" && canMoveRadar) {
+      const step = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      return onRadar!({ x: room!.radar.x + step[0]!, y: room!.radar.y + step[1]! });
+    }
     if (disabled || sel?.kind !== "zone") return;
     const z = zones[sel.index];
     if (!z) return;
@@ -438,7 +472,15 @@ export default function ZoneCanvas({
             const [ax, ay] = P(0, fs * 1.8);
             return <line x1={0} y1={0} x2={ax} y2={ay} className="zc-look" />;
           })()}
-          <circle cx={0} cy={0} r={fs * 0.5} className="zc-radar" />
+          <circle
+            cx={0}
+            cy={0}
+            r={fs * (canMoveRadar ? 0.6 : 0.5)}
+            className={`zc-radar${canMoveRadar ? " movable" : ""}${sel?.kind === "radar" ? " on" : ""}`}
+            onPointerDown={(e) => (canMoveRadar ? begin(e, { kind: "radar" }) : undefined)}
+          >
+            {canMoveRadar && <title>{installType === 1 ? "沿墙拖到实际安装的位置" : "拖到实际安装的位置"}</title>}
+          </circle>
           {(() => {
             const [lx, ly] = installType === 1 ? P(0, -1) : [0, 1];
             return (
@@ -472,13 +514,20 @@ export default function ZoneCanvas({
               删除
             </Button>
           </>
+        ) : sel?.kind === "radar" && room ? (
+          <span>
+            雷达离左墙 {fmtM(room.radar.x / 10)} 米、离上墙 {fmtM(room.radar.y / 10)} 米
+            {canMoveRadar ? (installType === 1 ? "，沿墙拖动或按方向键（10 厘米）挪到实际安装的位置" : "，拖动或按方向键（10 厘米）挪到实际安装的位置") : ""}。区域在房间里的位置不变
+          </span>
         ) : sel?.kind === "bound" && pb ? (
           <span>
             监测范围 {fmtM(pb.w)} × {fmtM(pb.h)} 米
             {onBound && !disabled ? "，拖边调整" : ""}
           </span>
         ) : (
-          <span className="muted">拖动区域移动，选中后拖边角调大小，方向键微调 10 厘米；点虚线框可以调监测范围。</span>
+          <span className="muted">
+            拖动区域移动，选中后拖边角调大小，方向键微调 10 厘米；点虚线框可以调监测范围{canMoveRadar ? "；雷达也能拖，放到实际安装的位置" : ""}。
+          </span>
         )}
       </div>
       {overlapPairs.length > 0 && <p className="pp-note warn">区域 {overlapPairs.join("、")} 重叠了（之前的配置），请拖开后再下发。</p>}

@@ -52,6 +52,7 @@ export default function NightTimeline({
   codes,
   vitals,
   postures,
+  away,
 }: {
   r: SleepReport;
   /** 睡眠分段 status → 阶段（两套编码由 stageCodesOf 判断） */
@@ -59,6 +60,8 @@ export default function NightTimeline({
   vitals?: VitalPoint[];
   /** 雷达姿态（所有目标），用来画"雷达位置"一行，和睡眠报告对照 */
   postures?: PostureSeg[];
+  /** 装在卫生间等别处的设备和区域名：这些设备看到人时画成"在卫生间"（care/devices.ts awayDevices） */
+  away?: { sns: Set<string>; names: string[] };
 }) {
   const [hover, setHover] = useState<number>();
   const box = useRef<HTMLDivElement>(null);
@@ -123,7 +126,8 @@ export default function NightTimeline({
       s.points.flatMap((p) => (s.gap > 5 * 60_000 ? Array.from({ length: TREND_STEP / 60_000 }, (_, k) => p.t + k * 60_000) : [p.t])),
     ),
   ];
-  const runs = postures?.length || vitalTimes.length ? presenceRuns(postures ?? [], t0, t1, vitalTimes) : undefined;
+  const runs = postures?.length || vitalTimes.length ? presenceRuns(postures ?? [], t0, t1, vitalTimes, away?.sns) : undefined;
+  const presenceLabel = (k: RadarPresence) => (k === "away" && away?.names.length ? `在${away.names.join("、")}` : RADAR_PRESENCE[k].label);
 
   // 整点刻度（范围太长时每 2 小时一个）
   const every = (t1 - t0) / 3_600_000 > 10 ? 2 : 1;
@@ -200,10 +204,10 @@ export default function NightTimeline({
         {runs && (
           <>
             <span className="night-legend-sep">雷达：</span>
-            {(["bed", "room"] as const).map((k) => (
+            {(["bed", "room", ...(runs.some((x) => x.state === "away") ? (["away"] as const) : [])] as const).map((k) => (
               <span key={k}>
                 <i style={{ background: RADAR_PRESENCE[k].color }} />
-                {RADAR_PRESENCE[k].label}
+                {presenceLabel(k)}
               </span>
             ))}
           </>
@@ -314,7 +318,7 @@ export default function NightTimeline({
                 </div>
                 {runs && (
                   <div>
-                    雷达 <b>{info.radar ? RADAR_PRESENCE[info.radar].label : "无数据"}</b>
+                    雷达 <b>{info.radar ? presenceLabel(info.radar) : "无数据"}</b>
                     {info.targets > 1 ? `（${info.targets} 个目标）` : ""}
                   </div>
                 )}

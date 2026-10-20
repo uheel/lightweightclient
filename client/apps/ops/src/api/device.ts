@@ -1,4 +1,7 @@
+import dayjs from "dayjs";
 import { api, realtime } from "@radar/core";
+import type { PlanElement } from "./room";
+import { installAreaOf, type InstallArea } from "../rooms/installArea";
 
 /** 运维端专用：设备相关接口（用户端不使用，不放进 core） */
 
@@ -212,6 +215,10 @@ export interface QingLanConfig {
 interface RoomElement {
   type: number;
   sn?: string;
+  deviceName?: string;
+  /** 安装区域编号和别名，见 rooms/installArea.ts */
+  rangeType?: number | null;
+  rangeName?: string | null;
   qingLanConfig?: QingLanConfig;
   children?: RoomElement[];
 }
@@ -233,15 +240,19 @@ export interface RoomInfo {
   size?: { width: number; height: number };
   /** sn → 安装配置 */
   configs: Map<string, QingLanConfig>;
+  /** 布置里装着设备的雷达（一个房间可以有几台：卧室一台、卫生间一台） */
+  radars: { sn: string; deviceName?: string; area?: InstallArea }[];
 }
 
 /** 房间详情：位置与每台雷达的安装配置（安装方式、方向、高度、工作模式） */
 export async function getRoomInfo(roomId: string): Promise<RoomInfo> {
   const d = (await api.get<RoomDetail>("/api/room-view/v3/detail", { params: { roomId } })).data;
   const configs = new Map<string, QingLanConfig>();
+  const radars: RoomInfo["radars"] = [];
   const walk = (list?: RoomElement[]) => {
     for (const e of list ?? []) {
       if (e.type === 3 && e.sn && e.qingLanConfig) configs.set(e.sn, e.qingLanConfig);
+      if (e.type === 3 && e.sn) radars.push({ sn: e.sn, deviceName: e.deviceName, area: installAreaOf(e as PlanElement) });
       walk(e.children);
     }
   };
@@ -251,6 +262,7 @@ export async function getRoomInfo(roomId: string): Promise<RoomInfo> {
     place: [d?.buildingName, d?.floorName, d?.roomName].filter(Boolean).join(" / "),
     size: d?.background?.width && d.background.height ? { width: d.background.width, height: d.background.height } : undefined,
     configs,
+    radars,
   };
 }
 
@@ -299,15 +311,18 @@ export interface Heartbeat {
 }
 
 const parseTime = (s: string) => Date.parse(s.replace(" ", "T"));
+const LOG_FMT = "YYYY-MM-DD HH:mm:ss";
 
 /**
  * 心跳（约每分钟一次）。每次心跳日志里有两条记录，只有设备上报的那条带 install = [angle_x, angle_y, angle_z]。
- * 不传 range 时取最近的 limit 条日志。返回按时间正序。
+ * 时间范围必须带：不带时平台从新到旧扫全部日志，没有日志的设备（离线、还没装好）要扫完整张表才返回，
+ * 一次 5–40 秒（2026-10-20 实测），会把 Rust 层的 6 个连接名额占住，所有页面的请求都跟着排队。
+ * 平台按时间倒序返回前 limit 条，这里返回按时间正序。
  */
-export async function getHeartbeats(sn: string, range?: [string, string], limit = 3000) {
+export async function getHeartbeats(sn: string, range: [string, string], limit = 3000) {
   const res = await api.get<DeviceLog[]>("/api/device-log/pages", {
     params: { current: 1, pageSize: limit },
-    filter: { sn, command: "Device.heartbeat", createdAt: range?.join(",") },
+    filter: { sn, command: "Device.heartbeat", createdAt: range.join(",") },
   });
   const out: Heartbeat[] = [];
   for (const row of res.data ?? []) {
@@ -323,6 +338,14 @@ export async function getHeartbeats(sn: string, range?: [string, string], limit 
     }
   }
   return out.sort((a, b) => a.t - b.t);
+}
+
+/** "最近心跳"往回查多远：再早的不查，按没有心跳处理 */
+export const RECENT_HB_MS = 2 * 3600e3;
+
+/** from（毫秒）之后的最新 limit 条心跳，默认查最近 2 小时；终点多留 1 分钟，免得本机时钟比平台慢时漏掉刚到的 */
+export function getHeartbeatsSince(sn: string, from = Date.now() - RECENT_HB_MS, limit = 8) {
+  return getHeartbeats(sn, [dayjs(from).format(LOG_FMT), dayjs().add(1, "minute").format(LOG_FMT)], limit);
 }
 
 // ---------- 告警 ----------

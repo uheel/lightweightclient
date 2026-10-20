@@ -1,5 +1,6 @@
 import { api } from "@radar/core";
 import type { CareAlert } from "./api";
+import { byBed } from "./devices";
 
 /**
  * 长者健康数据（只读）。字段已用真实数据核对过（2026-10-14）：
@@ -222,6 +223,8 @@ export async function getVitalMinutes(memberId: string, start: number, end: numb
  * - 单次查询不能超过 24 小时
  */
 export interface PostureSeg {
+  /** 哪台设备的（一位长者可能有卧室、卫生间两台） */
+  sn: string;
   userId: number;
   posture: number;
   start: number;
@@ -242,24 +245,26 @@ export async function getPostureTimeline(sns: string[], start: number, end: numb
         .get<{ segments?: { posture: number; userId: number; startAt: string; endAt: string }[] }>("/api/device/human-position/posture-timeline", {
           params: { sn, startAt: fmt(start), endAt: fmt(end), userId: i + 1 },
         })
-        .then((r) => r.data?.segments ?? [])
+        .then((r) => (r.data?.segments ?? []).map((s) => ({ ...s, sn })))
         .catch(() => []),
     ),
   );
   const all = (await Promise.all(jobs)).flat();
   return all
-    .map((s) => ({ userId: s.userId, posture: s.posture, start: Date.parse(s.startAt.replace(" ", "T")), end: Date.parse(s.endAt.replace(" ", "T")) }))
+    .map((s) => ({ sn: s.sn, userId: s.userId, posture: s.posture, start: Date.parse(s.startAt.replace(" ", "T")), end: Date.parse(s.endAt.replace(" ", "T")) }))
     .filter((s) => !Number.isNaN(s.start) && !Number.isNaN(s.end) && s.end > s.start);
 }
 
 /** 在床的姿态：6 在床，9 床上坐起，10 / 11 床上坐起告警 */
 const IN_BED_POSTURES = new Set([6, 9, 10, 11]);
 
-export type RadarPresence = "bed" | "room" | "none";
+export type RadarPresence = "bed" | "room" | "away" | "none";
 
 export const RADAR_PRESENCE: Record<RadarPresence, { label: string; color: string }> = {
   bed: { label: "在床（测到心率呼吸）", color: "#2E9F6B" },
   room: { label: "在房间（不在床）", color: "#E08A3C" },
+  /** 装在卫生间等别处的设备看到人；界面上换成具体的区域名 */
+  away: { label: "在其他区域", color: "#8E6CCF" },
   none: { label: "未检测到人", color: "#F1F2F7" },
 };
 
@@ -281,8 +286,9 @@ export interface PresenceRun {
  * 但人其实还在床上。实测（藕塘社区 3楼05床，10-14 05:15–06:05）心率呼吸与是否在床吻合：
  * 下床走开的 25 分钟里一分钟都没有，回到床上立刻恢复；只有起身的几分钟（坐在床边）仍有读数。
  * vitalTimes 为空（这一晚没有心率呼吸数据，比如设备不支持）时，退回按姿态判断。
+ * away：装在卫生间等别处的设备（care/devices.ts awayDevices），这一分钟它们看到人、又不在床，算"在其他区域"（夜里起夜看得出来）。
  */
-export function presenceRuns(segs: PostureSeg[], rangeStart: number, end: number, vitalTimes: number[] = []): PresenceRun[] {
+export function presenceRuns(segs: PostureSeg[], rangeStart: number, end: number, vitalTimes: number[] = [], away?: Set<string>): PresenceRun[] {
   const MIN = 60_000;
   // 格子对齐到整分钟：设备每分钟记录标在整分钟上（"04:12" 代表 04:12:00–04:12:59），
   // 如果从带秒数的起点（例如 20:45:13）切格子，04:12 的记录会落到前一格，造成某一分钟误判为不在床
@@ -290,13 +296,15 @@ export function presenceRuns(segs: PostureSeg[], rangeStart: number, end: number
   const n = Math.max(0, Math.ceil((end - start) / MIN));
   const bed = new Uint8Array(n);
   const any = new Uint8Array(n);
+  const elsewhere = new Uint8Array(n);
   const ids: Set<number>[] = Array.from({ length: n }, () => new Set());
   const byVitals = vitalTimes.length > 0;
   for (const s of segs) {
     const a = Math.max(0, Math.floor((s.start - start) / MIN));
     const b = Math.min(n, Math.ceil((s.end - start) / MIN));
     for (let i = a; i < b; i++) {
-      any[i] = 1;
+      if (away?.has(s.sn)) elsewhere[i] = 1;
+      else any[i] = 1;
       ids[i].add(s.userId);
       if (!byVitals && IN_BED_POSTURES.has(s.posture)) bed[i] = 1;
     }
@@ -307,7 +315,7 @@ export function presenceRuns(segs: PostureSeg[], rangeStart: number, end: number
   }
   const runs: PresenceRun[] = [];
   for (let i = 0; i < n; i++) {
-    const state: RadarPresence = bed[i] ? "bed" : any[i] ? "room" : "none";
+    const state: RadarPresence = bed[i] ? "bed" : elsewhere[i] ? "away" : any[i] ? "room" : "none";
     const last = runs[runs.length - 1];
     if (last && last.state === state) {
       last.end = start + (i + 1) * MIN;
@@ -328,9 +336,10 @@ const SOURCE_BY_DEVICE_TYPE: Record<number, number> = { 6: 1, 12: 3, 13: 5, 15: 
 /** 雷达类来源要带 windowMinutes=1（与网页端一致） */
 const RADAR_SOURCES = new Set([1, 3, 5, 6]);
 
-export function sourcesOf(member: { devices?: { deviceType?: number }[] }) {
+/** 几台设备时先查看床的那台（卫生间的跌倒雷达也会生成报告，但只有零星片段） */
+export function sourcesOf(member: { devices?: { deviceType?: number; qlWorkingType?: number }[] }) {
   const set = new Set<number>();
-  for (const d of member.devices ?? []) {
+  for (const d of byBed(member.devices ?? [])) {
     const s = d.deviceType !== undefined ? SOURCE_BY_DEVICE_TYPE[d.deviceType] : undefined;
     if (s) set.add(s);
   }

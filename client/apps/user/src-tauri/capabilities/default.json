@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window and the alert popup",
   "windows": [
-    "main"
+    "main",
+    "alert-popup"
   ],
   "permissions": [
     "core:default",
@@ -24,7 +25,6 @@
         }
       ]
     },
-    "notification:default",
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-unminimize",

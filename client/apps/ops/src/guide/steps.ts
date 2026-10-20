@@ -1,5 +1,5 @@
 import { deviceLink } from "@radar/core";
-import { getHeartbeats, getRadars, getStoredProperties, type Heartbeat, type Radar, type StoredProperty } from "../api/device";
+import { getHeartbeatsSince, getRadars, getStoredProperties, type Heartbeat, type Radar, type StoredProperty } from "../api/device";
 import { getRoomDesign, radarElements, type Room, type RoomDesign } from "../api/room";
 import { getDeviceScenes, type Scene } from "../api/scene";
 import { getSpaces, type BedRow, type Building, type Floor } from "../api/space";
@@ -85,7 +85,8 @@ export async function loadGuideData(full: boolean | ((d: GuideData) => boolean),
   const values = new Map<string, Record<string, StoredProperty>>();
   const scenes = new Map<string, Scene[]>();
   const heartbeats = new Map<string, Heartbeat | undefined>();
-  // 所有请求共用一个并发池，免得几类请求叠加起来同时打太多
+  // 所有请求共用一个并发池，最多同时 2 个：这是后台检查，Rust 层一共 6 个连接名额，要给页面上的请求留出 4 个，
+  // 不然几十上百个检查请求排在前面，切到哪个页面都要等它们跑完
   const jobs: (() => Promise<void>)[] = [
     ...spaces.rooms.map((r) => async () => {
       try {
@@ -95,13 +96,13 @@ export async function loadGuideData(full: boolean | ((d: GuideData) => boolean),
       }
     }),
     ...active.map((d) => async () => {
-      const list = await getHeartbeats(d.sn, undefined, 8).catch(() => []);
+      const list = await getHeartbeatsSince(d.sn).catch(() => []);
       heartbeats.set(d.sn, list[list.length - 1]);
     }),
     ...bound.map((d) => async () => void scenes.set(d.id, await getDeviceScenes(d.id).catch(() => []))),
     ...zoned.map((d) => async () => void values.set(d.sn, await getStoredProperties(d.sn).catch(() => ({})))),
   ];
-  await pool(jobs, 6, async (job) => {
+  await pool(jobs, 2, async (job) => {
     await job();
     tick();
   });
@@ -200,12 +201,12 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       const link = deviceLink({ lastReportAt: hb?.t, platformOnline: d.isOnline, now });
       const target: Target = { nav: "devices", id: d.id };
       if (!link.online) {
-        offline.push({ text: `${nameOf(d)} · ${where(d)} · 离线${hb ? `（最近心跳 ${minsAgo(hb.t, now)}）` : "，还没收到过心跳"}`, target });
+        offline.push({ text: `${nameOf(d)} · ${where(d)} · 离线${hb ? `（最近心跳 ${minsAgo(hb.t, now)}）` : "，2 小时内没有心跳"}`, target });
         continue;
       }
       online++;
       if (!hb) {
-        silent.push({ text: `${nameOf(d)} · ${where(d)} · 还没收到心跳，看不到安装角度`, target });
+        silent.push({ text: `${nameOf(d)} · ${where(d)} · 2 小时内没有心跳，看不到安装角度`, target });
         continue;
       }
       const type = typeBySn.get(d.sn);

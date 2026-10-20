@@ -4,6 +4,8 @@ import { getBuildingOptions, getFloorOptions, getRoomOptions, type Option, type 
 import { getRooms } from "../api/room";
 import { moveRadar, planMove, type MovePlan } from "../rooms/moveRadar";
 import { SLOT_TEXT } from "../rooms/radarSlot";
+import { SlotAreaLine } from "../rooms/AreaSelect";
+import type { InstallArea } from "../rooms/installArea";
 
 interface Values {
   buildingId?: string;
@@ -25,6 +27,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
   const [plan, setPlan] = useState<MovePlan>();
   const [planning, setPlanning] = useState(false);
   const [opts, setOpts] = useState({ unbindBed: true, keepOldSlot: true, placeNew: true });
+  const [area, setArea] = useState<InstallArea | null>(null);
   const [saving, setSaving] = useState(false);
   const buildingId = Form.useWatch("buildingId", form);
   const floorId = Form.useWatch("floorId", form);
@@ -60,7 +63,14 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
     let alive = true;
     setPlanning(true);
     planMove(d, target)
-      .then((p) => alive && setPlan(p), () => {})
+      .then(
+        (p) => {
+          if (!alive) return;
+          setPlan(p);
+          setArea(p.newSlot?.area ?? null);
+        },
+        () => {},
+      )
       .finally(() => alive && setPlanning(false));
     // 没算完就关掉或改选：这次的结果作废，但 planning 要复位，否则再打开会一直转圈
     return () => {
@@ -77,7 +87,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
     const doIt = async () => {
       setSaving(true);
       try {
-        const failed = await moveRadar(d, target ? { buildingId: v.buildingId, floorId: v.floorId, roomId: target } : null, plan, opts);
+        const failed = await moveRadar(d, target ? { buildingId: v.buildingId, floorId: v.floorId, roomId: target } : null, plan, { ...opts, area });
         if (failed.length) message.warning({ content: `位置已改，但${failed.join("；")}。可以到"诊断"页处理`, duration: 8 });
         else message.success(target ? `已改到 ${roomLabel ?? "新房间"}` : "已解除房间绑定");
         onMoved();
@@ -160,6 +170,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
                 : SLOT_TEXT[plan.newSlot.kind]}
             </Checkbox>
           )}
+          {target && plan.newSlot && plan.newSlot.kind !== "has" && opts.placeNew && <SlotAreaLine slot={plan.newSlot} area={area} onChange={setArea} />}
           {target && plan.newSlot && plan.newSlot.kind !== "has" && !opts.placeNew && (
             <Alert type="info" showIcon message="新房间布置里不会有这台雷达，诊断页会提示区域没配" />
           )}

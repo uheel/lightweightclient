@@ -52,6 +52,11 @@ export interface LiveData {
   outOfBedMinutes?: number;
   /** 最近一次测到心率或呼吸（大于 0）的时间（毫秒）。人在床上时设备一定测得到心率呼吸，离开后就没有，用它判断在床 */
   vitalsAt?: number;
+  /**
+   * 最近一次报"有人"（有人体存在、跟踪到目标或测到体征）的时间（毫秒）。
+   * 一个人身边有几台设备时（卧室一台、卫生间一台）用它判断人现在在哪台那边：人走开后，那台设备最后一帧的"有人"会一直留着
+   */
+  seenAt?: number;
   /** 最近一次数据的时间（毫秒） */
   updatedAt: number;
 }
@@ -80,7 +85,9 @@ export const ALARM_POSTURES = new Set([2, 5, 7, 8, 10, 11]);
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 /** 测到心率或呼吸时记下时间（合并进 LiveData；没测到时不覆盖上一次的时间） */
-const vitalsSeen = (hr: unknown, rr: unknown, at: number) => ((num(hr) ?? 0) > 0 || (num(rr) ?? 0) > 0 ? { vitalsAt: at } : {});
+const vitalsSeen = (hr: unknown, rr: unknown, at: number) => ((num(hr) ?? 0) > 0 || (num(rr) ?? 0) > 0 ? { vitalsAt: at, seenAt: at } : {});
+/** 报了有人时记下时间 */
+const seen = (yes: boolean, at: number) => (yes ? { seenAt: at } : {});
 
 function ts(t: DeviceDataMessage["timestamp"]) {
   if (typeof t === "number") return t < 1e12 ? t * 1000 : t;
@@ -99,10 +106,12 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
   switch (m.msgType) {
     case 1:
       if (!a || a.length < 8) return null;
-      return { heartRate: num(a[2]), respiratoryRate: num(a[3]), presence: (num(a[0]) ?? 0) > 0 ? 1 : 0, ...vitalsSeen(a[2], a[3], at), online: true, updatedAt: at };
+      return { heartRate: num(a[2]), respiratoryRate: num(a[3]), presence: (num(a[0]) ?? 0) > 0 ? 1 : 0, ...seen((num(a[0]) ?? 0) > 0, at), ...vitalsSeen(a[2], a[3], at), online: true, updatedAt: at };
     case 2:
-    case 7:
-      return { presence: num(a ? a[0] : p) ?? (p ? 1 : 0), online: true, updatedAt: at };
+    case 7: {
+      const presence = num(a ? a[0] : p) ?? (p ? 1 : 0);
+      return { presence, ...seen(presence > 0, at), online: true, updatedAt: at };
+    }
     case 3:
       return { fall: num(a ? a[0] : p) ?? (p ? 1 : 0), online: true, updatedAt: at };
     case 4:
@@ -128,8 +137,10 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
         targets.find((x) => typeof x[6] === "string" && x[6].includes("床")) ??
         targets.find((x) => ALARM_POSTURES.has(Number(x[4]))) ??
         targets[0];
+      const someone = targets.length > 0 && (num(targets[0][0]) ?? 0) > 0;
       return {
-        presence: targets.length && (num(targets[0][0]) ?? 0) > 0 ? 1 : 0,
+        presence: someone ? 1 : 0,
+        ...seen(someone, at),
         targets: targets.length,
         posture: t ? num(t[4]) : undefined,
         areaName: t && typeof t[6] === "string" ? t[6] : undefined,
@@ -143,6 +154,7 @@ export function parseDeviceData(m: DeviceDataMessage): Partial<LiveData> | null 
         heartRate: num(a[0]),
         respiratoryRate: num(a[1]),
         presence: num(a[2]),
+        ...seen((num(a[2]) ?? 0) > 0, at),
         inBedMinutes: num(a[3]),
         outOfBedMinutes: num(a[4]),
         sleepStatus: num(a[7]),
