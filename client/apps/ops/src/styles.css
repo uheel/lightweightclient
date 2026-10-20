@@ -203,24 +203,24 @@
 .replay.fill { height: 100%; min-height: 0; }
 .replay.fill .rp-body { flex: 1; height: auto; min-height: 320px; }
 
-/* 回放深色（监控模式）；画布的颜色在 engine.ts 的 DARK 里 */
-.replay.dark { color: #E6E8F5; }
-.replay.dark .muted, .replay.dark .rp-msg, .replay.dark .rp-field, .replay.dark .rp-st .name small, .replay.dark .rp-mark .mono { color: #8E95BF; }
-.replay.dark .quick button { background: transparent; border-color: #2D3570; color: #C9CDE6; }
-.replay.dark .quick button:hover { border-color: #7B8CFF; color: #fff; }
-.replay.dark .rp-body { background: #0F1436; border-color: #1F2652; }
-.replay.dark .rp-stage { background: #0A0E27; }
-.replay.dark .rp-legend { background: rgba(15, 20, 54, 0.9); color: #C9CDE6; }
-.replay.dark .rp-side { border-left-color: #1F2652; }
-.replay.dark .rp-status { border-bottom-color: #1F2652; }
-.replay.dark .rp-tag.absent { background: #1A2048; color: #8E95BF; }
-.replay.dark .rp-tag.unknown { background: #3A4380; }
-.replay.dark .rp-mark { color: #E6E8F5; }
-.replay.dark .rp-mark:hover { background: #161D4F; }
-.replay.dark .rp-mark.current { background: #232B6B; }
-.replay.dark .rp-mark.alarm .txt { color: #FF8A93; }
-.replay.dark .rp-timeline { background: #0F1436; border-color: #1F2652; }
-.replay.dark .rp-tip { background: rgba(35, 43, 107, 0.96); }
+/* 回放深色（监控模式）；颜色跟监控模式的配色方案（--m-xxx，没有时用深海蓝），画布的颜色由 engine.ts 的 palette 传入 */
+.replay.dark { color: var(--m-text, #E6E8F5); }
+.replay.dark .muted, .replay.dark .rp-msg, .replay.dark .rp-field, .replay.dark .rp-st .name small, .replay.dark .rp-mark .mono { color: var(--m-muted, #8E95BF); }
+.replay.dark .quick button { background: transparent; border-color: var(--m-border-2, #2D3570); color: var(--m-text-2, #C9CDE6); }
+.replay.dark .quick button:hover { border-color: var(--m-accent, #7B8CFF); color: var(--m-text, #fff); }
+.replay.dark .rp-body { background: var(--m-panel, #0F1436); border-color: var(--m-border, #1F2652); }
+.replay.dark .rp-stage { background: var(--m-bg, #0A0E27); }
+.replay.dark .rp-legend { background: var(--m-tag-bg, rgba(15, 20, 54, 0.9)); color: var(--m-text-2, #C9CDE6); }
+.replay.dark .rp-side { border-left-color: var(--m-border, #1F2652); }
+.replay.dark .rp-status { border-bottom-color: var(--m-border, #1F2652); }
+.replay.dark .rp-tag.absent { background: var(--m-hover, #1A2048); color: var(--m-muted, #8E95BF); }
+.replay.dark .rp-tag.unknown { background: var(--m-border-2, #3A4380); }
+.replay.dark .rp-mark { color: var(--m-text, #E6E8F5); }
+.replay.dark .rp-mark:hover { background: var(--m-hover, #161D4F); }
+.replay.dark .rp-mark.current { background: var(--m-accent-bg, #232B6B); }
+.replay.dark .rp-mark.alarm .txt { color: var(--m-alert-text, #FF8A93); }
+.replay.dark .rp-timeline { background: var(--m-panel, #0F1436); border-color: var(--m-border, #1F2652); }
+.replay.dark .rp-tip { background: var(--m-accent-bg, rgba(35, 43, 107, 0.96)); }
 
 /* 安装角度检查（移植自 room-install-angle 脚本） */
 .verdict { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; }

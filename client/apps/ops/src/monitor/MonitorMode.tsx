@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, ConfigProvider, Form, Input, Modal, Select, theme as antdTheme } from "antd";
-import { CompressOutlined, ExpandOutlined } from "@ant-design/icons";
+import { App, ConfigProvider, Dropdown, Form, Input, Modal, Select, theme as antdTheme } from "antd";
+import { BgColorsOutlined, CheckOutlined, CompressOutlined, ExpandOutlined } from "@ant-design/icons";
 import { baseTheme, isTauri, POSTURE, WindowControls, type LiveData, type RealtimeState, type Session } from "@radar/core";
 import { getProcessTypes, processAlert, type OpsAlert } from "../api/device";
 import { getRoomDesign, radarElements, roomSize, type RoomDesign } from "../api/room";
@@ -10,6 +10,7 @@ import ReplayView from "../devices/replay/ReplayView";
 import { STATE_TEXT } from "../pages/RealtimePage";
 import { bedName, bedVitals, CARE_GROUPS, durationText, hasVitals, useMonitorData, type BedVitals, type RoomKind, type RoomTile } from "./useMonitorData";
 import { useLiveTargets, type LiveTarget } from "./useLiveTargets";
+import { replayPalette, saveScheme, savedScheme, SCHEMES, schemeCss, type Scheme } from "./schemes";
 import "./monitor.css";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -18,12 +19,12 @@ const clock = (t: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-/** 深色主题（弹窗、下拉跟着监控模式走） */
-const darkTheme = {
+/** antd 主题跟着配色方案（弹窗、下拉、输入框） */
+const themeOf = (sc: Scheme) => ({
   ...baseTheme,
-  algorithm: antdTheme.darkAlgorithm,
-  token: { ...baseTheme.token, colorBgElevated: "#151B4A", colorBgContainer: "#0F1436", colorBorder: "#2D3570", colorPrimary: "#556FF7" },
-};
+  algorithm: sc.tone === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+  token: { ...baseTheme.token, colorBgElevated: sc.tone === "dark" ? sc.c.card : "#FFFFFF", colorBgContainer: sc.c.panel, colorBorder: sc.c.border2, colorPrimary: sc.c.accent },
+});
 
 /**
  * 实时目标（雷达坐标，cm）→ 房间平面图坐标。
@@ -137,9 +138,19 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
   const st = STATE_TEXT[rt];
   const stale = rt !== "connected";
 
+  const [scheme, setScheme] = useState(savedScheme);
+  const theme = useMemo(() => themeOf(scheme), [scheme]);
+  const pick = (k: string) => {
+    const sc = SCHEMES.find((x) => x.key === k);
+    if (!sc) return;
+    setScheme(sc);
+    saveScheme(sc.key);
+  };
+
   return (
-    <ConfigProvider theme={darkTheme}>
-      <div className="monitor">
+    <ConfigProvider theme={theme}>
+      <style>{schemeCss(scheme)}</style>
+      <div className="monitor" data-scheme={scheme.key}>
         <header className="mon-head" data-tauri-drag-region>
           <div className="mon-brand" data-tauri-drag-region>
             <img src="/logo.svg" alt="" width={22} height={22} />
@@ -155,6 +166,32 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
             <i style={{ background: st.dot }} />
             实时{st.text}
           </span>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              selectedKeys: [scheme.key],
+              onClick: ({ key }) => pick(key),
+              items: SCHEMES.map((x) => ({
+                key: x.key,
+                label: (
+                  <span title={x.desc}>
+                    <span className="mon-swatch" aria-hidden="true">
+                      {[x.c.bg, x.c.card, x.c.accent, x.c.alert].map((c, i) => (
+                        <i key={i} style={{ background: c }} />
+                      ))}
+                    </span>
+                    {x.name}
+                    {x.key === scheme.key && <CheckOutlined style={{ marginLeft: 10 }} />}
+                  </span>
+                ),
+              })),
+            }}
+          >
+            <button className="mon-btn" title="配色" aria-label="配色">
+              <BgColorsOutlined />
+              {scheme.name}
+            </button>
+          </Dropdown>
           {isTauri && (
             <button className="mon-btn" onClick={toggleFullscreen} title={fullscreen ? "退出全屏" : "全屏"}>
               {fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
@@ -275,7 +312,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
           onCancel={() => setReplay(null)}
           styles={{ body: { height: "82vh", display: "flex", flexDirection: "column", overflow: "auto" } }}
         >
-          {replay && <ReplayView roomId={replay.roomId} sn={replay.sn} dark fill />}
+          {replay && <ReplayView roomId={replay.roomId} sn={replay.sn} dark={scheme.tone === "dark"} palette={replayPalette(scheme)} fill />}
         </Modal>
       </div>
     </ConfigProvider>

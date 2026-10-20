@@ -58,7 +58,9 @@ const LIGHT = {
   tlGrid: "rgba(17,20,65,.04)",
   hover: "rgba(27,29,46,.35)",
 };
-const DARK: typeof LIGHT = {
+/** 画布配色（监控模式按配色方案传入一套） */
+export type ReplayPalette = typeof LIGHT;
+const DARK: ReplayPalette = {
   text: "#E6E8F5",
   muted: "#8E95BF",
   line: "#2D3570",
@@ -106,15 +108,17 @@ export class ReplayEngine {
   private ro: ResizeObserver;
   private off: (() => void)[] = [];
   private C: typeof LIGHT;
+  private dark: boolean;
 
   constructor(
     private els: ReplayEls,
     private opts: () => ReplayOptions,
     private cb: ReplayCallbacks,
     range: [number, number],
-    dark = false,
+    dark: boolean | ReplayPalette = false,
   ) {
-    this.C = dark ? DARK : LIGHT;
+    this.C = typeof dark === "object" ? dark : dark ? DARK : LIGHT;
+    this.dark = !!dark;
     [this.q0, this.q1] = range;
     this.v0 = this.q0;
     this.v1 = this.q1;
@@ -305,7 +309,7 @@ export class ReplayEngine {
     this.worldTransform(ctx);
     // 房间底色；背景为图片时是户型底图，否则画 1m 网格
     // 深色时不用布置里的底色（多半是白色）
-    ctx.fillStyle = this.C === DARK ? this.C.roomBg : bg.fill || this.C.roomBg;
+    ctx.fillStyle = this.dark ? this.C.roomBg : bg.fill || this.C.roomBg;
     ctx.beginPath();
     ctx.rect(b.x, b.y, b.w, b.h);
     ctx.fill();

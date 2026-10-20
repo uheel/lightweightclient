@@ -13,7 +13,7 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 import { perfTimer } from "@radar/core";
 import { fmt, fmtDate, fmtTime, getRoomDetail, lowerBound, MAX_RANGE_DAYS, POSTURES, trackStateAt, loadReplayData, type Mark, type ReplayData, type RoomDetail } from "./data";
-import { ReplayEngine, type ReplayOptions } from "./engine";
+import { ReplayEngine, type ReplayOptions, type ReplayPalette } from "./engine";
 
 const OPTS_KEY = "ops:replay-options";
 const SPEEDS = [0.5, 1, 2, 5, 10, 30, 60, 120];
@@ -63,7 +63,7 @@ export default memo(ReplayView);
  * 任选时间段（可跨天，最多 7 天）复现房间里的人员轨迹与姿态，时间轴可缩放，事件 / 告警可逐个跳转。
  * 回放以房间为单位，默认只选当前设备，同房间的其他雷达可以勾选一起看。
  */
-function ReplayView({ roomId, sn, dark, fill }: { roomId?: string; sn: string; /** 深色（监控模式） */ dark?: boolean; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
+function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; sn: string; /** 深色（监控模式） */ dark?: boolean; /** 深色时画布用的配色（监控模式的配色方案），不传用默认深色 */ palette?: ReplayPalette; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
   const stage = useRef<HTMLDivElement>(null);
   const roomBase = useRef<HTMLCanvasElement>(null);
   const roomDyn = useRef<HTMLCanvasElement>(null);
@@ -97,7 +97,7 @@ function ReplayView({ roomId, sn, dark, fill }: { roomId?: string; sn: string; /
       () => optsRef.current,
       { onTime: clock.set, onPlaying: setPlaying, onView: setSpan },
       [dayjs().startOf("day").valueOf(), Date.now()],
-      dark,
+      dark && palette ? palette : !!dark,
     );
     engine.current = e;
     return () => {
