@@ -162,6 +162,21 @@
 - 机构账号能用的是房间页（v3 房间视图）那套：`bindDeviceMember` → `POST /api/device/bind {deviceId, memberId}`，`unbindDeviceMember` → `POST /api/device/unbind {deviceId, memberId}`，`getDeviceMembers` → `GET /api/device-position/v2/device-members?deviceId=`（批量 `v2/batch-device-members?deviceIds=`）。路径里的 v2 是接口版本，V3 机构的平台前端现在也在用
 - 2026-10-19 那次长者关联实测用的应该是超管账号，所以当时没碰到 403
 
+机构账号的长者设备关联（2026-10-21 用 `leehu` 在李虎机构建两位临时长者 + 一台没人关联的雷达实测，测完已解除并删除）：
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/member/devices?memberId=` | 长者关联的设备 `[{deviceId, sn, deviceName, deviceType, isOnline, lastActivityTime}]`，机构账号能用。**含别的机构的设备**（谢珍有 4 台，李虎机构的设备列表里一台都没有），所以不能用本机构设备列表 + 归属反推 |
+| `GET /api/device-position/v2/batch-device-members?deviceIds=a,b` | `data` 是 `{deviceId: [{memberId, realName, age, gender, phoneNumber?}]}`，没人的设备不在结果里。50 台约 90 ms |
+| `GET /api/device-position/v2/device-members?deviceId=` | 一台设备的归属，同上的数组 |
+| `POST /api/device/bind {deviceId, memberId}` | 关联。**不拦已归属别人的设备，直接替换**：A 关联后再关联给 B，设备只剩 B（不需要再解绑 A）；返回 `data: 1` |
+| `POST /api/device/unbind {deviceId, memberId}` | 取消关联，返回删掉的条数；不是这位长者的设备返回 0（不报错）。同一人重复 bind 过一次时返回 2 |
+| `GET /api/device-position/v3/device-member-candidates?deviceId=&keyword=` | 设备一侧的候选长者 `[{memberId, realName, phoneNumber?, orgName}]`，机构账号能用（客户端没用） |
+
+客户端（`apps/ops/src/api/member.ts`）：超管仍走 v3 那四个接口；机构账号用 `member/devices` 取长者的设备，候选是本机构全部设备（`/api/device/v4/management-pages`，各类型）+ `batch-device-members` 的归属。因为 `device/bind` 会静默替换，客户端选设备时按候选里的归属先问"转过来"；没确认的关联在提交前再查一次 `device-members`，候选过时（别人刚关联过）就报错不提交。
+
+另外：`POST /api/member` 不带手机号也能建档（只给 `realName`）。
+
 ### 告警 / 日志
 
 | 接口 | 说明 |
@@ -708,7 +723,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `PUT /api/member/bed-adjust {memberId, bedId, description}` | 调床 |
 | `PUT /api/member/bed-swap {memberId, swapMemberId, description}` | 两位已入住的长者对调床位 |
 | `PUT /api/member/check-out {memberId, checkOutReason, description}` | 退住；原因 1 回家、2 转院、3 死亡、4 其他。退住后 `checkType` = 3，可以再办入住 |
-| `GET /api/device-position/v3/member-devices?memberId=` | 关联在长者身上的设备 `[{deviceId, sn, deviceName, deviceType}]` |
+| `GET /api/device-position/v3/member-devices?memberId=` | 关联在长者身上的设备 `[{deviceId, sn, deviceName, deviceType}]`。**这一行起的四个 v3 接口只有超管能用**，机构账号用 `/api/member/devices` 和 `/api/device/bind`、`unbind`（见上面"删除设备会连带清掉什么"之后那段） |
 | `GET /api/device-position/v3/member-device-candidates?memberId=&keywords=` | 可关联的设备，带 `owners[{memberId, memberName}]`（已归属谁） |
 | `PUT /api/device-position/v3/bind-member-device {memberId, deviceId, confirmTransfer}` | 关联设备。一台设备只归属一位长者：已归属别人时报"设备当前归属 X，请确认后再转移关联"，`confirmTransfer: true` 才转过来 |
 | `PUT /api/device-position/v3/unbind-member-device {memberId, deviceId}` | 取消关联 |

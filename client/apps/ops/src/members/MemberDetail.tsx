@@ -108,24 +108,25 @@ export default function MemberDetail({
 
   async function bind(deviceId: string) {
     const d = cands?.find((x) => x.deviceId === deviceId);
-    const owner = d?.owners?.find((o) => o.memberId !== member.id);
+    const owners = d?.owners?.filter((o) => o.memberId !== member.id).map((o) => `"${o.memberName}"`).join("、");
     const go = async (transfer: boolean) => {
       setBusy("bind");
       try {
         await bindMemberDevice(member.id, deviceId, transfer);
         message.success("已关联");
-        setCands(undefined);
         await loadDevices();
       } catch (e) {
         message.error(`关联失败：${errText(e)}`);
       } finally {
+        // 失败多半是归属变了（别人刚关联过），下次展开重取候选
+        setCands(undefined);
         setBusy(undefined);
       }
     };
-    if (owner)
+    if (owners)
       modal.confirm({
         title: "这台设备已经关联了别人",
-        content: `${d?.deviceName || d?.sn} 现在关联的是"${owner.memberName}"。一台设备只能关联一位长者，转过来后"${owner.memberName}"就不再关联这台设备。`,
+        content: `${d?.deviceName || d?.sn} 现在关联的是${owners}。一台设备只能关联一位长者，转过来后${owners}就不再关联这台设备。`,
         okText: "转过来",
         onOk: () => go(true),
       });
@@ -285,8 +286,8 @@ export default function MemberDetail({
             options={(cands ?? [])
               .filter((x) => !devices?.some((y) => y.deviceId === x.deviceId))
               .map((x) => {
-                const owner = x.owners?.find((o) => o.memberId !== member.id);
-                return { value: x.deviceId, label: `${x.deviceName || x.sn} · ${x.sn}${owner ? `（现关联 ${owner.memberName}）` : ""}` };
+                const owners = x.owners?.filter((o) => o.memberId !== member.id).map((o) => o.memberName).join("、");
+                return { value: x.deviceId, label: `${x.deviceName || x.sn} · ${x.sn}${owners ? `（现关联 ${owners}）` : ""}` };
               })}
           />
         </div>

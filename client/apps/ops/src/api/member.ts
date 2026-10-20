@@ -1,4 +1,5 @@
-import { api } from "@radar/core";
+import { api, session } from "@radar/core";
+import { getAllDevices } from "./device";
 
 /**
  * 长者（平台界面叫"用户"）建档与入住。
@@ -178,6 +179,10 @@ export async function checkOut(memberId: string, checkOutReason: number, descrip
 }
 
 // ---------- 长者关联的设备 ----------
+// 长者一侧的 v3 接口（member-devices 等）只有超管能用，机构账号是 403。机构账号用设备一侧那套（平台房间页在用）：
+// /api/member/devices 取长者的设备，/api/device/bind、unbind 关联，v2/batch-device-members 取设备归属。见 docs/site-analysis.md
+
+const isSa = () => !!session.get()?.isSa;
 
 export interface MemberDevice {
   deviceId: string;
@@ -188,21 +193,62 @@ export interface MemberDevice {
   owners?: { memberId: string; memberName: string }[];
 }
 
+/** 长者关联的设备（含别的机构的设备） */
 export async function getMemberDevices(memberId: string) {
-  return (await api.get<MemberDevice[]>("/api/device-position/v3/member-devices", { params: { memberId } })).data ?? [];
+  const path = isSa() ? "/api/device-position/v3/member-devices" : "/api/member/devices";
+  return (await api.get<MemberDevice[]>(path, { params: { memberId } })).data ?? [];
 }
 
-export async function getMemberDeviceCandidates(memberId: string) {
-  return (await api.get<MemberDevice[]>("/api/device-position/v3/member-device-candidates", { params: { memberId } })).data ?? [];
+type DeviceOwner = { memberId: string; realName: string };
+
+/** 设备当前归属的长者：deviceId → 长者（没人的设备不在结果里） */
+async function getDeviceOwners(deviceIds: string[]) {
+  const out = new Map<string, DeviceOwner[]>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < deviceIds.length; i += 200) chunks.push(deviceIds.slice(i, i + 200));
+  await Promise.all(
+    chunks.map(async (ids) => {
+      const map = (await api.get<Record<string, DeviceOwner[]>>("/api/device-position/v2/batch-device-members", { params: { deviceIds: ids.join(",") } })).data ?? {};
+      for (const [id, list] of Object.entries(map)) if (list?.length) out.set(id, list);
+    }),
+  );
+  return out;
 }
 
-/** 一台设备只归属一位长者；已归属别人时要 transfer = true 才转过来 */
+/** 可关联的设备：本机构全部设备（各类型），带当前归属 */
+export async function getMemberDeviceCandidates(memberId: string): Promise<MemberDevice[]> {
+  if (isSa()) return (await api.get<MemberDevice[]>("/api/device-position/v3/member-device-candidates", { params: { memberId } })).data ?? [];
+  const devices = await getAllDevices();
+  const owners = await getDeviceOwners(devices.map((d) => d.id));
+  return devices.map((d) => ({
+    deviceId: d.id,
+    sn: d.sn,
+    deviceName: d.deviceName,
+    deviceType: d.deviceType,
+    owners: owners.get(d.id)?.map((o) => ({ memberId: o.memberId, memberName: o.realName })),
+  }));
+}
+
+/**
+ * 一台设备只归属一位长者；已归属别人时要 transfer = true 才转过来。
+ * 机构账号用的 /api/device/bind 不拦，直接把原来的长者（入住自动关联的可能不止一位）全换掉，所以没确认时先查一遍归属
+ */
 export async function bindMemberDevice(memberId: string, deviceId: string, transfer = false) {
-  await api.put("/api/device-position/v3/bind-member-device", { memberId, deviceId, confirmTransfer: transfer });
+  if (isSa()) {
+    await api.put("/api/device-position/v3/bind-member-device", { memberId, deviceId, confirmTransfer: transfer });
+    return;
+  }
+  if (!transfer) {
+    const owners = (await api.get<DeviceOwner[]>("/api/device-position/v2/device-members", { params: { deviceId } })).data ?? [];
+    const other = owners.filter((o) => o.memberId !== memberId);
+    if (other.length) throw new Error(`这台设备刚关联给了${other.map((o) => o.realName).join("、")}，重新选一次会问你是否转过来`);
+  }
+  await api.post("/api/device/bind", { deviceId, memberId });
 }
 
 export async function unbindMemberDevice(memberId: string, deviceId: string) {
-  await api.put("/api/device-position/v3/unbind-member-device", { memberId, deviceId });
+  if (isSa()) await api.put("/api/device-position/v3/unbind-member-device", { memberId, deviceId });
+  else await api.post("/api/device/unbind", { deviceId, memberId });
 }
 
 // ---------- 亲友 ----------
