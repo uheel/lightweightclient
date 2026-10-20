@@ -586,6 +586,7 @@ const QL_RADAR_AREA: Structured = {
           facing={facing}
           bound={bound}
           limit={limitOf(installType, mode)}
+          mode={mode}
           zones={list}
           room={plan.room}
           types={CANVAS_TYPES}

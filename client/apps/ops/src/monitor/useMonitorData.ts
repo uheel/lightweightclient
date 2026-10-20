@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
-import { ALARM_POSTURES, BED_POSTURES, deviceLink, POSTURE, realtime, type DeviceLink, type LiveData } from "@radar/core";
+import { ALARM_POSTURES, BED_POSTURES, deviceLink, LIVE_STALE_MS, POSTURE, realtime, type DeviceLink, type LiveData } from "@radar/core";
 import { getAlertPage, getRadars, type OpsAlert, type Radar } from "../api/device";
 import { getRooms, type Room } from "../api/room";
 import { useLiveMap } from "../devices/useLiveMap";
@@ -33,6 +33,60 @@ export interface RoomTile {
   alert?: OpsAlert;
   people: number;
   online: number;
+  /** 体征异常的床位（橙色写在卡片上），例如"16床 呼吸偏快" */
+  flag?: string;
+}
+
+export type VitalLevel = "ok" | "warn" | "bad";
+
+/** 一张床（床位监护雷达）此刻的体征 */
+export interface BedVitals {
+  /** in = 在床有体征，out = 离床，none = 这台雷达一直没报过体征，stale = 设备没数据 */
+  state: "in" | "out" | "none" | "stale";
+  /** 浅睡 / 深睡 / 清醒 / 在床 / 离床 18 分 / 无体征数据 / 暂无数据 */
+  text: string;
+  heartRate?: number;
+  respiratoryRate?: number;
+  level: VitalLevel;
+  /** 异常时的说明：呼吸暂停 / 呼吸偏快 / 呼吸偏慢 / 体征弱 */
+  issue?: string;
+}
+
+const SLEEP_TEXT: Record<number, string> = { 1: "浅睡", 2: "深睡", 3: "清醒" };
+
+/** 设备报过体征（心率呼吸、睡眠状态、呼吸状态任一）就当作能测体征的雷达 */
+export const hasVitals = (live?: LiveData) => !!live && (live.vitalsAt !== undefined || live.sleepStatus !== undefined || live.breathStatus !== undefined);
+
+/**
+ * 床位体征：最近 1 分钟内测到过心率或呼吸就算在床（和房间状态同一规则），
+ * 呼吸状态 3 暂停算红，1 / 2 偏慢偏快、生命状态 3 体征弱算橙（编码见 core 的 LiveData）
+ */
+export function bedVitals(live: LiveData | undefined, now: number): BedVitals {
+  if (!live || now - live.updatedAt > LIVE_STALE_MS || live.online === false) return { state: "stale", text: "暂无数据", level: "ok" };
+  const t = Math.max(now, live.updatedAt);
+  const inBed = live.vitalsAt !== undefined && t - live.vitalsAt <= IN_BED_MS;
+  if (!inBed) {
+    if (!hasVitals(live)) return { state: "none", text: "无体征数据", level: "ok" };
+    const m = live.outOfBedMinutes;
+    const away = m !== undefined && m > 0 ? m * 60_000 : live.vitalsAt !== undefined ? t - live.vitalsAt : undefined;
+    return { state: "out", text: away !== undefined ? `离床 ${durationText(away)}` : "离床", level: "ok" };
+  }
+  const issue =
+    live.breathStatus === 3 ? "呼吸暂停" : live.lifeStatus === 3 ? "体征弱" : live.breathStatus === 2 ? "呼吸偏快" : live.breathStatus === 1 ? "呼吸偏慢" : undefined;
+  return {
+    state: "in",
+    text: SLEEP_TEXT[live.sleepStatus ?? -1] ?? "在床",
+    heartRate: live.heartRate || undefined,
+    respiratoryRate: live.respiratoryRate || undefined,
+    level: live.breathStatus === 3 ? "bad" : issue ? "warn" : "ok",
+    issue,
+  };
+}
+
+/** 床位名：设备名去掉房间名前缀（"07房15床" → "15床"） */
+export function bedName(deviceName: string | undefined, roomName: string, sn: string) {
+  const n = deviceName || sn.slice(-4);
+  return n.startsWith(roomName) && n.length > roomName.length ? n.slice(roomName.length) : n;
 }
 
 export interface MonitorAlerts {
@@ -229,7 +283,14 @@ export function useMonitorData(now: number, onNewAlerts: (a: OpsAlert[]) => void
         } else {
           meta = [`${people} 人`, at ? `持续 ${durationText(now - at)}` : undefined].filter(Boolean).join(" · ");
         }
-        return { room, devices, kind, state, meta, alert, people, online: onlineDevs.length };
+        const flags = onlineDevs.flatMap((dv) => {
+          const v = bedVitals(live[dv.sn], now);
+          return v.issue ? [{ v, text: `${bedName(dv.deviceName, room.roomName, dv.sn)} ${v.issue}` }] : [];
+        });
+        // 呼吸暂停排前面；几张床都异常时写第一张，后面加"等 N 床"
+        flags.sort((a, b) => (a.v.level === "bad" ? 0 : 1) - (b.v.level === "bad" ? 0 : 1));
+        const flag = flags.length ? flags[0].text + (flags.length > 1 ? ` 等 ${flags.length} 床` : "") : undefined;
+        return { room, devices, kind, state, meta, alert, people, online: onlineDevs.length, flag };
       })
       .sort(
         (a, b) =>

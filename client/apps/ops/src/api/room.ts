@@ -78,7 +78,19 @@ export async function saveRoomDesign(roomId: string, d: Pick<RoomDesign, "roomSt
       ...(e.type === 3 && e.qingLanConfig ? { qingLanConfig: renumberZones(e.qingLanConfig) } : {}),
       ...(e.children ? { children: fix(e.children) } : {}),
     }));
-  await api.post<number>("/api/room/v3/design", { roomId, roomStyle: d.roomStyle, elements: fix(d.elements) });
+  const roomStyle = d.roomStyle?.width && d.roomStyle.height ? d.roomStyle : await defaultRoomStyle(roomId, d.roomStyle);
+  await api.post<number>("/api/room/v3/design", { roomId, roomStyle, elements: fix(d.elements) });
+}
+
+/**
+ * 布置里没有房间外框时补一个，尺寸按房间长宽（米 → 厘米），样式和平台房间设计默认的一样。
+ * 没布置过的房间 roomStyle 是空的，直接保存的话平台房间详情会按一个很大的默认框画，雷达区域只占左上角一小块（2026-10-20 李虎 / 工位2）
+ */
+async function defaultRoomStyle(roomId: string, cur?: RoomDesign["roomStyle"]): Promise<NonNullable<RoomDesign["roomStyle"]>> {
+  const d = await getRoomDesign(roomId);
+  const { width, height } = roomSize(d);
+  const id = crypto.randomUUID?.().replace(/-/g, "") ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  return { id, type: 2, fill: "#fff", stroke: "#ccc", strokeWidth: 2, cornerRadius: 4, draggable: false, ...cur, width, height } as NonNullable<RoomDesign["roomStyle"]>;
 }
 
 /** 房间所用户型的当前设计（户型改过的话是改后的，和房间里的拷贝无关） */

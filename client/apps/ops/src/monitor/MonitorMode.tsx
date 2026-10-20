@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, ConfigProvider, Form, Input, Modal, Select, theme as antdTheme } from "antd";
 import { CompressOutlined, ExpandOutlined } from "@ant-design/icons";
-import { baseTheme, isTauri, POSTURE, WindowControls, type RealtimeState, type Session } from "@radar/core";
+import { baseTheme, isTauri, POSTURE, WindowControls, type LiveData, type RealtimeState, type Session } from "@radar/core";
 import { getProcessTypes, processAlert, type OpsAlert } from "../api/device";
 import { getRoomDesign, radarElements, roomSize, type RoomDesign } from "../api/room";
 import RoomPlan, { type PlanRadar } from "../rooms/RoomPlan";
-import { facingOf, MODE, modeOf, MOUNT, mountOf, radarInRoom, type QlConfig } from "../rooms/qinglan";
+import { facingOf, MODE, modeOf, MOUNT, mountOf, radarInRoom, zoneRect, zonesOf, type QlConfig } from "../rooms/qinglan";
 import ReplayView from "../devices/replay/ReplayView";
 import { STATE_TEXT } from "../pages/RealtimePage";
-import { CARE_GROUPS, durationText, useMonitorData, type RoomKind, type RoomTile } from "./useMonitorData";
+import { bedName, bedVitals, CARE_GROUPS, durationText, hasVitals, useMonitorData, type BedVitals, type RoomKind, type RoomTile } from "./useMonitorData";
 import { useLiveTargets, type LiveTarget } from "./useLiveTargets";
 import "./monitor.css";
 
@@ -206,7 +206,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
                       <i className="mon-dot" />
                     </span>
                     <span className="mon-room-state">{t.state}</span>
-                    <span className="mon-room-meta">{t.meta}</span>
+                    {t.flag ? <span className="mon-room-meta flag">{t.flag}</span> : <span className="mon-room-meta">{t.meta}</span>}
                   </button>
                 ))}
               </div>
@@ -303,7 +303,7 @@ function RoomLive({
   onReplay,
 }: {
   tile: RoomTile;
-  live: Record<string, { updatedAt: number } | undefined>;
+  live: Record<string, LiveData | undefined>;
   now: number;
   onProcess: (a: OpsAlert) => void;
   onReplay: (sn: string) => void;
@@ -339,6 +339,14 @@ function RoomLive({
   const sns = useMemo(() => devices.map((x) => x.sn), [devices]);
   const targets = useLiveTargets(sns);
   const unplaced = devices.filter((x) => !configs.has(x.sn));
+  // 床位监护的雷达（工作模式 15，或者报过体征的）按床显示体征；点下面的床位行在图上突出这张床
+  const beds = devices.filter((x) => {
+    const c = configs.get(x.sn);
+    return (c && modeOf(c) === 15) || hasVitals(live[x.sn]);
+  });
+  const others = devices.filter((x) => !beds.includes(x));
+  const vitals = new Map(beds.map((x) => [x.sn, bedVitals(live[x.sn], now)]));
+  const [focusSn, setFocusSn] = useState<string>();
 
   return (
     <section className="mon-live-room" aria-label="房间实时">
@@ -376,14 +384,49 @@ function RoomLive({
         ) : !d ? (
           <div className="mon-empty">加载房间布置…</div>
         ) : (
-          <RoomPlan key={room.id} design={d} size={size} radars={planRadars} className="dark" zoomable>
-            {(fs) => targets.map((t) => <TargetMark key={`${t.sn}#${t.id}`} t={t} config={configs.get(t.sn)} fs={fs} />)}
+          <RoomPlan key={room.id} design={d} size={size} radars={planRadars} className="dark" zoomable focusSn={focusSn}>
+            {(fs) => (
+              <>
+                {beds.map((b) => {
+                  const c = configs.get(b.sn);
+                  return c ? <VitalsTag key={b.sn} c={c} v={vitals.get(b.sn)!} fs={fs} /> : null;
+                })}
+                {targets.map((t) => (
+                  <TargetMark key={`${t.sn}#${t.id}`} t={t} config={configs.get(t.sn)} fs={fs} />
+                ))}
+              </>
+            )}
           </RoomPlan>
         )}
       </div>
 
+      {beds.length > 0 && (
+        <div className="mon-beds">
+          {beds.map((b) => {
+            const v = vitals.get(b.sn)!;
+            const at = live[b.sn]?.updatedAt;
+            return (
+              <button
+                key={b.sn}
+                className={`mon-bed ${v.state} ${v.level}${focusSn === b.sn ? " on" : ""}`}
+                onClick={() => setFocusSn((x) => (x === b.sn ? undefined : b.sn))}
+                title={b.deviceName || b.sn}
+              >
+                <b>{bedName(b.deviceName, room.roomName, b.sn)}</b>
+                <span className="mon-bed-state">{v.state === "in" ? `在床${v.text === "在床" ? "" : v.text}` : v.text}</span>
+                <span className="mon-bed-v">{v.state === "in" ? `♥ ${v.heartRate ?? "—"}` : ""}</span>
+                <span className="mon-bed-v">{v.state === "in" ? `≋ ${v.respiratoryRate ?? "—"}` : ""}</span>
+                <span className="mon-bed-issue">{v.issue ?? ""}</span>
+                <span className="mon-bed-at">{at ? `数据 ${durationText(now - at)}前` : "还没收到推送"}</span>
+                <span className="mono mon-bed-sn">{b.sn.slice(-4)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="mon-live-foot">
-        {devices.map((dev) => {
+        {others.map((dev) => {
           const c = configs.get(dev.sn);
           const at = live[dev.sn]?.updatedAt;
           return (
@@ -406,6 +449,33 @@ function RoomLive({
         </span>
       </div>
     </section>
+  );
+}
+
+/**
+ * 床上的体征标签：贴在监护床区域的左下角（不跟着人的点走，点会抖）。
+ * 呼吸那一格按实际呼吸频率一明一暗，看着就知道数据是活的
+ */
+function VitalsTag({ c, v, fs }: { c: QlConfig; v: BedVitals; fs: number }) {
+  const z = zonesOf(c).find((x) => x.type === 5) ?? zonesOf(c).find((x) => x.type === 2);
+  if (!z) return null;
+  const r = zoneRect(c, z);
+  const breath = v.respiratoryRate ? Math.min(10, Math.max(1.5, 60 / v.respiratoryRate)) : undefined;
+  return (
+    <foreignObject x={r.x + fs * 0.3} y={r.y + r.height - fs * 2.1} width={Math.max(r.width, fs * 16)} height={fs * 2} className="mon-vt-fo">
+      <div className={`mon-vt ${v.state} ${v.level}`} style={{ fontSize: fs * 0.85 }}>
+        <b>{v.state === "in" ? (v.issue ?? v.text) : v.text}</b>
+        {v.state === "in" && (
+          <>
+            <span>{`\u2665 ${v.heartRate ?? "\u2014"}`}</span>
+            <span>
+              <i className="mon-breath" style={breath ? { animationDuration: `${breath}s` } : { animation: "none" }} />
+              {`\u224B ${v.respiratoryRate ?? "\u2014"}`}
+            </span>
+          </>
+        )}
+      </div>
+    </foreignObject>
   );
 }
 

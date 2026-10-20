@@ -111,6 +111,31 @@ export async function setRadarLocation(deviceId: string, loc: { buildingId?: str
   });
 }
 
+/**
+ * 改设备名：同样是 PUT /api/device/v3 整条带回。properties 不带的话平台会把房间绑定清掉（GET 不带 propertyNames 时 properties 是空的），
+ * 所以先取出位置原样带回，改完再读一次核对房间绑定没变。
+ * propertyNames 只能写 roomId（会连楼栋、楼层、床位一起返回）；写成 "roomId,buildingId,floorId" 反而什么都不返回（2026-10-20 实测），
+ * 所以再拿设备列表里的 roomId 核对一遍，对不上就不改
+ */
+export async function renameRadar(deviceId: string, deviceName: string, roomId?: string) {
+  const read = async () => (await api.get<DeviceRecord>("/api/device/v3", { params: { id: deviceId, propertyNames: "roomId" } })).data;
+  const rec = await read();
+  if (!rec) throw new Error("设备记录读不到");
+  const p = rec.properties ?? {};
+  if ((p.roomId ?? null) !== (roomId ?? null)) throw new Error("读到的房间绑定和设备列表对不上，没有改名，刷新后再试");
+  await api.put("/api/device/v3", {
+    id: rec.id,
+    deviceName,
+    sn: rec.sn,
+    deviceType: rec.deviceType,
+    sortOrder: rec.sortOrder,
+    description: rec.description,
+    properties: p.roomId ? { roomId: p.roomId, buildingId: p.buildingId, floorId: p.floorId } : { roomId: null },
+  });
+  const after = await read();
+  if ((after?.properties?.roomId ?? null) !== (p.roomId ?? null)) throw new Error("改名后房间绑定变了，请到安装位置里检查");
+}
+
 /** 绑在房间上的设备（平台房间设计左侧的设备列表），带床位绑定 */
 export interface RoomDevice {
   deviceId: string;

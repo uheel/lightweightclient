@@ -12,6 +12,7 @@ import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
 import PropertyTab from "./PropertyTab";
 import LocationDialog from "./LocationDialog";
+import NameEdit from "./NameEdit";
 import { radarInRoom, type QlConfig } from "../rooms/qinglan";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
@@ -194,7 +195,7 @@ export default function DeviceDetail({
               onClick={onToggleList}
             />
           </Tooltip>
-          <h1>{d.deviceName || d.sn}</h1>
+          <NameEdit d={d} onRenamed={onMoved} />
           <span className={`status-tag ${statusCls}`}>{statusText}</span>
         </div>
         <div className="detail-sub">

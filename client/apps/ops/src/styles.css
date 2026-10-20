@@ -63,6 +63,12 @@
 .detail-head { display: flex; flex-direction: column; gap: 4px; }
 .detail-title { display: flex; align-items: center; gap: 10px; }
 .detail-title h1 { margin: 0; font-size: 18px; font-weight: 600; }
+/* 设备名就地改名：铅笔平时淡，悬停标题时才明显 */
+.name-view { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.name-edit-btn { color: #B3B7C9; opacity: 0.6; }
+.name-view:hover .name-edit-btn { opacity: 1; color: #3B4FD8; }
+.name-edit { width: 320px; max-width: 60%; }
+.detail-title .status-tag { flex: none; white-space: nowrap; }
 .detail-sub { padding-left: 34px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #5B6078; }
 .detail-tabs .ant-tabs-nav { margin-bottom: 12px; }
 .detail-body { display: flex; flex-direction: column; gap: 12px; }
@@ -498,6 +504,10 @@
 .zc-room { fill: none; stroke: #1B1D2E; stroke-width: 0.45; pointer-events: none; }
 .zc-bound { fill: #3B4FD8; fill-opacity: 0.04; stroke: #3B4FD8; stroke-width: 0.2; stroke-dasharray: 1 0.6; cursor: pointer; }
 .zc-bound.on { stroke-width: 0.35; fill-opacity: 0.07; }
+/* 床位监护模式下监护床的可画范围（红色虚线，和监护床同色系），不接收鼠标 */
+.zc-bedrange { pointer-events: none; }
+.zc-bedrange rect { fill: #E5484D; fill-opacity: 0.04; stroke: #E5484D; }
+.zc-bedrange text { fill: #B4232A; opacity: 0.8; }
 .zc-zone { cursor: grab; }
 .zc-grip { fill: #fff; stroke: #3B4FD8; stroke-width: 0.15; cursor: pointer; }
 .zc-label { font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 0.35px; pointer-events: none; }

@@ -130,3 +130,14 @@ export async function clearSlot(sn: string, roomId: string, keep: boolean) {
   });
   await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements });
 }
+
+/**
+ * 设备改名后，把房间布置里这台雷达位置上存的设备名也改掉（布置在建房 / 装设备时拷了一份 deviceName，平台网页的房间图显示的是这份）。
+ * 名字本来就一样时不保存
+ */
+export async function syncSlotName(roomId: string, sn: string, deviceName: string) {
+  const design = await getRoomDesign(roomId);
+  if (!design || !findRadar(design.elements, (e) => e.sn === sn && e.deviceName !== deviceName)) return false;
+  await saveRoomDesign(roomId, { roomStyle: design.roomStyle, elements: mapRadars(design.elements, (e) => (e.sn === sn ? { ...e, deviceName } : e)) });
+  return true;
+}

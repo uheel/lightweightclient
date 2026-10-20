@@ -90,6 +90,62 @@ function resizeInside(r: DmRect, g: Grip, x: number, y: number, lim: DmRect): Dm
   return n;
 }
 
+/** 两个矩形有重叠面积（只碰边不算） */
+const overlaps = (a: DmRect, b: DmRect) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+const intersect = (a: DmRect, b: DmRect): DmRect | undefined => {
+  const r = { x0: Math.max(a.x0, b.x0), x1: Math.min(a.x1, b.x1), y0: Math.max(a.y0, b.y0), y1: Math.min(a.y1, b.y1) };
+  return r.x1 > r.x0 && r.y1 > r.y0 ? r : undefined;
+};
+
+/**
+ * 从 cur 往 target 一格（10 cm）一格地挪，碰到别的区域就停在贴边的位置：先挪 x 再挪 y，再补一次 x，
+ * 这样斜着拖碰到一条边时还能沿着边滑过去。blocked 判断某个位置能不能放
+ */
+function slideTo(cur: DmRect, target: DmRect, blocked: (r: DmRect) => boolean): DmRect {
+  let r = cur;
+  const axis = (k: "x" | "y") => {
+    const a = k === "x" ? "x0" : "y0";
+    const b = k === "x" ? "x1" : "y1";
+    const d = target[a] - r[a];
+    const step = Math.sign(d);
+    for (let i = 0; i < Math.abs(d); i++) {
+      const n = { ...r, [a]: r[a] + step, [b]: r[b] + step };
+      if (blocked(n)) break;
+      r = n;
+    }
+  };
+  axis("x");
+  axis("y");
+  axis("x");
+  return r;
+}
+
+/** 拖边 / 角时同理：被拖的边一格一格挪向目标，碰到别的区域就停 */
+function resizeTo(cur: DmRect, target: DmRect, g: Grip, blocked: (r: DmRect) => boolean): DmRect {
+  let r = cur;
+  for (const e of [g.x, g.y]) {
+    if (!e) continue;
+    const d = target[e] - r[e];
+    const step = Math.sign(d);
+    for (let i = 0; i < Math.abs(d); i++) {
+      const n = { ...r, [e]: r[e] + step };
+      if (blocked(n)) break;
+      r = n;
+    }
+  }
+  return r;
+}
+
+/**
+ * 床位监护模式下监护床只能画在这个范围里（设备坐标，分米）：
+ * 侧装是雷达正前方 2 × 2 米（贴着雷达所在的墙），顶装是以雷达为中心 3 × 3 米。和平台的"监护区"大小一致（qinglan.ts 的 supervisionSize）
+ */
+export function bedRangeOf(installType: number, mode: number): DmRect | undefined {
+  if (mode !== 15) return undefined;
+  return installType === 1 ? { x0: -10, x1: 10, y0: 0, y1: 20 } : { x0: -15, x1: 15, y0: -15, y1: 15 };
+}
+
 const GRIPS: Grip[] = [{ x: "x0" }, { x: "x1" }, { y: "y0" }, { y: "y1" }, { x: "x0", y: "y0" }, { x: "x1", y: "y0" }, { x: "x0", y: "y1" }, { x: "x1", y: "y1" }];
 
 export default function ZoneCanvas({
@@ -97,6 +153,7 @@ export default function ZoneCanvas({
   facing,
   bound,
   limit,
+  mode,
   zones,
   room,
   types,
@@ -110,6 +167,8 @@ export default function ZoneCanvas({
   bound?: DmRect;
   /** 探测范围上限 */
   limit: DmRect;
+  /** 工作模式：15 床位监护时画监护床的可画范围（虚线），监护床只能放在里面 */
+  mode?: number;
   zones: CanvasZone[];
   /** 房间外框（cm，平面图坐标）和雷达在房间里的位置；不在房间布置里时没有 */
   room?: { width: number; height: number; radar: { x: number; y: number } };
@@ -132,7 +191,21 @@ export default function ZoneCanvas({
     return { x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) };
   };
   const typeOf = (t: number) => types.find((x) => x.value === t);
-  const zoneLimit = (z: { type: number }) => (z.type === 3 ? limit : bound ?? limit);
+  const bedRange = bedRangeOf(installType, mode ?? 0);
+  const zoneLimit = (z: { type: number }) => {
+    const base = z.type === 3 ? limit : bound ?? limit;
+    // 监护床再限制在可画范围里；和监测范围没有交集时（监测范围被拖得很小）就只按可画范围
+    return z.type === 5 && bedRange ? (intersect(base, bedRange) ?? bedRange) : base;
+  };
+  /**
+   * 区域之间不能重叠。拖动开始时已经和它重叠的区域（旧配置里画重了的）不算，方便把它们拖开；
+   * 下面信息栏会提示哪些区域重叠
+   */
+  const blockerOf = (i: number, start: DmRect) => {
+    const others = zones.filter((q, j) => j !== i && !overlaps(q, start));
+    return (r: DmRect) => others.some((q) => overlaps(q, r));
+  };
+  const overlapPairs = zones.flatMap((a, i) => zones.slice(i + 1).flatMap((b) => (overlaps(a, b) ? [`${a.id} 和 ${b.id}`] : [])));
 
   // 视图范围：探测上限、房间、所有区域
   const roomRect = room && { x: -room.radar.x / 10, y: -room.radar.y / 10, w: room.width / 10, h: room.height / 10 };
@@ -177,14 +250,15 @@ export default function ZoneCanvas({
     }
     const i = drag.target.index;
     const z = zones[i]!;
+    const blocked = blockerOf(i, drag.rect);
     let r: DmRect;
     if (drag.grip) {
       const [dx, dy] = fromPlan(installType, facing, px, py);
-      r = resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), zoneLimit(z));
+      r = resizeTo(z, resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), zoneLimit(z)), drag.grip, blocked);
     } else {
       // 平面图上的位移换成设备坐标的位移（只有旋转 / 镜像，没有平移）
       const [mx, my] = fromPlan(installType, facing, px - drag.start[0], py - drag.start[1]);
-      r = moveInside(drag.rect, Math.round(mx), Math.round(my), zoneLimit(z));
+      r = slideTo(z, moveInside(drag.rect, Math.round(mx), Math.round(my), zoneLimit(z)), blocked);
     }
     if (r.x0 !== z.x0 || r.x1 !== z.x1 || r.y0 !== z.y0 || r.y1 !== z.y1) onZones(zones.map((q, j) => (j === i ? { ...q, ...r } : q)));
   }
@@ -192,6 +266,20 @@ export default function ZoneCanvas({
   function end() {
     dragRef.current = undefined;
     setDragging(false);
+  }
+
+  /** 离 want 最近、和现有区域都不重叠的位置（按 10 cm 一圈圈往外找） */
+  function freeSpot(want: DmRect, lim: DmRect): DmRect | undefined {
+    const span = Math.max(lim.x1 - lim.x0, lim.y1 - lim.y0);
+    for (let d = 0; d <= span; d++) {
+      for (let dx = -d; dx <= d; dx++) {
+        for (const dy of d === 0 ? [0] : Math.abs(dx) === d ? Array.from({ length: 2 * d + 1 }, (_, k) => k - d) : [-d, d]) {
+          const r = moveInside(want, dx, dy, lim);
+          if (!zones.some((q) => overlaps(q, r))) return r;
+        }
+      }
+    }
+    return undefined;
   }
 
   function add(t: ZoneType) {
@@ -204,7 +292,10 @@ export default function ZoneCanvas({
     const lim = zoneLimit({ type: t.value });
     const cx = Math.round((lim.x0 + lim.x1) / 2 - w / 2);
     const cy = Math.round((lim.y0 + lim.y1) / 2 - h / 2);
-    const r = moveInside({ x0: cx, x1: cx + w, y0: cy, y1: cy + h }, 0, 0, lim);
+    // 放在监测范围中间；被别的区域占了就从中间往外一圈圈找空位，找不到就不加
+    const r = freeSpot({ x0: cx, x1: cx + w, y0: cy, y1: cy + h }, lim);
+    if (!r) return setShifted(`监测范围里放不下新的${t.label}了，先把别的区域缩小或挪开`);
+    setShifted(undefined);
     const next = [...zones, { id, type: t.value, ...r }];
     onZones(next);
     setSel({ kind: "zone", index: next.length - 1 });
@@ -236,7 +327,7 @@ export default function ZoneCanvas({
     if (!step) return;
     e.preventDefault();
     const [mx, my] = fromPlan(installType, facing, step[0]!, step[1]!);
-    const r = moveInside(z, mx, my, zoneLimit(z));
+    const r = slideTo(z, moveInside(z, mx, my, zoneLimit(z)), blockerOf(sel.index, z));
     onZones(zones.map((q, j) => (j === sel.index ? { ...q, ...r } : q)));
   }
 
@@ -288,6 +379,18 @@ export default function ZoneCanvas({
           <rect x={vx} y={vy} width={vw} height={vh} fill="url(#zc-grid)" />
           <rect x={lim.x} y={lim.y} width={lim.w} height={lim.h} className="zc-limit" />
           {roomRect && <rect x={roomRect.x} y={roomRect.y} width={roomRect.w} height={roomRect.h} className="zc-room" />}
+          {bedRange &&
+            (() => {
+              const b = planRect(bedRange);
+              return (
+                <g className="zc-bedrange">
+                  <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeDasharray={`${fs * 0.45} ${fs * 0.3}`} strokeWidth={fs * 0.09} />
+                  <text x={b.x + b.w - fs * 0.3} y={b.y + b.h - fs * 0.4} fontSize={fs * 0.85} textAnchor="end">
+                    监护床可画范围 {fmtM(b.w)} × {fmtM(b.h)} 米
+                  </text>
+                </g>
+              );
+            })()}
           {pb && (
             <g>
               <rect
@@ -378,6 +481,7 @@ export default function ZoneCanvas({
           <span className="muted">拖动区域移动，选中后拖边角调大小，方向键微调 10 厘米；点虚线框可以调监测范围。</span>
         )}
       </div>
+      {overlapPairs.length > 0 && <p className="pp-note warn">区域 {overlapPairs.join("、")} 重叠了（之前的配置），请拖开后再下发。</p>}
       {shifted && <p className="pp-note warn">{shifted}</p>}
     </div>
   );
