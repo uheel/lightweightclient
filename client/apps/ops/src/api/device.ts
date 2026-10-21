@@ -323,18 +323,44 @@ const parseTime = (s: string) => Date.parse(s.replace(" ", "T"));
 const LOG_FMT = "YYYY-MM-DD HH:mm:ss";
 
 /**
- * 心跳（约每分钟一次）。每次心跳日志里有两条记录，只有设备上报的那条带 install = [angle_x, angle_y, angle_z]。
+ * Ultra 系列（13 UltraFall，15 UltraPlus）走 sdb/slim 这套报文，上报都是 post，params 是 [[类型, 设备时间(秒), …], …]：
+ * 0 注册信息、1 信号 [1, ts, rssi]、3 心跳 [3, ts]（每分钟）、10 安装角度 [10, ts, x, y, z]。
+ * 角度含义和 AIO 的 install 一样，但**只在姿态变化时上报**，装好不动就一直不报（2026-10-21 …D339 实测）。
+ * 属性 QL_radar_install 写 1 后持续上报约 70 秒（约每秒一个采样，两个一条），然后设备自己改回 0。
+ * 15 型还没有设备核对过，按同一套处理。
+ */
+export const isSlim = (deviceType?: number) => deviceType === 13 || deviceType === 15;
+
+type SlimItem = [number, number, ...unknown[]];
+function slimItems(row: DeviceLog): SlimItem[] {
+  try {
+    const p = row.rawData ? JSON.parse(row.rawData)?.params : undefined;
+    return Array.isArray(p) ? p.filter((it): it is SlimItem => Array.isArray(it) && typeof it[0] === "number") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 安装角度。AIO 来自心跳（约每分钟一次）：每次心跳日志里有两条记录，只有设备上报的那条带 install = [angle_x, angle_y, angle_z]。
+ * Ultra 系列来自 post 里的 [10, …]，用 filter[rawData] 按内容筛（子串匹配，查半年也只要 0.2 秒）。
  * 时间范围必须带：不带时平台从新到旧扫全部日志，没有日志的设备（离线、还没装好）要扫完整张表才返回，
  * 一次 5–40 秒（2026-10-20 实测），会把 Rust 层的 6 个连接名额占住，所有页面的请求都跟着排队。
  * 平台按时间倒序返回前 limit 条，这里返回按时间正序。
  */
-export async function getHeartbeats(sn: string, range: [string, string], limit = 3000) {
+export async function getHeartbeats(sn: string, range: [string, string], limit = 3000, deviceType?: number) {
+  const slim = isSlim(deviceType);
   const res = await api.get<DeviceLog[]>("/api/device-log/pages", {
     params: { current: 1, pageSize: limit },
-    filter: { sn, command: "Device.heartbeat", createdAt: range.join(",") },
+    filter: slim ? { sn, command: "post", rawData: "[10,", createdAt: range.join(",") } : { sn, command: "Device.heartbeat", createdAt: range.join(",") },
   });
   const out: Heartbeat[] = [];
   for (const row of res.data ?? []) {
+    if (slim) {
+      // 持续上报时一条里有两个采样，用各自的设备时间（平台每分钟给设备对一次时）
+      for (const it of slimItems(row)) if (it[0] === 10 && it.length >= 5) out.push({ t: it[1] * 1000 || parseTime(row.createdAt), x: +it[2]!, y: +it[3]!, z: +it[4]! });
+      continue;
+    }
     let raw: { params?: { install?: unknown[]; rssi?: number; firmware_ver?: string; IP?: string } } | undefined;
     try {
       raw = row.rawData ? JSON.parse(row.rawData) : undefined;
@@ -351,10 +377,53 @@ export async function getHeartbeats(sn: string, range: [string, string], limit =
 
 /** "最近心跳"往回查多远：再早的不查，按没有心跳处理 */
 export const RECENT_HB_MS = 2 * 3600e3;
+/** Ultra 系列的角度只在姿态变化时上报，最近一次角度要往回查得远一些 */
+export const SLIM_ANGLE_LOOKBACK_MS = 180 * 86400e3;
 
-/** from（毫秒）之后的最新 limit 条心跳，默认查最近 2 小时；终点多留 1 分钟，免得本机时钟比平台慢时漏掉刚到的 */
-export function getHeartbeatsSince(sn: string, from = Date.now() - RECENT_HB_MS, limit = 8) {
-  return getHeartbeats(sn, [dayjs(from).format(LOG_FMT), dayjs().add(1, "minute").format(LOG_FMT)], limit);
+/** from（毫秒）之后的最新 limit 条角度，默认查最近 2 小时；终点多留 1 分钟，免得本机时钟比平台慢时漏掉刚到的 */
+export function getHeartbeatsSince(sn: string, from = Date.now() - RECENT_HB_MS, limit = 8, deviceType?: number) {
+  return getHeartbeats(sn, [dayjs(from).format(LOG_FMT), dayjs().add(1, "minute").format(LOG_FMT)], limit, deviceType);
+}
+
+/** 最近一次角度：AIO 每分钟带一次，查最近 2 小时；Ultra 系列只在变化时报，查最近半年 */
+export async function getLatestAngle(sn: string, deviceType?: number) {
+  const list = isSlim(deviceType) ? await getHeartbeatsSince(sn, Date.now() - SLIM_ANGLE_LOOKBACK_MS, 1, deviceType) : await getHeartbeatsSince(sn, undefined, 8, deviceType);
+  return list[list.length - 1];
+}
+
+export interface DeviceReport {
+  /** 最近一次心跳（毫秒），判断在线用 */
+  lastReportAt?: number;
+  rssi?: number;
+  /** 最近一次安装角度；AIO 就是最近一次心跳 */
+  angle?: Heartbeat;
+}
+
+/**
+ * 最近上报：心跳时间、信号、安装角度。AIO 三样都在同一条心跳里；
+ * Ultra 系列的心跳 [3, …] 和信号 [1, …] 每一两分钟一条，角度另查（只在变化时报）。from 之后没有心跳时 lastReportAt 为空。
+ */
+export async function getDeviceReport(sn: string, deviceType?: number, from = Date.now() - RECENT_HB_MS): Promise<DeviceReport> {
+  if (!isSlim(deviceType)) {
+    const list = await getHeartbeatsSince(sn, from);
+    const hb = list[list.length - 1];
+    return hb ? { lastReportAt: hb.t, rssi: hb.rssi, angle: hb } : {};
+  }
+  const [res, angle] = await Promise.all([
+    api.get<DeviceLog[]>("/api/device-log/pages", {
+      params: { current: 1, pageSize: 10 },
+      filter: { sn, command: "post", createdAt: [dayjs(from).format(LOG_FMT), dayjs().add(1, "minute").format(LOG_FMT)].join(",") },
+    }),
+    getLatestAngle(sn, deviceType),
+  ]);
+  const out: DeviceReport = { angle };
+  // 平台的 command 筛选是子串匹配，post-hex（雷达原始帧）也会混进来，它同样是设备在上报；按时间倒序
+  for (const row of res.data ?? []) {
+    if (row.direction !== 1) continue;
+    out.lastReportAt ??= parseTime(row.createdAt);
+    if (out.rssi === undefined) for (const it of slimItems(row)) if (it[0] === 1 && typeof it[2] === "number") out.rssi = it[2];
+  }
+  return out;
 }
 
 // ---------- 告警 ----------

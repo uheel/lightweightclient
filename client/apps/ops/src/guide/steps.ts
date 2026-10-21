@@ -1,5 +1,5 @@
 import { deviceLink } from "@radar/core";
-import { getHeartbeatsSince, getRadars, getStoredProperties, type Heartbeat, type Radar, type StoredProperty } from "../api/device";
+import { getDeviceReport, getRadars, getStoredProperties, isSlim, type DeviceReport, type Radar, type StoredProperty } from "../api/device";
 import { getRoomDesign, radarElements, type Room, type RoomDesign } from "../api/room";
 import { getDeviceScenes, type Scene } from "../api/scene";
 import { getSpaces, type BedRow, type Building, type Floor } from "../api/space";
@@ -58,7 +58,7 @@ export interface GuideData {
     designs: Map<string, DesignState>;
     values: Map<string, Record<string, StoredProperty>>;
     scenes: Map<string, Scene[]>;
-    heartbeats: Map<string, Heartbeat | undefined>;
+    reports: Map<string, DeviceReport>;
     at: number;
   };
 }
@@ -84,7 +84,7 @@ export async function loadGuideData(full: boolean | ((d: GuideData) => boolean),
   const designs = new Map<string, DesignState>();
   const values = new Map<string, Record<string, StoredProperty>>();
   const scenes = new Map<string, Scene[]>();
-  const heartbeats = new Map<string, Heartbeat | undefined>();
+  const reports = new Map<string, DeviceReport>();
   // 所有请求共用一个并发池，最多同时 2 个：这是后台检查，Rust 层一共 6 个连接名额，要给页面上的请求留出 4 个，
   // 不然几十上百个检查请求排在前面，切到哪个页面都要等它们跑完
   const jobs: (() => Promise<void>)[] = [
@@ -96,8 +96,7 @@ export async function loadGuideData(full: boolean | ((d: GuideData) => boolean),
       }
     }),
     ...active.map((d) => async () => {
-      const list = await getHeartbeatsSince(d.sn).catch(() => []);
-      heartbeats.set(d.sn, list[list.length - 1]);
+      reports.set(d.sn, await getDeviceReport(d.sn, d.deviceType).catch(() => ({})));
     }),
     ...bound.map((d) => async () => void scenes.set(d.id, await getDeviceScenes(d.id).catch(() => []))),
     ...zoned.map((d) => async () => void values.set(d.sn, await getStoredProperties(d.sn).catch(() => ({})))),
@@ -106,7 +105,7 @@ export async function loadGuideData(full: boolean | ((d: GuideData) => boolean),
     await job();
     tick();
   });
-  data.heavy = { designs, values, scenes, heartbeats, at: Date.now() };
+  data.heavy = { designs, values, scenes, reports, at: Date.now() };
   return data;
 }
 
@@ -179,7 +178,7 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
     const base = {
       key: "install" as const,
       title: "安装与上线",
-      why: "雷达通电联网后会每分钟上报心跳，心跳里带安装角度，角度不对会影响检测。",
+      why: "雷达通电联网后会每分钟上报心跳，并上报安装角度（AIO 每次心跳都带，Ultra 跌倒在姿态变化时才报），角度不对会影响检测。",
       note: ANGLE_NOTE,
       action: { label: "去设备", target: { nav: "devices" as const } },
     };
@@ -197,16 +196,20 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
     const offline: StepItem[] = [];
     let online = 0;
     for (const d of active) {
-      const hb = heavy.heartbeats.get(d.sn);
-      const link = deviceLink({ lastReportAt: hb?.t, platformOnline: d.isOnline, now });
+      const rep = heavy.reports.get(d.sn) ?? {};
+      const hb = rep.angle;
+      const link = deviceLink({ lastReportAt: rep.lastReportAt, platformOnline: d.isOnline, now });
       const target: Target = { nav: "devices", id: d.id };
       if (!link.online) {
-        offline.push({ text: `${nameOf(d)} · ${where(d)} · 离线${hb ? `（最近心跳 ${minsAgo(hb.t, now)}）` : "，2 小时内没有心跳"}`, target });
+        offline.push({ text: `${nameOf(d)} · ${where(d)} · 离线${rep.lastReportAt ? `（最近心跳 ${minsAgo(rep.lastReportAt, now)}）` : "，2 小时内没有心跳"}`, target });
         continue;
       }
       online++;
       if (!hb) {
-        silent.push({ text: `${nameOf(d)} · ${where(d)} · 2 小时内没有心跳，看不到安装角度`, target });
+        silent.push({
+          text: `${nameOf(d)} · ${where(d)} · ${isSlim(d.deviceType) ? "没有上报过安装角度（这类设备姿态变化时才报，动一下设备就会报）" : "2 小时内没有心跳，看不到安装角度"}`,
+          target,
+        });
         continue;
       }
       const type = typeBySn.get(d.sn);

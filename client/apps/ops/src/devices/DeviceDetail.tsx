@@ -3,7 +3,7 @@ import { App, Button, Tabs, Tooltip } from "antd";
 import { DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, POSTURE, type LiveData } from "@radar/core";
-import { getHeartbeatsSince, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, WORKING_TYPE, type Heartbeat, type Radar, type RoomInfo } from "../api/device";
+import { getDeviceReport, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, isSlim, WORKING_TYPE, type DeviceReport, type Radar, type RoomInfo } from "../api/device";
 import { lastSeen } from "../pages/DevicesPage";
 import { evaluate, GRADE_TEXT } from "./angle";
 import AlarmTab from "./AlarmTab";
@@ -44,7 +44,7 @@ export default function DeviceDetail({
   const [savingArea, setSavingArea] = useState(false);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [hb, setHb] = useState<Heartbeat>();
+  const [rep, setRep] = useState<DeviceReport>({});
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
   // 每 30 秒更新一次"当前时间"，用来判断 10 分钟内有没有收到设备数据
@@ -62,13 +62,17 @@ export default function DeviceDetail({
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     let lastT: number | undefined;
+    setRep({});
     const load = async () => {
       try {
-        const list = await getHeartbeatsSince(d.sn, lastT);
-        const last = list[list.length - 1];
-        if (alive && last) {
-          lastT = last.t;
-          setHb((cur) => (cur && cur.t >= last.t ? cur : last));
+        const r = await getDeviceReport(d.sn, d.deviceType, lastT);
+        if (alive) {
+          if (r.lastReportAt) lastT = r.lastReportAt;
+          setRep((cur) => ({
+            lastReportAt: Math.max(cur.lastReportAt ?? 0, r.lastReportAt ?? 0) || undefined,
+            rssi: r.rssi ?? cur.rssi,
+            angle: cur.angle && r.angle && cur.angle.t >= r.angle.t ? cur.angle : (r.angle ?? cur.angle),
+          }));
         }
       } catch {
         /* 下次再试 */
@@ -82,7 +86,7 @@ export default function DeviceDetail({
       alive = false;
       clearTimeout(timer);
     };
-  }, [d.sn, d.roomId]);
+  }, [d.sn, d.roomId, d.deviceType]);
 
   const cfg = room?.configs.get(d.sn);
   /** 布置里的这台雷达，以及同一个房间里的其他雷达（卧室、卫生间各一台这种） */
@@ -109,12 +113,14 @@ export default function DeviceDetail({
   );
   const installType = cfg?.installType === 0 || cfg?.installType === 1 ? cfg.installType : undefined;
   // 在线状态和最近活动以设备数据（实时推送、心跳）为准，没收到时才用平台记录（规则见 core 的 deviceLink，与用户端一致）
-  const link = deviceLink({ live, lastReportAt: hb?.t, platformOnline: d.isOnline, now: Math.max(now, live?.updatedAt ?? 0) });
+  const hb = rep.angle;
+  const link = deviceLink({ live, lastReportAt: rep.lastReportAt, platformOnline: d.isOnline, now: Math.max(now, live?.updatedAt ?? 0) });
   const statusCls = d.isDisabled ? "disabled" : link.online ? "online" : "offline";
   const statusText = (d.isDisabled ? "已停用" : link.online ? "在线" : "离线") + (link.source === "platform" && !d.isDisabled ? "（平台记录）" : "");
   const ev = hb ? evaluate(hb, installType ?? 1) : undefined;
 
-  const rssi = hb?.rssi ?? d.rssi;
+  const rssi = rep.rssi ?? d.rssi;
+  const slim = isSlim(d.deviceType);
   const install = [
     installType !== undefined ? INSTALL_TYPE[installType] : undefined,
     cfg?.installDirection ? INSTALL_DIR[cfg.installDirection] : undefined,
@@ -138,7 +144,7 @@ export default function DeviceDetail({
         </div>
         <div>
           <small>最近心跳</small>
-          <b>{hb ? dayjs(hb.t).fromNow() : hbLoading ? "…" : "2 小时内无"}</b>
+          <b>{rep.lastReportAt ? dayjs(rep.lastReportAt).fromNow() : hbLoading ? "…" : "2 小时内无"}</b>
         </div>
       </div>
       <div className="ops-grid">
@@ -223,14 +229,17 @@ export default function DeviceDetail({
               </div>
               <p className="muted small">
                 {installType === undefined ? "房间布局里没有安装方式，按侧装标准判断。" : `${ev.name}标准，允许偏差 ±${ev.tol}°。`}
-                绿色区间为允许偏差，角度来自 {dayjs(hb!.t).format("HH:mm:ss")} 的心跳。
+                绿色区间为允许偏差，
+                {slim ? `角度来自 ${dayjs(hb!.t).format("YYYY-MM-DD HH:mm:ss")} 的上报（这类设备只在姿态变化时上报角度）。` : `角度来自 ${dayjs(hb!.t).format("HH:mm:ss")} 的心跳。`}
               </p>
               <Button size="small" onClick={() => setTab("angle")}>
                 查看角度曲线
               </Button>
             </>
           ) : (
-            <p className="muted small">{hbLoading ? "正在读取心跳…" : "最近 2 小时没有带安装角度的心跳。设备离线或固件不上报角度时会这样。"}</p>
+            <p className="muted small">
+              {hbLoading ? "正在读取心跳…" : slim ? "最近半年没有上报过安装角度。这类设备只在姿态变化时上报，装好后动一下设备就会报。" : "最近 2 小时没有带安装角度的心跳。设备离线或固件不上报角度时会这样。"}
+            </p>
           )}
         </div>
       </div>
@@ -274,7 +283,7 @@ export default function DeviceDetail({
         destroyOnHidden
         items={[
           { key: "overview", label: "概览", children: overview },
-          { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} installType={installType} online={link.online} /> },
+          { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} deviceType={d.deviceType} installType={installType} online={link.online} /> },
           { key: "replay", label: "时间回溯", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
           { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
           { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },

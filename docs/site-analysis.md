@@ -297,6 +297,14 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
   - 一台设备约 2 万条 / 7 天，查询耗时 0.25 秒
   - "坐起测试"这台查不到 9 月 20 日的数据，数据最早从哪天开始还没确认
 - 设备属性（`/api/device-type-property/list?deviceTypeCode=6`，共 57 个）里**没有安装角度**，不能主动读取，只能等心跳
+- **Ultra 系列（13 UltraFall，15 按同一套处理但未核对）不发 `Device.heartbeat`**（2026-10-21 李虎机构 …D339 实测）。设备上报都是 command `post`（topic `sdb/slim/{sn}/post/d2s`，direction 1），`rawData` 形如 `{"seq":38,"params":[[10,1792551141,84.98,-2.95,4.05]]}`，每项第一位是类型、第二位是设备时间（秒）：
+  - `[0, ts, 型号, ?, ?]` 注册（例如 `"FHK004-51B",1,"5"`）；`[1, ts, rssi]` 信号，约 2 分钟一条；`[3, ts]` 心跳，每分钟一条
+  - `[10, ts, angle_x, angle_y, angle_z]` **安装角度**，含义和 AIO 的 `install` 相同（侧装读到 0.4 / 65.9 / 24.1，三轴 sin² 之和 = 1）。默认**只在姿态有大变化时上报**，装好不动就一直不报，所以"最近一次角度"可能是几天前的。倒扣时 z 为负（−87°）
+  - 几种项会合在一条里报，例如 `[[10, …],[3, …]]`、`[[10, …],[1, …, -40]]`，按项逐个解析
+  - **设备属性 `QL_radar_install`（雷达安装姿态上报开关，0 / 1）写 1 后持续上报角度约 70 秒，然后设备自己改回 0**（2026-10-21 …D339 实测：11:04:11 下发 1，11:04:13～11:05:22 共 76 个采样，约每秒一个、两个一条消息，期间没有下发 0；11:06:37 读设备返回 0，平台记录随之变 0。10-16 那次也是约 70 秒）。所以它不是常开开关，现场调角度时要再点。运维端角度页对 Ultra 系列做成"持续上报 70 秒"按钮 + 倒计时
+  - 每个采样用自己的设备时间 `ts`（平台每分钟用 `set-property {time}` 给设备对时，设备时间比入库时间早约 2 秒）
+  - 平台 `filter[command]` 是子串匹配，`post` 会把 `post-hex`（雷达原始帧，约 30 秒一条）也带出来
+  - **`filter[rawData]` 可以按内容子串筛选**：`filter[rawData]=[10,` 只取角度，查半年 0.2 秒。客户端见 `api/device.ts` 的 `getHeartbeats / getDeviceReport`
 - 告警类型分组 `alertTypeGroup`：1 = 场景（烟感、水浸、门磁…），2 = 事件（跌倒、呼吸心率、离床…），3 = 离线，4 = 紧急求助，5 = 安装姿态（"设备安装水平告警"）
 
 - **`alert/pages` 不能按设备筛**（2026-10-17 李虎机构实测）：`filter[sn]`、`deviceSn`、`sns`、`deviceSns`、`keyword`、`search` 都被忽略，返回整个机构的告警。要按设备看只能按时间段取回后本地按 `sn` 筛。记录里有 `sn, deviceName, alertTypeName, alertTypeColor, createdAt`，没有雷达目标编号

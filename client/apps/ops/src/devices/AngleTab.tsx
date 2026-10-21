@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Segmented, Spin } from "antd";
+import { App, Button, Segmented, Spin, Tooltip } from "antd";
 import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, QuestionCircleFilled } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { getHeartbeats, getHeartbeatsSince, RECENT_HB_MS, type Heartbeat } from "../api/device";
+import { getHeartbeats, getHeartbeatsSince, isSlim, RECENT_HB_MS, SLIM_ANGLE_LOOKBACK_MS, writeDeviceProperties, type Heartbeat } from "../api/device";
 import { ANGLE_STD, AXES, AXIS_COLOR, deg, evaluate, GRADE_COLOR, heartbeatInterval, signed, type Axis } from "./angle";
 import { BubbleLevel, PitchView } from "./angleviews/Gauges";
 import AttitudeView from "./angleviews/AttitudeView";
@@ -10,6 +10,10 @@ import AttitudeView from "./angleviews/AttitudeView";
 /**
  * 安装角度检查（移植自油猴脚本 room-install-angle.user.js）：
  * 结论、三轴明细、侧视俯角、水平仪、空间姿态、角度趋势。角度来自设备心跳，每 5 秒拉一次新心跳。
+ * Ultra 系列只在姿态变化时上报角度（见 api/device.ts isSlim）：两次上报之间角度不变，曲线画成阶梯并延到当前，
+ * 时间窗前最后一次上报也取回来，作为窗口起点的值。
+ * 设备属性 QL_radar_install（雷达安装姿态上报开关）写 1 后持续上报约 70 秒（约每秒一个采样），之后设备自己改回 0，
+ * 所以做成按钮 + 倒计时，现场调角度时点。
  */
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
@@ -17,6 +21,10 @@ const POLL_MS = 5000;
 /** 超过 3 分钟没有新心跳，提示数据过期 */
 const STALE_MS = 3 * 60 * 1000;
 const WINDOW_KEY = "ops:angle-window";
+/** Ultra 系列的"雷达安装姿态上报开关"：0 只在姿态大变化时上报，写 1 后持续上报一段时间再自己改回 0 */
+const CONTINUOUS_PROP = "QL_radar_install";
+/** 持续上报的时长：2026-10-16、10-21 两次实测都是约 70 秒 */
+const CONTINUOUS_MS = 70e3;
 const WINDOWS = [
   { label: "30 分钟", value: 30 },
   { label: "2 小时", value: 120 },
@@ -46,7 +54,8 @@ function fmtAgo(ms: number) {
   return `${Math.floor(s / 86400)} 天前`;
 }
 
-export default function AngleTab({ sn, installType, online }: { sn: string; installType?: number; online: boolean }) {
+export default function AngleTab({ sn, deviceType, installType, online }: { sn: string; deviceType?: number; installType?: number; online: boolean }) {
+  const slim = isSlim(deviceType);
   const [minutes, setMinutes] = useState(loadWindow);
   const [override, setOverride] = useState<number>();
   const [list, setList] = useState<Heartbeat[]>([]);
@@ -60,7 +69,34 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
   const type = override ?? installType ?? 1;
   const std = ANGLE_STD[type];
 
-  // 加载时间窗内的心跳；窗不到 2 小时且窗内没有时，取最近 2 小时里的最后几次上报
+  // Ultra 系列的持续上报：写一次开关，设备持续报约 70 秒后自己关掉，这里按下发时间倒计时
+  const { message } = App.useApp();
+  const [continuousUntil, setContinuousUntil] = useState(0);
+  const [starting, setStarting] = useState(false);
+  const [tick, setTick] = useState(Date.now());
+  const continuousLeft = Math.max(0, Math.ceil((continuousUntil - tick) / 1000));
+  useEffect(() => {
+    if (!continuousLeft) return;
+    const t = setTimeout(() => setTick(Date.now()), 1000);
+    return () => clearTimeout(t);
+  }, [continuousLeft, tick]);
+  useEffect(() => setContinuousUntil(0), [sn]);
+  async function startContinuous() {
+    setStarting(true);
+    try {
+      await writeDeviceProperties(sn, [{ propertyName: CONTINUOUS_PROP, value: 1 }], false);
+      setContinuousUntil(Date.now() + CONTINUOUS_MS);
+      setTick(Date.now());
+      message.success("已下发，设备会持续上报角度约 70 秒");
+    } catch (e) {
+      message.error(`下发失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  // 加载时间窗内的心跳；窗不到 2 小时且窗内没有时，取最近 2 小时里的最后几次上报。
+  // Ultra 系列另取时间窗前的最后一次上报（往回最多半年）
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -68,8 +104,13 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
     setList([]);
     (async () => {
       try {
-        let hist = await getHeartbeats(sn, [dayjs().subtract(minutes, "minute").format(FMT), dayjs().add(1, "minute").format(FMT)], Math.min(30000, minutes * 2 + 20));
-        if (!hist.length && minutes * 60e3 < RECENT_HB_MS) hist = await getHeartbeatsSince(sn);
+        const t0 = dayjs().subtract(minutes, "minute");
+        const [inWin, before] = await Promise.all([
+          getHeartbeats(sn, [t0.format(FMT), dayjs().add(1, "minute").format(FMT)], Math.min(30000, minutes * 2 + 20), deviceType),
+          slim ? getHeartbeats(sn, [dayjs(Date.now() - SLIM_ANGLE_LOOKBACK_MS).format(FMT), t0.format(FMT)], 1, deviceType) : Promise.resolve([]),
+        ]);
+        let hist = [...before.filter((p) => !inWin.length || p.t < inWin[0].t), ...inWin];
+        if (!hist.length && !slim && minutes * 60e3 < RECENT_HB_MS) hist = await getHeartbeatsSince(sn);
         if (alive) {
           setList(hist);
           setWindowEnd(Date.now());
@@ -83,7 +124,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
     return () => {
       alive = false;
     };
-  }, [sn, minutes]);
+  }, [sn, minutes, deviceType]);
 
   // 每 5 秒拉上一条之后的新心跳，追加新的。上一次返回后才排下一次：平台慢的时候不会越堆越多、占满连接名额
   useEffect(() => {
@@ -93,7 +134,10 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
     const poll = async () => {
       try {
         const last = listRef.current[listRef.current.length - 1];
-        const rows = await getHeartbeatsSince(sn, last?.t ?? Date.now() - 10 * 60e3);
+        // Ultra 系列开着持续上报时约每秒一条，一次多取一些
+        // Ultra 系列的 t 是设备时间，和平台入库时间差几秒，往前多查 10 秒，靠下面按 t 去重
+        const from = last ? last.t - (slim ? 10e3 : 0) : Date.now() - 10 * 60e3;
+        const rows = await getHeartbeatsSince(sn, from, slim ? 30 : 8, deviceType);
         const fresh = rows.filter((p) => !last || p.t > last.t);
         if (alive && fresh.length) {
           setList((l) => [...l, ...fresh]);
@@ -109,7 +153,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
       alive = false;
       clearTimeout(timer);
     };
-  }, [sn, loading]);
+  }, [sn, loading, deviceType, slim]);
 
   const latest = list[list.length - 1];
   const ev = useMemo(() => (latest ? evaluate(latest, type) : undefined), [latest, type]);
@@ -122,7 +166,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
       cls: "none",
       icon: <QuestionCircleFilled />,
       t1: loading ? "加载中…" : "暂无角度数据",
-      t2: error ?? "这台设备最近没有上报带角度的心跳",
+      t2: error ?? (slim ? "这台设备最近半年没有上报过角度（只在姿态变化时上报，动一下设备就会报）" : "这台设备最近没有上报带角度的心跳"),
     };
   } else {
     const bad = ev.axes.filter((a) => a.grade === "bad");
@@ -160,6 +204,13 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
           onChange={(v) => setOverride(v as number)}
         />
         <span className="muted small">{typeNote}</span>
+        {slim && (
+          <Tooltip title="打开设备属性“雷达安装姿态上报开关”：设备约每秒上报一次角度，约 70 秒后自己关掉。平时只在姿态有大变化时才上报，现场调角度时点这里">
+            <Button className="angle-continuous" size="small" loading={starting} disabled={!online || continuousLeft > 0} onClick={startContinuous}>
+              {continuousLeft ? `持续上报中，还剩 ${continuousLeft} 秒` : "持续上报 70 秒"}
+            </Button>
+          </Tooltip>
+        )}
       </div>
 
       <div className={`verdict ${verdict.cls}`}>
@@ -208,7 +259,7 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
               })}
             </tbody>
           </table>
-          <ReportMeta list={list} online={online} />
+          <ReportMeta list={list} online={online} slim={slim} continuous={continuousLeft > 0} />
         </div>
         <div className="ops-card gauge">
           <h2>{type === 1 ? "侧视：俯角（90° − angle_y）" : "侧视：z 轴与水平面夹角"}</h2>
@@ -242,14 +293,14 @@ export default function AngleTab({ sn, installType, online }: { sn: string; inst
             }}
           />
         </h2>
-        {loading ? <Spin style={{ margin: 30 }} /> : <AngleChart list={list} type={type} t0={windowEnd - minutes * 60e3} t1={windowEnd} />}
+        {loading ? <Spin style={{ margin: 30 }} /> : <AngleChart list={list} type={type} t0={windowEnd - minutes * 60e3} t1={windowEnd} slim={slim} />}
       </div>
     </div>
   );
 }
 
 /** 上报信息：最近上报多久前、预计下次上报。自己每秒刷新，不带动整页重绘 */
-function ReportMeta({ list, online }: { list: Heartbeat[]; online: boolean }) {
+function ReportMeta({ list, online, slim, continuous }: { list: Heartbeat[]; online: boolean; slim: boolean; continuous: boolean }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000);
@@ -257,7 +308,17 @@ function ReportMeta({ list, online }: { list: Heartbeat[]; online: boolean }) {
   }, []);
   const latest = list[list.length - 1];
   const meta: React.ReactNode[] = [];
-  if (latest) {
+  if (latest && slim) {
+    // 只在姿态变化时上报：没有"下次上报"，也不能按上报时间判断过期
+    meta.push(
+      <span key="last">
+        最近一次角度上报 <b>{dayjs(latest.t).format(FMT)}</b>（{fmtAgo(now - latest.t)}）
+      </span>,
+      <span key="next">
+        {continuous ? "持续上报中，约每秒一个采样" : "这类设备只在姿态变化时上报角度，之后没动过就一直是这个角度；现场调角度时点上方“持续上报 70 秒”"}
+      </span>,
+    );
+  } else if (latest) {
     const age = now - latest.t;
     const next = heartbeatInterval(list) - age;
     meta.push(
@@ -279,18 +340,25 @@ function ReportMeta({ list, online }: { list: Heartbeat[]; online: boolean }) {
   return <div className="angle-meta">{meta}</div>;
 }
 
-function AngleChart({ list, type, t0, t1 }: { list: Heartbeat[]; type: number; t0: number; t1: number }) {
+function AngleChart({ list, type, t0, t1, slim }: { list: Heartbeat[]; type: number; t0: number; t1: number; slim: boolean }) {
   const [hover, setHover] = useState<Heartbeat>();
   const std = ANGLE_STD[type];
-  const pts = useMemo(() => list.filter((p) => p.t >= t0), [list, t0]);
-  // 相邻点间隔超过 3 个心跳周期则断开折线
-  const gap = heartbeatInterval(list) * 3;
+  /** 时间窗内的上报 */
+  const reports = useMemo(() => list.filter((p) => p.t >= t0), [list, t0]);
+  /** 画线用的点：Ultra 系列把窗前最后一次上报挪到窗口起点，角度一直保持到下次上报 */
+  const pts = useMemo(() => {
+    const earlier = slim ? list.filter((p) => p.t < t0) : [];
+    const before = earlier[earlier.length - 1];
+    return before ? [{ ...before, t: t0 }, ...reports] : reports;
+  }, [list, reports, t0, slim]);
+  // 相邻点间隔超过 3 个心跳周期则断开折线；Ultra 系列不断开
+  const gap = slim ? Infinity : heartbeatInterval(list) * 3;
   const W = 1000;
   const H = 90;
   const xOf = (t: number) => ((t - t0) / (t1 - t0)) * W;
 
   const outCount = { x: 0, y: 0, z: 0 };
-  for (const p of pts) for (const k of AXES) if (Math.abs(p[k] - std.axes[k]) > std.tol) outCount[k]++;
+  for (const p of reports) for (const k of AXES) if (Math.abs(p[k] - std.axes[k]) > std.tol) outCount[k]++;
   const outTotal = outCount.x + outCount.y + outCount.z;
 
   function onMove(e: React.MouseEvent<HTMLDivElement>) {
@@ -309,14 +377,16 @@ function AngleChart({ list, type, t0, t1 }: { list: Heartbeat[]; type: number; t
   return (
     <>
       <p className="muted small">
-        {pts.length} 次上报
+        {reports.length} 次上报
         {outTotal
           ? `，其中 ${AXES.filter((k) => outCount[k])
               .map((k) => `${k} 轴超限 ${outCount[k]} 次`)
               .join("、")}（红点）`
-          : pts.length
+          : reports.length
             ? "，全部在允许范围内"
-            : "（这段时间没有上报，上方显示的是最近一次）"}
+            : slim
+              ? "（这段时间姿态没变，没有上报，曲线是之前最后一次上报的角度）"
+              : "（这段时间没有上报，上方显示的是最近一次）"}
       </p>
       <div className="angle-chart" onMouseMove={onMove} onMouseLeave={() => setHover(undefined)}>
         {AXES.map((k) => {
@@ -332,7 +402,11 @@ function AngleChart({ list, type, t0, t1 }: { list: Heartbeat[]; type: number; t
           lo -= pad;
           hi += pad;
           const yOf = (v: number) => H - ((v - lo) / (hi - lo)) * H;
-          const d = pts.map((p, i) => `${i && p.t - pts[i - 1].t <= gap ? "L" : "M"}${xOf(p.t).toFixed(1)},${yOf(p[k]).toFixed(1)}`).join("");
+          // Ultra 系列画成阶梯：上一次的角度保持到这次上报，最后一次保持到窗口终点
+          const d = slim
+            ? pts.map((p, i) => `${i ? `L${xOf(p.t).toFixed(1)},${yOf(pts[i - 1][k]).toFixed(1)}L` : "M"}${xOf(p.t).toFixed(1)},${yOf(p[k]).toFixed(1)}`).join("") +
+              (pts.length ? `L${W},${yOf(pts[pts.length - 1][k]).toFixed(1)}` : "")
+            : pts.map((p, i) => `${i && p.t - pts[i - 1].t <= gap ? "L" : "M"}${xOf(p.t).toFixed(1)},${yOf(p[k]).toFixed(1)}`).join("");
           return (
             <div key={k} className="angle-row">
               <div className="angle-label">
@@ -349,7 +423,7 @@ function AngleChart({ list, type, t0, t1 }: { list: Heartbeat[]; type: number; t
                   {hover && <line x1={xOf(hover.t)} x2={xOf(hover.t)} y1={0} y2={H} stroke="#1B1D2E" vectorEffect="non-scaling-stroke" />}
                 </svg>
                 {/* 超限点用 HTML 圆点画，避免被 SVG 拉伸成椭圆 */}
-                {pts
+                {reports
                   .filter((p) => Math.abs(p[k] - sv) > std.tol)
                   .map((p) => (
                     <i key={p.t} className="out-dot" style={{ left: `${(xOf(p.t) / W) * 100}%`, top: `${(yOf(p[k]) / H) * 100}%` }} />
