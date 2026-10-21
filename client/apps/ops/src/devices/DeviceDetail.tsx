@@ -14,14 +14,28 @@ import PropertyTab from "./PropertyTab";
 import LocationDialog from "./LocationDialog";
 import DeleteDeviceDialog from "./DeleteDeviceDialog";
 import NameEdit from "./NameEdit";
-import { radarInRoom, type QlConfig } from "../rooms/qinglan";
+import { radarInRoom, type QlConfig, type Spot } from "../rooms/qinglan";
+import { flashSpot } from "../guide/flash";
 import AreaSelect from "../rooms/AreaSelect";
 import { areaText, type InstallArea } from "../rooms/installArea";
 import { setSlotArea } from "../rooms/radarSlot";
 
+/** 每个位置在哪个页签、闪哪个元素（按顺序取第一个找得到的）；prop 是属性页要切到的那个属性所在的分组 */
+const SPOTS: Record<Spot, { tab: string; sel: string[]; prop?: string }> = {
+  room: { tab: "overview", sel: ['[data-spot="room"]'] },
+  area: { tab: "overview", sel: ['[data-spot="area"]'] },
+  angle: { tab: "overview", sel: ['[data-spot="angle"]'] },
+  heartbeat: { tab: "overview", sel: ['[data-spot="heartbeat"]'] },
+  mount: { tab: "props", sel: ['[data-spot="QL_radar_config"]'], prop: "QL_radar_config" },
+  zones: { tab: "props", sel: ['[data-spot="QL_radar_area"]'], prop: "QL_radar_area" },
+  layout: { tab: "props", sel: ['[data-spot="layout"]', '[data-spot="QL_radar_area"]'], prop: "QL_radar_area" },
+  alarm: { tab: "alarm", sel: ['[data-spot="alarm"]'] },
+};
+
 export default function DeviceDetail({
   d,
   live,
+  spot,
   typeName,
   listHidden,
   onToggleList,
@@ -31,6 +45,8 @@ export default function DeviceDetail({
   d: Radar;
   /** 这台设备的实时推送（由设备列表统一订阅） */
   live?: LiveData;
+  /** 从快速开始跳过来：打开对应页签，滚到那一项并闪一下 */
+  spot?: { spot: Spot; seq: number };
   typeName?: string;
   listHidden: boolean;
   onToggleList: () => void;
@@ -47,6 +63,13 @@ export default function DeviceDetail({
   const [rep, setRep] = useState<DeviceReport>({});
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
+  const spotDef = spot && SPOTS[spot.spot];
+  useEffect(() => {
+    if (!spotDef) return;
+    setTab(spotDef.tab);
+    return flashSpot(spotDef.sel.map((s) => `.detail ${s}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spot?.seq]);
   // 每 30 秒更新一次"当前时间"，用来判断 10 分钟内有没有收到设备数据
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -142,7 +165,7 @@ export default function DeviceDetail({
           <small>信号强度</small>
           <b>{rssi !== undefined && rssi !== null ? `${rssi} dBm` : "—"}</b>
         </div>
-        <div>
+        <div data-spot="heartbeat">
           <small>最近心跳</small>
           <b>{rep.lastReportAt ? dayjs(rep.lastReportAt).fromNow() : hbLoading ? "…" : "2 小时内无"}</b>
         </div>
@@ -154,7 +177,7 @@ export default function DeviceDetail({
             <dt>所属机构</dt>
             <dd>{d.orgName}</dd>
             <dt>房间</dt>
-            <dd>
+            <dd data-spot="room">
               {room?.place || d.roomName || "未绑定房间"}
               <Button type="link" size="small" onClick={() => setMoving(true)} style={{ height: "auto", padding: "0 6px" }}>
                 {d.roomId ? "更改" : "设置"}
@@ -163,7 +186,7 @@ export default function DeviceDetail({
             {d.roomId && (
               <>
                 <dt>安装区域</dt>
-                <dd className="area-dd">
+                <dd className="area-dd" data-spot="area">
                   {slot ? (
                     <AreaSelect size="small" value={slot.area} loading={savingArea} disabled={savingArea} placeholder="未设置" onChange={changeArea} />
                   ) : (
@@ -203,7 +226,7 @@ export default function DeviceDetail({
             </dd>
           </dl>
         </div>
-        <div className="ops-card">
+        <div className="ops-card" data-spot="angle">
           <h2>
             安装角度
             {ev && <span className={`grade ${ev.grade}`}>{GRADE_TEXT[ev.grade]}</span>}
@@ -285,7 +308,7 @@ export default function DeviceDetail({
           { key: "overview", label: "概览", children: overview },
           { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} deviceType={d.deviceType} installType={installType} online={link.online} /> },
           { key: "replay", label: "时间回溯", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
-          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
+          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} focusProp={spotDef?.prop && spot ? { name: spotDef.prop, seq: spot.seq } : undefined} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
           { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}

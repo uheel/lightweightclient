@@ -78,7 +78,7 @@ export function sceneIssues(scenes: Scene[], config?: QlConfig): Issue[] {
     if (!values.length) continue;
     const name = `场景"${s.sceneName}"`;
     if (values.includes("{{area}}")) {
-      out.push({ level: "error", text: `${name}的区域还是占位符 {{area}}，没有换成区域 ID` });
+      out.push({ level: "error", text: `${name}的区域还是占位符 {{area}}，没有换成区域 ID`, spot: "alarm" });
       continue;
     }
     if (!config) {
@@ -94,11 +94,11 @@ export function sceneIssues(scenes: Scene[], config?: QlConfig): Issue[] {
       const z = zones.find(need.match);
       if (!z) out.push({ level: "error", text: `${name}需要${need.label}，但布置里没有` });
       else if (values.some((v) => v !== String(z.index)))
-        out.push({ level: "error", text: `${name}看的是${values.map(label).join("、")}，应该是${need.label}（区域 ${z.index}）`, zone: z.index });
+        out.push({ level: "error", text: `${name}看的是${values.map(label).join("、")}，应该是${need.label}（区域 ${z.index}）`, zone: z.index, spot: "alarm" });
       continue;
     }
     const missing = values.filter((v) => !zones.some((z) => String(z.index) === v));
-    if (missing.length) out.push({ level: "error", text: `${name}引用的${missing.map(label).join("、")}在布置里找不到` });
+    if (missing.length) out.push({ level: "error", text: `${name}引用的${missing.map(label).join("、")}在布置里找不到`, spot: "alarm" });
   }
   return out;
 }
@@ -128,7 +128,7 @@ export function checkRoom(opts: {
   const mixed = new Set(roomDevs.map((d) => d.deviceType)).size > 1 || roomEls.some((e) => installAreaOf(e)?.type);
   const areaIssue = (e: PlanElement, device?: Radar): Issue | undefined =>
     roomDevs.length > 1 && mixed && device?.roomId === room.id && !installAreaOf(e)?.type
-      ? { level: "warn", text: `房间里有 ${roomDevs.length} 台雷达，这台没设安装区域（卧室、卫生间…），分不清它装在哪` }
+      ? { level: "warn", text: `房间里有 ${roomDevs.length} 台雷达，这台没设安装区域（卧室、卫生间…），分不清它装在哪`, spot: "area" }
       : undefined;
 
   for (const e of radarElements(design)) {
@@ -140,8 +140,8 @@ export function checkRoom(opts: {
     if (!sn) r.issues.push({ level: "warn", text: "布置里有一个没绑设备的雷达位置" });
     else if (!device) r.issues.push({ level: "warn", text: "布置里的雷达在本机构的设备里找不到（设备删了或转到别的机构，布置没清理）" });
     else if (!device.roomId)
-      r.issues.push({ level: "warn", text: "这台雷达没绑定任何房间：布置里有它，但告警、长者、平台房间页都按绑定走，在那些地方它不属于这个房间" });
-    else if (device.roomId !== room.id) r.issues.push({ level: "warn", text: `这台雷达已经绑到"${device.roomName ?? "别的房间"}"了，这里的布置是旧的` });
+      r.issues.push({ level: "warn", text: "这台雷达没绑定任何房间：布置里有它，但告警、长者、平台房间页都按绑定走，在那些地方它不属于这个房间", spot: "room" });
+    else if (device.roomId !== room.id) r.issues.push({ level: "warn", text: `这台雷达已经绑到"${device.roomName ?? "别的房间"}"了，这里的布置是旧的`, spot: "room" });
     const others = sn ? (layoutRooms?.get(sn) ?? []).filter((x) => x.id !== room.id) : [];
     if (others.length) r.issues.push({ level: "warn", text: `这台雷达还出现在 ${others.map((x) => `"${x.roomName}"`).join("、")} 的布置里，同一台雷达只该在一个房间` });
 
@@ -153,21 +153,22 @@ export function checkRoom(opts: {
       radars.push(r);
       continue;
     }
-    if (!e.qingLanConfig) r.issues.push({ level: "error", text: "雷达放进了房间，但还没配安装方式和区域" });
+    if (!e.qingLanConfig) r.issues.push({ level: "error", text: "雷达放进了房间，但还没配安装方式和区域", spot: "mount" });
     else {
       r.config = e.qingLanConfig;
       r.expected = toDeviceArrays(e.qingLanConfig);
       r.issues.push(...validate(e.qingLanConfig));
       if (device) {
         r.record = recordState(r.expected, values.get(sn));
-        if (r.record?.state === "never") r.issues.push({ level: "warn", text: "这份布置还没下发过" });
-        else if (r.record?.state === "failed") r.issues.push({ level: "error", text: "上次下发失败" });
+        if (r.record?.state === "never") r.issues.push({ level: "warn", text: "这份布置还没下发过", spot: "layout" });
+        else if (r.record?.state === "failed") r.issues.push({ level: "error", text: "上次下发失败", spot: "layout" });
         else if (r.record?.state === "differs") {
           const at = r.record.config?.deliveryAt ?? r.record.area?.deliveryAt;
           r.issues.push({
             level: "warn",
             text: `设备上的区域和房间布置不一样（平台记录${at ? ` ${at.slice(5, 16)}` : ""}）。在设备属性里直接改区域不会同步回布置；以布置为准就重新下发，以设备为准就把布置改成一样`,
             details: describeDiff(r.expected, r.record.config?.value, r.record.area?.value),
+            spot: "layout",
           });
         }
       }
@@ -183,7 +184,7 @@ export function checkRoom(opts: {
     const zoned = d.deviceType === undefined || ZONE_TYPES.has(d.deviceType);
     const r: RadarReport = { sn: d.sn, device: d, issues: [], level: zoned ? "error" : "none" };
     if (zoned) {
-      r.issues.push({ level: "error", text: "雷达绑在这个房间，但房间布置里没有它，区域没配", fix: "add-slot" });
+      r.issues.push({ level: "error", text: "雷达绑在这个房间，但房间布置里没有它，区域没配", fix: "add-slot", spot: "area" });
       r.issues.push(...sceneIssues(scenes.get(d.id) ?? []));
     }
     radars.push(r);

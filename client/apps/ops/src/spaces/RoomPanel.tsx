@@ -89,7 +89,7 @@ export default function RoomPanel({
       <h3>
         床位 <span className="muted">{beds.length}</span>
       </h3>
-      <ul className="space-beds-list">
+      <ul className="space-beds-list" data-spot="beds" data-room={room.id}>
         {beds.map((b) => {
           const onBed = roomDevices?.filter((d) => d.bedId === b.id) ?? [];
           const free = roomDevices?.filter((d) => !d.bedId) ?? [];

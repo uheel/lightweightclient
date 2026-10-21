@@ -256,10 +256,19 @@ export function describeDiff(want: DeviceArrays, gotConfig: unknown, gotArea: un
 
 // ---------- 校验 ----------
 
+/**
+ * 问题在设备详情的哪里改（快速开始跳过去时打开对应的页签、滚到那一项并闪一下）：
+ * room 概览的房间，area 概览的安装区域，angle 概览的安装角度，heartbeat 概览的最近心跳，
+ * mount 属性里的安装与监测范围，zones 属性里的区域划分，layout 属性里的"按房间布置下发"，alarm 告警配置
+ */
+export type Spot = "room" | "area" | "angle" | "heartbeat" | "mount" | "zones" | "layout" | "alarm";
+
 export interface Issue {
   /** error：平台不接受或设备上不对；warn：能用但要注意 */
   level: "error" | "warn";
   text: string;
+  /** 在设备详情哪里改；没写的按区域问题算（zones） */
+  spot?: Spot;
   /** 涉及的区域 ID */
   zone?: number;
   /** 逐项说明（例如布置和设备哪几个区域不一样） */
@@ -286,12 +295,12 @@ export function validate(c: QlConfig): Issue[] {
 
   const rule = radarInContainer(c);
   if (c.radar && (c.radar.x !== rule.x || c.radar.y !== rule.y))
-    out.push({ level: "warn", text: "雷达位置和装法对不上（旧数据），平台换算区域和边界时用的雷达位置不同，设备上的区域可能偏了，建议重新保存布置" });
+    out.push({ level: "warn", text: "雷达位置和装法对不上（旧数据），平台换算区域和边界时用的雷达位置不同，设备上的区域可能偏了，建议重新保存布置", spot: "mount" });
   if (c.container && (c.container.width !== size.width || c.container.height !== size.height))
-    out.push({ level: "warn", text: `探测范围尺寸是 ${c.container.width}×${c.container.height}，按当前装法应为 ${size.width}×${size.height}` });
+    out.push({ level: "warn", text: `探测范围尺寸是 ${c.container.width}×${c.container.height}，按当前装法应为 ${size.width}×${size.height}`, spot: "mount" });
   const h = c.installHeight;
-  if (h === undefined || h <= 0) out.push({ level: "error", text: "没有安装高度" });
-  else if (mountOf(c) === SIDE && (h < 1.5 || h > 3.5)) out.push({ level: "warn", text: `侧装高度 ${h} m，平台只允许 1.5～3.5 m（低于 1.5 m 时床上坐起的识别率会大大降低）` });
+  if (h === undefined || h <= 0) out.push({ level: "error", text: "没有安装高度", spot: "mount" });
+  else if (mountOf(c) === SIDE && (h < 1.5 || h > 3.5)) out.push({ level: "warn", text: `侧装高度 ${h} m，平台只允许 1.5～3.5 m（低于 1.5 m 时床上坐起的识别率会大大降低）`, spot: "mount" });
 
   if (zones.length > 16) out.push({ level: "error", text: `区域有 ${zones.length} 个，设备最多 16 个` });
   const drift = zoneIndexDrift(c);
@@ -316,7 +325,7 @@ export function validate(c: QlConfig): Issue[] {
     out.push({ level: "error", text: `监护床不在监护区里（${supervisionSize(c)} cm 见方），离雷达太远或位置不对`, zone: beds[0]!.index });
   if (mode === BED_CARE) {
     for (const z of zones) if (z.type === 2 && overlaps(zoneRect(c, z), sup)) out.push({ level: "error", text: `${zoneName(z)}（普通床）压到了监护区`, zone: z.index });
-    if (!beds.length) out.push({ level: "warn", text: "床位监护模式下没有监护床，离床、坐起等告警用不了" });
+    if (!beds.length) out.push({ level: "warn", text: "工作模式是床位监护，但区域里还没画监护床，离床、坐起等告警用不了" });
   }
   if (mode !== SLEEP && !zones.some((z) => z.type === 4)) out.push({ level: "error", text: "至少要有一个门" });
 

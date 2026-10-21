@@ -185,7 +185,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
 
   return (
     <div className="detail-body">
-      <div className="ops-card">
+      <div className="ops-card" data-spot="alarm">
         <h2>
           常用告警
           <Button size="small" type="text" icon={<ReloadOutlined />} disabled={!!busy} onClick={load} title="重新读取" style={{ marginLeft: "auto" }} />

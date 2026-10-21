@@ -5,6 +5,7 @@ import { getDeviceScenes, type Scene } from "../api/scene";
 import { getSpaces, type BedRow, type Building, type Floor } from "../api/space";
 import { evaluate } from "../devices/angle";
 import { checkRoom, sceneIssues, ZONE_TYPES, type RoomReport } from "../rooms/check";
+import type { Spot as DeviceSpot } from "../rooms/qinglan";
 import { pool } from "../scenes/plan";
 
 /**
@@ -15,11 +16,15 @@ import { pool } from "../scenes/plan";
 export type NavKey = "devices" | "spaces" | "rooms" | "scenes" | "members" | "alerts" | "realtime";
 export type StepKey = "spaces" | "radars" | "install" | "layout" | "scenes" | "members" | "diagnose";
 
+/** 跳过去后要打开、闪一下的那一项：设备详情里的位置（见 rooms/qinglan.ts 的 Spot），beds 是楼宇页房间面板的床位 */
+export type Spot = DeviceSpot | "beds";
+
 /** 跳到哪个页面；id 是要选中的设备 / 房间，add 打开页面上的新建 */
 export interface Target {
   nav: NavKey;
   id?: string;
   action?: "add";
+  spot?: Spot;
 }
 
 export type StepStatus = "done" | "doing" | "todo" | "unknown";
@@ -153,7 +158,7 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       ...base,
       status: "done",
       summary: `${buildings.length} 栋 · ${floors.length} 层 · ${rooms.length} 间房 · ${beds.length} 张床`,
-      items: noBed.length ? [{ text: `${noBed.length} 间房没有床位（活动室这类可以不加）`, tip: true, target: { nav: "spaces", id: noBed[0]!.id } }] : [],
+      items: noBed.length ? [{ text: `${noBed.length} 间房没有床位（活动室这类可以不加）`, tip: true, target: { nav: "spaces", id: noBed[0]!.id, spot: "beds" } }] : [],
     };
   })();
 
@@ -168,7 +173,7 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
         ...base,
         status: "doing",
         summary: `${active.length} 台，${unbound.length} 台还没绑定房间`,
-        items: unbound.map((d) => ({ text: `${nameOf(d)} · 未绑定房间`, target: { nav: "devices", id: d.id } })),
+        items: unbound.map((d) => ({ text: `${nameOf(d)} · 未绑定房间`, target: { nav: "devices", id: d.id, spot: "room" } })),
       };
     return { ...base, status: "done", summary: `共 ${active.length} 台，都已绑定房间`, items: [] };
   })();
@@ -199,7 +204,7 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       const rep = heavy.reports.get(d.sn) ?? {};
       const hb = rep.angle;
       const link = deviceLink({ lastReportAt: rep.lastReportAt, platformOnline: d.isOnline, now });
-      const target: Target = { nav: "devices", id: d.id };
+      const target: Target = { nav: "devices", id: d.id, spot: "heartbeat" };
       if (!link.online) {
         offline.push({ text: `${nameOf(d)} · ${where(d)} · 离线${rep.lastReportAt ? `（最近心跳 ${minsAgo(rep.lastReportAt, now)}）` : "，2 小时内没有心跳"}`, target });
         continue;
@@ -218,12 +223,13 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       const off = ev.axes.filter((a) => Math.abs(a.dev) > ev.tol);
       if (!off.length) continue;
       const head = `${nameOf(d)} · ${where(d)} · `;
+      const at: Target = { ...target, spot: "angle" };
       if (type === undefined && maxDev(ev) > FAR_OFF)
-        angleItems.push({ text: `${head}角度和顶装、侧装标准都对不上（x ${hb.x.toFixed(1)}° · y ${hb.y.toFixed(1)}° · z ${hb.z.toFixed(1)}°），看看是不是装反了`, target });
+        angleItems.push({ text: `${head}角度和顶装、侧装标准都对不上（x ${hb.x.toFixed(1)}° · y ${hb.y.toFixed(1)}° · z ${hb.z.toFixed(1)}°），看看是不是装反了`, target: at });
       else
         angleItems.push({
           text: `${head}${ev.name}角度超差：${off.map((a) => `${a.k} ${signed(a.dev)}`).join("、")}${type === undefined ? `（布置里没配安装方式，按更接近的${ev.name}判断）` : ""}`,
-          target,
+          target: at,
         });
     }
     const items = [...angleItems, ...silent, ...offline];
@@ -258,16 +264,13 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
         zoned++;
         if (r.level !== "error" && r.level !== "warn") continue;
         const [first, ...rest] = r.issues;
-        items.push({ text: `${nameOf(r.device)} · ${rep.room.roomName}：${first?.text ?? "布置有问题"}${rest.length ? `（还有 ${rest.length} 项）` : ""}`, target: { nav: "devices", id: r.device.id } });
+        items.push({
+          text: `${nameOf(r.device)} · ${rep.room.roomName}：${first?.text ?? "布置有问题"}${rest.length ? `（还有 ${rest.length} 项）` : ""}`,
+          target: { nav: "devices", id: r.device.id, spot: first?.spot ?? "zones" },
+        });
       }
-    const tips: StepItem[] = [];
-    for (const room of rooms) {
-      const bs = bedsOf.get(room.id) ?? [];
-      if (bs.length && bound.some((d) => d.roomId === room.id) && bs.every((b) => !b.deviceCount))
-        tips.push({ text: `${room.roomName} 的床位还没绑雷达（楼宇页点开房间可以绑）`, tip: true, target: { nav: "spaces", id: room.id } });
-    }
-    if (items.length) return { ...base, status: "doing", summary: `${items.length} / ${zoned} 台雷达的布置还没弄好`, items: [...items, ...tips] };
-    return { ...base, status: "done", summary: zoned ? `${zoned} 台雷达都已画进布置并下发` : "没有需要画区域的雷达型号", items: tips };
+    if (items.length) return { ...base, status: "doing", summary: `${items.length} / ${zoned} 台雷达的布置还没弄好`, items };
+    return { ...base, status: "done", summary: zoned ? `${zoned} 台雷达都已画进布置并下发` : "没有需要画区域的雷达型号", items: [] };
   })();
 
   // 5 下发场景
@@ -286,11 +289,12 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       const sc = heavy.scenes.get(d.id) ?? [];
       if (!sc.some((s) => !s.isDisabled)) {
         none++;
-        items.push({ text: `${nameOf(d)} · ${where(d)} · 还没有启用场景`, target: { nav: "scenes" } });
+        items.push({ text: `${nameOf(d)} · ${where(d)} · 还没有启用场景`, target: { nav: "devices", id: d.id, spot: "alarm" } });
         continue;
       }
       const zonedType = d.deviceType === undefined || ZONE_TYPES.has(d.deviceType);
-      for (const i of sceneIssues(sc, zonedType ? configBySn.get(d.sn) : undefined)) items.push({ text: `${nameOf(d)} · ${where(d)}：${i.text}`, target: { nav: "devices", id: d.id } });
+      for (const i of sceneIssues(sc, zonedType ? configBySn.get(d.sn) : undefined))
+        items.push({ text: `${nameOf(d)} · ${where(d)}：${i.text}`, target: { nav: "devices", id: d.id, spot: i.spot ?? "alarm" } });
     }
     if (!items.length) return { ...base, status: "done", summary: `${bound.length} 台雷达都已启用场景`, items };
     const wrong = items.length - none;
@@ -307,9 +311,16 @@ export function computeSteps(data: GuideData, now = Date.now()): Step[] {
       action: { label: "去长者", target: { nav: "members" as const } },
     };
     if (!beds.length) return { ...base, status: "todo", summary: "先建好床位", items: [] };
+    // 床位绑了雷达，告警才知道是哪张床、哪位长者；房间里有雷达、床位却一张都没绑时提醒
+    const tips: StepItem[] = [];
+    for (const room of rooms) {
+      const bs = bedsOf.get(room.id) ?? [];
+      if (bs.length && bound.some((d) => d.roomId === room.id) && bs.every((b) => !b.deviceCount))
+        tips.push({ text: `${room.roomName} 的 ${bs.length} 张床位都还没绑雷达，告警对不上是哪张床的长者（楼宇页点开房间，在床位上绑）`, tip: true, target: { nav: "spaces", id: room.id, spot: "beds" } });
+    }
     const occupied = beds.filter((b) => b.bedStatus === 2 || b.realName).length;
-    if (!occupied) return { ...base, status: "todo", summary: `${beds.length} 张床，还没有长者入住`, items: [] };
-    return { ...base, status: "done", summary: `${occupied} / ${beds.length} 张床已入住`, items: [] };
+    if (!occupied) return { ...base, status: "todo", summary: `${beds.length} 张床，还没有长者入住`, items: tips };
+    return { ...base, status: "done", summary: `${occupied} / ${beds.length} 张床已入住`, items: tips };
   })();
 
   // 7 体检

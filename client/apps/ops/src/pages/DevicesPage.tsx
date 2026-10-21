@@ -8,6 +8,7 @@ import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
 import { useLiveMap } from "../devices/useLiveMap";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
+import type { Spot } from "../rooms/qinglan";
 import { GuideEmpty } from "../guide/GuideEmpty";
 
 type Filter = "all" | "online" | "offline" | "disabled";
@@ -53,6 +54,13 @@ export default function DevicesPage() {
   /** 收起左侧列表，给详情（尤其是姿态回放）更多空间 */
   const [listHidden, setListHidden] = useState(false);
   const [adding, setAdding] = useState(false);
+  /** 从快速开始跳过来时详情里要打开、闪一下的那一项 */
+  const [spot, setSpot] = useState<{ id: string; spot: Spot; seq: number }>();
+  // 换到别的设备就作废，回来时不再闪
+  useEffect(() => {
+    if (spot && spot.id !== selId) setSpot(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId]);
   const [listW, setListW] = useState(savedListW);
   const [dragging, setDragging] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -150,6 +158,7 @@ export default function DevicesPage() {
   // 从快速开始清单跳过来：选中设备或打开添加
   useGuideFocus("devices", (f) => {
     if (f.id) focusDevice(f.id);
+    if (f.id && f.spot && f.spot !== "beds") setSpot({ id: f.id, spot: f.spot, seq: f.seq });
     if (f.action === "add") setAdding(true);
   });
 
@@ -291,7 +300,7 @@ export default function DevicesPage() {
             </Button>
           </GuideEmpty>
         ) : sel ? (
-          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} onDeleted={() => onDeleted(sel.id)} />
+          <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} spot={spot?.id === sel.id ? spot : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} onDeleted={() => onDeleted(sel.id)} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}

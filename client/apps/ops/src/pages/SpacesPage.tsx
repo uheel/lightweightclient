@@ -28,6 +28,7 @@ import { indexSpaces, roomsOfBuilding, roomsOfFloor, tallyRooms, without, type S
 import { nextBedName } from "../spaces/names";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import { GuideEmpty } from "../guide/GuideEmpty";
+import { flashSpot } from "../guide/flash";
 import { syncAfter } from "../members/deviceSync";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -106,16 +107,17 @@ export default function SpacesPage() {
     if (roomId && !ix.room.has(roomId)) setRoomId(undefined);
   }, [ix, roomId]);
 
-  // 从快速开始清单跳过来：选中那间房所在的楼层并打开房间（页面可能还在加载，等数据到了再选）
-  const [focusRoom, setFocusRoom] = useState<string>();
-  useGuideFocus("spaces", (f) => f.id && setFocusRoom(f.id));
+  // 从快速开始清单跳过来：选中那间房所在的楼层并打开房间（页面可能还在加载，等数据到了再选）；要看床位时闪一下床位
+  const [focusRoom, setFocusRoom] = useState<{ id: string; beds: boolean }>();
+  useGuideFocus("spaces", (f) => f.id && setFocusRoom({ id: f.id, beds: f.spot === "beds" }));
   useEffect(() => {
-    const r = focusRoom ? ix.room.get(focusRoom) : undefined;
+    const r = focusRoom ? ix.room.get(focusRoom.id) : undefined;
     if (!r) return;
     setFocusRoom(undefined);
     if (r.floorId) setSel({ kind: "floor", id: r.floorId });
     if (r.buildingId) setExpanded((x) => new Set(x).add(r.buildingId!));
     setRoomId(r.id);
+    if (focusRoom!.beds) flashSpot([`[data-spot="beds"][data-room="${r.id}"]`]);
   }, [focusRoom, ix]);
 
   const curFloor = sel?.kind === "floor" ? ix.floor.get(sel.id) : undefined;

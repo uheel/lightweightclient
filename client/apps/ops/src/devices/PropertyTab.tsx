@@ -115,8 +115,11 @@ export default function PropertyTab({
   roomId,
   layout,
   onLayoutSynced,
+  focusProp,
 }: {
   sn: string;
+  /** 从快速开始跳过来：切到这个属性所在的分组（不记成下次默认的分组） */
+  focusProp?: { name: string; seq: number };
   online: boolean;
   /** 设备所在房间：下发安装配置 / 区域后写回这个房间的布置 */
   roomId?: string;
@@ -156,6 +159,15 @@ export default function PropertyTab({
   const setPlan = (x: Partial<PlanCtx>) => setPlanEdit((cur) => ({ ...cur, ...x }));
 
   useEffect(() => realtime.onState((s) => setRtState(s)), []);
+
+  const focusSeen = useRef(0);
+  useEffect(() => {
+    if (!schema || !focusProp || focusProp.seq === focusSeen.current) return;
+    const p = schema.properties.find((x) => x.propertyName === focusProp.name);
+    if (!p) return;
+    focusSeen.current = focusProp.seq;
+    setGroup(p.propertyGroupStringCode && groupsOf(schema).some((g) => g.value === p.propertyGroupStringCode) ? p.propertyGroupStringCode : UNGROUPED);
+  }, [schema, focusProp]);
 
   const load = useCallback(async () => {
     setLoadError(undefined);
@@ -671,7 +683,7 @@ export default function PropertyTab({
               {groupText && <p>{groupText}</p>}
             </header>
             {showLayoutBar && (
-              <div className="pp-layout">
+              <div className="pp-layout" data-spot="layout">
                 <span>
                   <b>房间布置</b>：{layout?.installType === 0 ? "顶装" : "侧装"}，{layout?.ranges?.length ?? 0} 个区域
                   {devMatch === true ? "，设备上一致" : devMatch === false ? "，设备上不一样" : "（平台记录可能已被保存布置改过，不代表设备上是这个，读取本组可以核对）"}
@@ -821,7 +833,7 @@ function SettingRow({
 
   if (st?.wide)
     return (
-      <div className={`pp-row wide${modified ? " modified" : ""}`}>
+      <div className={`pp-row wide${modified ? " modified" : ""}`} data-spot={p.propertyName}>
         <div className="pp-row-head">
           {head}
           {status}
@@ -831,7 +843,7 @@ function SettingRow({
     );
 
   return (
-    <div className={`pp-row${modified ? " modified" : ""}`}>
+    <div className={`pp-row${modified ? " modified" : ""}`} data-spot={p.propertyName}>
       {head}
       <div className="pp-control">
         {st ? (
