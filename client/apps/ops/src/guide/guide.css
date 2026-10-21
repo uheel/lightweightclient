@@ -1,14 +1,19 @@
-/* 快速开始：右侧清单面板、侧栏入口、下一步提示条、空状态 */
+/* 快速开始：浮动清单、侧栏入口、下一步提示条、空状态 */
 .guide-layout { position: relative; height: 100%; display: flex; min-height: 0; }
 .guide-page { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .guide-page-body { flex: 1; min-height: 0; overflow: auto; }
 
-.guide-panel { flex: 0 0 340px; display: flex; flex-direction: column; min-height: 0; background: #fff; border-left: 1px solid #E8EAF2; }
-/* 窗口窄时并排会把页面挤坏，改成浮在页面右侧 */
-@media (max-width: 1180px) {
-  .guide-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 340px; z-index: 20; box-shadow: -8px 0 24px rgba(17, 20, 65, 0.1); }
+/* 浮在页面上的小窗（位置由 left / bottom 内联给出，可以拖动） */
+.guide-panel {
+  position: absolute; z-index: 20; width: 340px; max-height: calc(100% - 24px); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  background: #fff; border: 1px solid #E1E4EE; border-radius: 10px; box-shadow: 0 8px 28px rgba(17, 20, 65, 0.16);
 }
-.guide-head { padding: 12px 14px 10px; border-bottom: 1px solid #EEF0F5; display: flex; flex-direction: column; gap: 6px; }
+.guide-panel.mini { width: 280px; flex-direction: row; align-items: center; gap: 2px; padding: 4px 6px 4px 4px; cursor: grab; }
+.guide-mini-body { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 2px 4px; border: 0; background: transparent; border-radius: 6px; text-align: left; cursor: pointer; font-family: inherit; color: inherit; }
+.guide-mini-body:hover { background: #F6F7FB; }
+.guide-mini-body svg { flex: none; display: block; }
+.guide-head { padding: 12px 14px 10px; border-bottom: 1px solid #EEF0F5; display: flex; flex-direction: column; gap: 6px; cursor: grab; user-select: none; }
+.guide-head .ant-btn { cursor: pointer; }
 .guide-title { display: flex; align-items: center; gap: 6px; }
 .guide-title b { font-size: 15px; font-weight: 600; }
 .guide-title .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

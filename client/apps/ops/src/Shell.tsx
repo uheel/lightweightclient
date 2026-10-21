@@ -86,7 +86,7 @@ export default function Shell({ s }: { s: Session }) {
         onNav={go}
         railFooter={<GuideRailEntry />}
       >
-        {/* 以 orgId 作为 key：切换机构时页面整体重新挂载、重新请求。快速开始清单在右侧和页面并排，不遮页面 */}
+        {/* 以 orgId 作为 key：切换机构时页面整体重新挂载、重新请求。快速开始清单浮在页面右上角，可以拖动、收起 */}
         <div key={s.orgId} className="guide-layout">
           <div className="guide-page">
             <GuideBanner />

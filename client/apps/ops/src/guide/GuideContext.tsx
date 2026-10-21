@@ -51,6 +51,9 @@ interface GuideState {
   error?: string;
   open: boolean;
   setOpen: (v: boolean) => void;
+  /** 清单开着但收成一条（只显示进度和下一步） */
+  mini: boolean;
+  setMini: (v: boolean) => void;
   hidden: boolean;
   setHidden: (v: boolean) => void;
   refresh: (force?: boolean) => void;
@@ -89,6 +92,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
   const [progress, setProgress] = useState<{ done: number; total: number }>();
   const [error, setError] = useState<string>();
   const [open, setOpenState] = useState(false);
+  const [mini, setMini] = useState(false);
   const [focus, setFocus] = useState<Focus>();
   const handled = useRef(0);
   const [banner, setBanner] = useState<Banner>();
@@ -162,6 +166,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
     (v: boolean) => {
       openRef.current = v;
       setOpenState(v);
+      if (v) setMini(false);
       // 打开时做完整检查（大机构平时只做轻量检查）
       if (v) run(!data?.heavy || Date.now() - lastAt.current > AUTO_GAP_MS);
     },
@@ -210,6 +215,8 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
     error,
     open,
     setOpen,
+    mini,
+    setMini,
     hidden: !!saved.hidden,
     setHidden: (v) => save({ hidden: v }),
     refresh: (force) => run(!!force),
