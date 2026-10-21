@@ -85,6 +85,15 @@ export async function createRadar(d: NewRadar) {
   return res.data;
 }
 
+/**
+ * 新增蓝牙外设，和平台"智能设备管理 › 蓝牙外设"的"新增"一样（同样是 POST /api/device/v3）。
+ * sn 就是外设 ID（≤32，全平台唯一），名称 ≤64。和雷达的绑定不在这里，是写雷达的 slave_config 属性
+ */
+export async function createSlave(d: { deviceName: string; sn: string; deviceType: number; description?: string }) {
+  const res = await api.post<string>("/api/device/v3", d);
+  return res.data;
+}
+
 /** 设备记录（GET /api/device/v3?id=），编辑时要整条带回 */
 interface DeviceRecord {
   id: string;

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Checkbox, InputNumber, Segmented, Select, Switch, TimePicker, Tooltip } from "antd";
+import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Switch, TimePicker, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
+import { createSlave, getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
 import ZoneCanvas, { limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 
@@ -748,7 +748,18 @@ function useTypeNames() {
   return m;
 }
 
-function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice) => unknown; max: number; noun: string }): Structured {
+function linkedDevices(o: {
+  read: (v: unknown) => Linked[];
+  make: (d: AnyDevice) => unknown;
+  max: number;
+  noun: string;
+  /** 只有这些设备类型能选；不给就是除雷达外都能选 */
+  types?: Set<number>;
+  /** 暂停添加（比如停售），给出原因；已绑的仍能移除 */
+  paused?: string;
+  /** 平台上还没有这个设备时，能在这里直接新建（类型限于 types 里字典有的） */
+  creatable?: boolean;
+}): Structured {
   return {
     wide: true,
     summary: (v) => {
@@ -764,9 +775,11 @@ function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice)
       ];
     },
     Editor: function LinkedEditor({ value, onChange, disabled, sn }) {
-      const list = o.read(value);
+      const read = o.read(value);
       const names = useTypeNames();
       const [devices, setDevices] = useState<AnyDevice[]>();
+      // 只在真的去取设备列表时转圈（停售的环境传感器不取，不能一直转）
+      const [loading, setLoading] = useState(false);
       const load = () => {
         // 雷达本身不能当子设备，列表里去掉雷达类的设备
         orgDevices ??= Promise.all([getAllDevices(), getRadarTypes().catch(() => [])])
@@ -778,16 +791,32 @@ function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice)
             orgDevices = undefined;
             return [];
           });
-        orgDevices.then(setDevices);
+        setLoading(true);
+        orgDevices.then((d) => {
+          setDevices(d);
+          setLoading(false);
+        });
       };
+      // slave_config 只存外设 ID，名称从机构设备列表补上（列表只取一次）
+      useEffect(() => {
+        if (read.some((x) => !x.name)) load();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      const list = read.map((x) => (x.name ? x : { ...x, name: devices?.find((d) => d.sn === x.sn)?.deviceName }));
       const options = useMemo(
         () =>
           (devices ?? [])
-            .filter((d) => d.sn !== sn && !list.some((x) => x.sn === d.sn || x.key === d.id))
+            .filter((d) => d.sn !== sn && (!o.types || o.types.has(d.deviceType)) && !list.some((x) => x.sn === d.sn || x.key === d.id))
             .map((d) => ({ value: d.sn, label: `${d.deviceName || d.sn} · ${names.get(d.deviceType) ?? d.deviceType} · ${d.sn}` })),
         [devices, list, names, sn],
       );
       const typeName = (t?: number) => (t ? (names.get(t) ?? `类型 ${t}`) : o.noun);
+      const [creating, setCreating] = useState(false);
+      const typeOptions = useMemo(
+        () => [...names].filter(([t]) => o.types?.has(t)).sort(([a], [b]) => a - b).map(([value, label]) => ({ value, label })),
+        [names],
+      );
+      const add = (d: AnyDevice) => onChange([...list.map((q) => q.raw), o.make(d)]);
       return (
         <div className="st">
           <div className="st-chips">
@@ -806,21 +835,43 @@ function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice)
             {!list.length && <small className="muted">没有绑定{o.noun}。</small>}
           </div>
           {list.length < o.max && (
-            <Select
-              size="small"
-              showSearch
-              disabled={disabled}
-              value={null}
-              placeholder={`添加${o.noun}（还可添加 ${o.max - list.length} 个），按名称或 SN 搜索`}
-              onFocus={load}
-              loading={!devices}
-              options={options}
-              optionFilterProp="label"
-              onChange={(v: string) => {
-                const d = devices?.find((x) => x.sn === v);
-                if (d) onChange([...list.map((q) => q.raw), o.make(d)]);
+            <div style={{ display: "flex", gap: 8, maxWidth: 620 }}>
+              <Select
+                size="small"
+                showSearch
+                disabled={disabled || !!o.paused}
+                value={null}
+                placeholder={o.paused ?? `添加${o.noun}（还可添加 ${o.max - list.length} 个），按名称或 SN 搜索`}
+                onFocus={load}
+                loading={loading}
+                options={options}
+                optionFilterProp="label"
+                notFoundContent={o.creatable ? `平台上没有可选的${o.noun}，点右边"新建"` : undefined}
+                onChange={(v: string) => {
+                  const d = devices?.find((x) => x.sn === v);
+                  if (d) add(d);
+                }}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              {o.creatable && !o.paused && (
+                <Button size="small" icon={<PlusOutlined />} disabled={disabled} onClick={() => setCreating(true)}>
+                  新建
+                </Button>
+              )}
+            </div>
+          )}
+          {creating && (
+            <NewLinkedDialog
+              noun={o.noun}
+              typeOptions={typeOptions}
+              onClose={() => setCreating(false)}
+              onCreated={(d) => {
+                // 机构设备列表缓存里没有新建的这台，重新取（名称也从这里来）
+                orgDevices = undefined;
+                load();
+                setCreating(false);
+                add(d);
               }}
-              style={{ width: "100%", maxWidth: 520 }}
             />
           )}
         </div>
@@ -829,12 +880,70 @@ function linkedDevices(o: { read: (v: unknown) => Linked[]; make: (d: AnyDevice)
   };
 }
 
+/** 在平台新建一台子设备（目前只有蓝牙外设），建好后由调用方加进绑定列表 */
+function NewLinkedDialog({
+  noun,
+  typeOptions,
+  onClose,
+  onCreated,
+}: {
+  noun: string;
+  typeOptions: { value: number; label: string }[];
+  onClose: () => void;
+  onCreated: (d: AnyDevice) => void;
+}) {
+  const { message } = App.useApp();
+  const [form] = Form.useForm<{ deviceName: string; deviceType: number; sn: string; description?: string }>();
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    const v = await form.validateFields();
+    setSaving(true);
+    try {
+      const d = { deviceName: v.deviceName.trim(), sn: v.sn.trim(), deviceType: v.deviceType, description: v.description?.trim() || undefined };
+      let id = await createSlave(d);
+      // 新增接口应返回设备 id；没返回时按外设 ID 查一下
+      if (typeof id !== "string" || !id) id = (await getAllDevices()).find((x) => x.sn === d.sn)?.id ?? "";
+      message.success(`已新建${noun} ${d.deviceName}，已加进列表，下发后绑定到这台雷达`);
+      onCreated({ id, sn: d.sn, deviceName: d.deviceName, deviceType: d.deviceType });
+    } catch (e) {
+      message.error(`新建失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal open title={`新建${noun}`} okText="新建并添加" onOk={submit} confirmLoading={saving} onCancel={onClose} destroyOnHidden>
+      <Form form={form} layout="vertical" initialValues={{ deviceType: typeOptions.length === 1 ? typeOptions[0].value : undefined }}>
+        <Form.Item name="deviceType" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
+          <Select options={typeOptions} placeholder="选择类型" />
+        </Form.Item>
+        <Form.Item name="sn" label="外设 ID" tooltip="外设上标的 ID，例如 FHKS_00019939848；全平台唯一" rules={[{ required: true, whitespace: true, message: "请填写外设 ID" }, { max: 32, message: "最多 32 个字符" }]}>
+          <Input placeholder="外设上标的 ID" />
+        </Form.Item>
+        <Form.Item name="deviceName" label="名称" rules={[{ required: true, whitespace: true, message: "请填写名称" }, { max: 64, message: "最多 64 个字符" }]}>
+          <Input placeholder="例如 201 床头拉绳" />
+        </Form.Item>
+        <Form.Item name="description" label="备注" rules={[{ max: 200, message: "最多 200 个字符" }]}>
+          <Input.TextArea rows={2} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
+
 const objects = (v: unknown) => (toArray(v) ?? []).filter((x): x is Record<string, unknown> => !!x && typeof x === "object");
 
-/** AIO 蓝牙外设：[{slave_ID: SN, slave_type: 类型编号(字符串)}]，最多 19 个 */
+/**
+ * AIO 蓝牙外设：[{slave_ID: SN, slave_type: 类型编号(字符串)}]，最多 19 个。绑定就是写这个属性（平台"所属雷达"也是从这里来）。
+ * 能选的类型是设备类型字典里 groupCode = SLAVE 的 100x（2026-10-21）：1001 拉绳按钮、1002 语音、1003 门磁、1004 烟感、1005 体温贴。
+ * 平台网页端枚举里还有 1008 戒指、1009 鞋垫，但字典里 1008 是戒指（RING）、1009 是步态分析（GAIT），都不是蓝牙外设；
+ * OneNet 设备（110x、1201）属于环境传感器
+ */
 const SLAVE_CONFIG = linkedDevices({
   noun: "蓝牙外设",
   max: 19,
+  types: new Set([1001, 1002, 1003, 1004, 1005]),
+  creatable: true,
   read: (v) =>
     objects(v)
       .filter((x) => x.slave_ID)
@@ -846,6 +955,9 @@ const SLAVE_CONFIG = linkedDevices({
 const HEIMAN_SLAVE_IDS = linkedDevices({
   noun: "环境传感器",
   max: 99,
+  // OneNet 设备都算环境传感器：1101 紧急按钮 NB、1102 烟感、1103 门磁、1104 可燃气、1105 水浸、1201 紧急按钮 Cat1
+  types: new Set([1101, 1102, 1103, 1104, 1105, 1201]),
+  paused: "环境传感器已停售，暂不能添加",
   read: (v) =>
     (toArray(v) ?? [])
       .map((x): Linked | undefined => {
