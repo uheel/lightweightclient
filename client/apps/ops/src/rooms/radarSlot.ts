@@ -27,7 +27,7 @@ export const SLOT_TEXT: Record<SlotSource["kind"], string> = {
   has: "布置里已有这台雷达",
   placeholder: "放进布置里的空雷达位置（沿用那里的安装方式和区域）",
   roomType: "从户型拷一个雷达位置（沿用户型里的安装方式和区域）",
-  blank: "在布置里新建雷达位置（侧装在上墙，没有区域，装好后到设备属性里画区域）",
+  blank: "在布置里新建雷达位置（没有区域，装好后到设备属性里画区域）",
 };
 
 export function findRadar(list: PlanElement[] | undefined, test: (e: PlanElement) => boolean): PlanElement | undefined {
@@ -58,21 +58,25 @@ const isPlaceholder = (d: Radar) => (e: PlanElement) => !e.sn && !e.deviceId && 
 const newId = () =>
   crypto.randomUUID?.().replace(/-/g, "") ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-/** 空白默认配置：侧装在上墙中间、往下看，床位监护，2.8 m，监测范围裁到墙内，没有区域 */
-export function blankRadarConfig(room: { width: number; height: number }): QlConfig {
-  const base: QlConfig = { workingType: 15, installType: 1, installDirection: 1, installHeight: 2.8 };
+/** 空白默认配置：侧装在上墙中间、往下看，顶装在房间正中；床位监护，2.8 m，监测范围裁到墙内，没有区域 */
+export function blankRadarConfig(room: { width: number; height: number }, installType: 0 | 1 = 1): QlConfig {
+  const base: QlConfig = { workingType: 15, installType, installDirection: 1, installHeight: 2.8 };
+  const top = installType === 0;
   const size = containerSize(base);
-  const container = { x: Math.round(room.width / 2 - size.width / 2), y: 0, ...size };
+  const container = { x: Math.round(room.width / 2 - size.width / 2), y: top ? Math.round(room.height / 2 - size.height / 2) : 0, ...size };
   const r = radarInContainer(base);
   const x0 = Math.max(container.x, 0);
   const x1 = Math.min(container.x + size.width, room.width);
+  const y0 = Math.max(container.y, 0);
+  const y1 = Math.min(container.y + size.height, room.height);
   const s = supervisionSize(base);
   return {
     ...base,
     container,
     radar: { x: r.x, y: r.y, width: 24, height: 24 },
-    bound: { x: x0, y: 0, width: Math.max(x1 - x0, 0), height: Math.min(size.height, room.height) },
-    supervision: { x: size.width / 2 - s / 2, y: 0 },
+    bound: { x: x0, y: y0, width: Math.max(x1 - x0, 0), height: Math.max(y1 - y0, 0) },
+    // 监护区贴着雷达：侧装在容器上边中间，顶装在容器正中
+    supervision: { x: size.width / 2 - s / 2, y: top ? size.height / 2 - s / 2 : 0 },
     ranges: [],
   };
 }
@@ -108,8 +112,9 @@ export async function slotSource(d: Radar, roomId: string, design?: RoomDesign):
 /**
  * 按 slotSource 的结果把设备放进房间布置并保存。
  * area：这台雷达的安装区域；不传时沿用位置上原有的（户型里存在 qingLanConfig.extra 的，拷过来时写成房间布置用的 rangeType）
+ * installType：新建空白位置时的装法（0 顶装，1 侧装），其他来源沿用原来的
  */
-export async function placeInLayout(d: Radar, roomId: string, src: SlotSource, area?: InstallArea | null) {
+export async function placeInLayout(d: Radar, roomId: string, src: SlotSource, area?: InstallArea | null, installType: 0 | 1 = 1) {
   if (src.kind === "has") return;
   const design = await getRoomDesign(roomId);
   if (!design) throw new Error("房间布置读不到");
@@ -132,7 +137,7 @@ export async function placeInLayout(d: Radar, roomId: string, src: SlotSource, a
     const a = area !== undefined ? area : installAreaOf(el) ?? null;
     elements = [...(design.elements ?? []), withArea(withDevice(el, d), a)];
   } else {
-    const cfg = blankRadarConfig(roomSize(design));
+    const cfg = blankRadarConfig(roomSize(design), installType);
     const at = radarInRoom(cfg);
     const el = withDevice({ id: newId(), type: 3, width: 24, height: 24, x: Math.round(at.x), y: Math.round(at.y), src: "/images/plan/qinglan-radar.png", qingLanConfig: cfg }, d);
     elements = [...(design.elements ?? []), area ? withArea(el, area) : el];

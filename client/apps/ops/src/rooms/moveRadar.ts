@@ -44,8 +44,8 @@ export async function moveRadar(
   d: Radar,
   loc: { buildingId?: string; floorId?: string; roomId?: string } | null,
   plan: MovePlan,
-  /** area：放进新房间布置时这台雷达的安装区域 */
-  opts: { unbindBed: boolean; keepOldSlot: boolean; placeNew: boolean; area?: InstallArea | null },
+  /** area：放进新房间布置时这台雷达的安装区域；mount：新建空白位置时的装法（0 顶装，1 侧装） */
+  opts: { unbindBed: boolean; keepOldSlot: boolean; placeNew: boolean; area?: InstallArea | null; mount?: 0 | 1 },
 ): Promise<string[]> {
   // 床位在原房间，先解绑，免得设备挪走了床位还指着它
   if (opts.unbindBed && plan.bed?.bedId) await unbindBedDevice(plan.bed.bedId);
@@ -62,7 +62,7 @@ export async function moveRadar(
   }
   if (opts.placeNew && plan.newSlot && plan.newRoomId) {
     try {
-      await placeInLayout(d, plan.newRoomId, plan.newSlot, opts.area);
+      await placeInLayout(d, plan.newRoomId, plan.newSlot, opts.area, opts.mount);
     } catch (e) {
       failed.push(`放进新房间布置失败：${err(e)}`);
     }

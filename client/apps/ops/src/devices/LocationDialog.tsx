@@ -28,6 +28,8 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
   const [planning, setPlanning] = useState(false);
   const [opts, setOpts] = useState({ unbindBed: true, keepOldSlot: true, placeNew: true });
   const [area, setArea] = useState<InstallArea | null>(null);
+  /** 新建空白位置时的装法：1 侧装，0 顶装 */
+  const [mount, setMount] = useState<0 | 1>(1);
   const [saving, setSaving] = useState(false);
   const buildingId = Form.useWatch("buildingId", form);
   const floorId = Form.useWatch("floorId", form);
@@ -39,6 +41,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
     setReady(false);
     form.resetFields();
     setOpts({ unbindBed: true, keepOldSlot: true, placeNew: true });
+    setMount(1);
     getBuildingOptions().then(setBuildings, () => {});
     (d.roomId ? getRooms().then((list) => list.find((r) => r.id === d.roomId)) : Promise.resolve(undefined))
       .then((r) => r && form.setFieldsValue({ buildingId: r.buildingId, floorId: r.floorId, roomId: r.id }), () => {})
@@ -87,7 +90,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
     const doIt = async () => {
       setSaving(true);
       try {
-        const failed = await moveRadar(d, target ? { buildingId: v.buildingId, floorId: v.floorId, roomId: target } : null, plan, { ...opts, area });
+        const failed = await moveRadar(d, target ? { buildingId: v.buildingId, floorId: v.floorId, roomId: target } : null, plan, { ...opts, area, mount });
         if (failed.length) message.warning({ content: `位置已改，但${failed.join("；")}。可以到"诊断"页处理`, duration: 8 });
         else message.success(target ? `已改到 ${roomLabel ?? "新房间"}` : "已解除房间绑定");
         onMoved();
@@ -170,7 +173,7 @@ export default function LocationDialog({ d, open, onClose, onMoved }: { d: Radar
                 : SLOT_TEXT[plan.newSlot.kind]}
             </Checkbox>
           )}
-          {target && plan.newSlot && plan.newSlot.kind !== "has" && opts.placeNew && <SlotAreaLine slot={plan.newSlot} area={area} onChange={setArea} />}
+          {target && plan.newSlot && plan.newSlot.kind !== "has" && opts.placeNew && <SlotAreaLine slot={plan.newSlot} area={area} onChange={setArea} mount={mount} onMount={setMount} />}
           {target && plan.newSlot && plan.newSlot.kind !== "has" && !opts.placeNew && (
             <Alert type="info" showIcon message="新房间布置里不会有这台雷达，诊断页会提示区域没配" />
           )}

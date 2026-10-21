@@ -48,10 +48,13 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
   const [place, setPlace] = useState(true);
   /** 放进布置时这台雷达的安装区域（默认沿用位置上原有的） */
   const [area, setArea] = useState<InstallArea | null>(null);
+  /** 新建空白位置时的装法：1 侧装，0 顶装 */
+  const [mount, setMount] = useState<0 | 1>(1);
 
   useEffect(() => {
     if (!open) return;
     form.resetFields();
+    setMount(1);
     getRadarTypes().then(setTypes, () => {});
     getBuildingOptions().then(setBuildings, () => {});
   }, [open, form]);
@@ -94,7 +97,7 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
         try {
           // 新增接口应返回设备 id；没返回时按 SN 查一下（布置里的雷达要带 deviceId）
           const devId = typeof id === "string" && id ? id : (await getRadars()).find((x) => x.sn === sn)?.id;
-          await placeInLayout({ id: devId ?? "", sn, deviceName, deviceType: v.deviceType } as Radar, v.roomId, slot, area);
+          await placeInLayout({ id: devId ?? "", sn, deviceName, deviceType: v.deviceType } as Radar, v.roomId, slot, area, mount);
         } catch (e) {
           note = `，但放进房间布置失败（${e instanceof Error ? e.message : String(e)}），可到"诊断"页补上`;
         }
@@ -174,7 +177,7 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
             <Checkbox checked={place} onChange={(e) => setPlace(e.target.checked)}>
               {slot.kind === "roomType" && slot.typeName ? `从户型"${slot.typeName}"拷一个雷达位置（沿用户型里的安装方式和区域）` : SLOT_TEXT[slot.kind]}
             </Checkbox>
-            {place && <SlotAreaLine slot={slot} area={area} onChange={setArea} />}
+            {place && <SlotAreaLine slot={slot} area={area} onChange={setArea} mount={mount} onMount={setMount} />}
           </Form.Item>
         )}
         <Form.Item name="description" label="备注">

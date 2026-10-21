@@ -44,10 +44,38 @@ export default function AreaSelect({
   );
 }
 
-/** 放进布置时选安装区域；房间里已经有别的雷达时提醒选一下，分清哪台装在哪 */
-export function SlotAreaLine({ slot, area, onChange }: { slot: SlotSource; area: InstallArea | null; onChange: (a: InstallArea | null) => void }) {
+/** 放进布置时选安装区域；房间里已经有别的雷达时提醒选一下，分清哪台装在哪。新建空白位置时还要选装法（顶装 / 侧装） */
+export function SlotAreaLine({
+  slot,
+  area,
+  onChange,
+  mount,
+  onMount,
+}: {
+  slot: SlotSource;
+  area: InstallArea | null;
+  onChange: (a: InstallArea | null) => void;
+  mount?: 0 | 1;
+  onMount?: (m: 0 | 1) => void;
+}) {
   return (
     <div className="slot-area">
+      {slot.kind === "blank" && onMount && (
+        <>
+          <span>装法</span>
+          <Select
+            size="small"
+            value={mount ?? 1}
+            onChange={onMount}
+            popupMatchSelectWidth={false}
+            style={{ width: 150 }}
+            options={[
+              { value: 1, label: "侧装 · 上墙中间" },
+              { value: 0, label: "顶装 · 房间正中" },
+            ]}
+          />
+        </>
+      )}
       <span>装在</span>
       <AreaSelect size="small" value={area ?? undefined} onChange={onChange} placeholder="选择安装区域" style={{ width: 128 }} />
       <span className="muted small">
