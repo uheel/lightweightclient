@@ -3,7 +3,8 @@ import { App, Button, Tabs, Tooltip } from "antd";
 import { DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, POSTURE, type LiveData } from "@radar/core";
-import { getDeviceReport, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, isSlim, WORKING_TYPE, type DeviceReport, type Radar, type RoomInfo } from "../api/device";
+import { getDeviceReport, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, isSlim, supportsCall, WORKING_TYPE, type DeviceReport, type Radar, type RoomInfo } from "../api/device";
+import CallTab from "./CallTab";
 import { lastSeen } from "../pages/DevicesPage";
 import { evaluate, GRADE_TEXT } from "./angle";
 import AlarmTab from "./AlarmTab";
@@ -64,6 +65,18 @@ export default function DeviceDetail({
   const [rep, setRep] = useState<DeviceReport>({});
   const [hbLoading, setHbLoading] = useState(true);
   const [tab, setTab] = useState("overview");
+  /** 这个型号能通话（有呼叫方式属性）才显示通话页、告警里的呼叫主机 */
+  const [callable, setCallable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    supportsCall(d.deviceType).then(
+      (v) => alive && setCallable(v),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [d.deviceType]);
   const spotDef = spot && SPOTS[spot.spot];
   useEffect(() => {
     if (!spotDef) return;
@@ -309,8 +322,9 @@ export default function DeviceDetail({
           { key: "overview", label: "概览", children: overview },
           { key: "angle", label: "安装角度", children: <AngleTab sn={d.sn} deviceType={d.deviceType} installType={installType} online={link.online} /> },
           { key: "replay", label: "时间回溯", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
-          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} focusProp={spotDef?.prop && spot ? { name: spotDef.prop, seq: spot.seq } : undefined} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
-          { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
+          { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} focusProp={spotDef?.prop && spot ? { name: spotDef.prop, seq: spot.seq } : undefined} plan={plan} roomId={d.roomId} onGoCall={callable ? () => setTab("call") : undefined} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
+          { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} callable={callable} onGoCall={() => setTab("call")} /> },
+          ...(callable ? [{ key: "call", label: "通话", children: <CallTab d={d} online={link.online} onGoAlarm={() => setTab("alarm")} /> }] : []),
           // 表达式实验只在开发时用，打包发布的版本不显示
           ...(import.meta.env.DEV ? [{ key: "expr", label: "表达式", children: <ExprTab d={d} online={link.online} /> }] : []),
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },

@@ -31,6 +31,23 @@ const BUSY = 103;
 const BUSY_RETRY_MS = 10_000;
 const UNGROUPED = "__ungrouped";
 const GROUP_KEY = "ops:prop-group";
+
+/** 通话相关的属性：都在"通话"页改（CallTab），设备属性里不显示 */
+const CALL_PROPS = new Set([
+  "talk_type_sel",
+  "talk_master_number",
+  "talk_call_number_bak",
+  "talk_key1_number",
+  "talk_key2_number",
+  "talk_key3_number",
+  "talk_local_maxtime",
+  "talk_call_timeout",
+  "call_record_EN",
+  "call_record_url",
+  "sip_account",
+  "sip_password",
+  "sip_server",
+]);
 const SECRET = /pass|pwd|token/i;
 
 type Command = "get-property" | "set-property";
@@ -116,8 +133,11 @@ export default function PropertyTab({
   layout,
   onLayoutSynced,
   focusProp,
+  onGoCall,
 }: {
   sn: string;
+  /** 通话配置分组里提示去"通话"页（能通话的型号才传） */
+  onGoCall?: () => void;
   /** 从快速开始跳过来：切到这个属性所在的分组（不记成下次默认的分组） */
   focusProp?: { name: string; seq: number };
   online: boolean;
@@ -228,9 +248,10 @@ export default function PropertyTab({
   const visible = (p: PropertyDef) => visibleBy(p.fieldProps?.visibleExpression, ctx);
   const changed = (schema?.properties ?? []).filter((p) => !readOnly(p) && !p.isBuiltIn && visible(p) && isModified(p.propertyName));
   const groups = schema ? groupsOf(schema) : [];
-  const rows = (schema?.properties ?? [])
-    .filter((p) => (group === UNGROUPED ? !p.propertyGroupStringCode : p.propertyGroupStringCode === group))
-    .filter(visible);
+  const inGroup = (schema?.properties ?? []).filter((p) => (group === UNGROUPED ? !p.propertyGroupStringCode : p.propertyGroupStringCode === group));
+  // 通话相关的属性只在"通话"页改，这里不显示，免得两处都能改
+  const rows = inGroup.filter((p) => !CALL_PROPS.has(p.propertyName)).filter(visible);
+  const hasCallProps = inGroup.some((p) => CALL_PROPS.has(p.propertyName));
 
   function setValue(name: string, v: unknown) {
     setEdits((e) => ({ ...e, [name]: v }));
@@ -682,6 +703,18 @@ export default function PropertyTab({
               <h2>{groupLabel}</h2>
               {groupText && <p>{groupText}</p>}
             </header>
+            {hasCallProps && (
+              <div className="pp-layout">
+                <span>
+                  紧急号码、备用号码、云对讲 / 局域网、SIP 号、呼叫等待、通话录音这些通话设置都在<b>通话</b>页里改。
+                </span>
+                {onGoCall && (
+                  <Button size="small" onClick={onGoCall}>
+                    去通话页
+                  </Button>
+                )}
+              </div>
+            )}
             {showLayoutBar && (
               <div className="pp-layout" data-spot="layout">
                 <span>
@@ -728,7 +761,7 @@ export default function PropertyTab({
                 ))}
               </div>
             )}
-            {!rows.length && <p className="pp-empty">这一组现在没有要显示的设置。</p>}
+            {!rows.length && !hasCallProps && <p className="pp-empty">这一组现在没有要显示的设置。</p>}
           </section>
         </div>
 

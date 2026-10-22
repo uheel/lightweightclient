@@ -273,10 +273,24 @@ export function durationOf(s: Scene) {
  * 单台设备开 / 关一个场景，返回要下发的完整列表（已停用的场景平台保存时也会清掉，这里同样不带）。
  * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area，给了 duration（分钟）时改成待够这么久才触发；关：去掉 names 里的所有同名场景。
  */
+/** 场景动作：呼叫管理主机（雷达拨紧急号码 talk_master_number，不带参数）、播放本地音频 */
+export const CALL_MASTER = "Service_call_master";
+export const PLAY_AUDIO = "Service_play_audiofile";
+
+export const callsMaster = (s?: Scene) => !!s?.actions?.some((a) => a.name === CALL_MASTER);
+export const playsAudio = (s?: Scene) => !!s?.actions?.some((a) => a.name === PLAY_AUDIO);
+
+/** 加上或去掉"呼叫管理主机"动作。平台规定和"播放本地音频"只能二选一 */
+export function withCallMaster(s: Scene, on: boolean): Scene {
+  const rest = (s.actions ?? []).filter((a) => a.name !== CALL_MASTER);
+  if (on && playsAudio(s)) throw new Error("这个场景会播放音频，平台规定播放音频和呼叫管理主机只能二选一");
+  return { ...s, actions: on ? [...rest, { type: "method", name: CALL_MASTER }] : rest };
+}
+
 export function toggleScene(
   current: Scene[],
   names: string[],
-  tpl?: { name: string; scene: Scene; area?: number; duration?: number; deviceType?: number },
+  tpl?: { name: string; scene: Scene; area?: number; duration?: number; deviceType?: number; callMaster?: boolean },
 ) {
   const list = current.filter((s) => !s.isDisabled && !names.includes(s.sceneName));
   if (tpl) {
@@ -286,6 +300,7 @@ export function toggleScene(
       scene = fillArea(scene, tpl.area);
     }
     if (tpl.duration !== undefined) scene = withMinutes(scene, tpl.duration, tpl.deviceType);
+    if (tpl.callMaster !== undefined) scene = withCallMaster(scene, tpl.callMaster);
     const old = current.find((s) => !s.isDisabled && s.sceneName === tpl.name);
     list.push(old ? { ...scene, id: old.id } : scene);
   }

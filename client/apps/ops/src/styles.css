@@ -33,6 +33,11 @@
 .dev-list-title { display: flex; align-items: baseline; gap: 10px; }
 .dev-list-title h1 { margin: 0; font-size: 15px; font-weight: 600; }
 .dev-list-title .muted { font-size: 12px; }
+.dev-list-search { display: flex; gap: 6px; }
+.dev-list-search .dev-cat { flex: none; width: 104px; }
+.ops-grid.master-rooms { grid-template-columns: minmax(240px, 2fr) minmax(0, 3fr); }
+@media (max-width: 1300px) { .ops-grid.master-rooms { grid-template-columns: minmax(0, 1fr); } }
+.master-tree { max-height: 420px; overflow: auto; border: 1px solid #EEF0F5; border-radius: 6px; padding: 6px 4px; }
 .seg { display: flex; background: #F1F2F7; border-radius: 6px; padding: 2px; }
 .seg button {
   flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 4px 0; font-size: 12px; color: #5B6078; cursor: pointer; font-family: inherit;
@@ -649,3 +654,13 @@
 .expr-run-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .expr-run-head code { word-break: break-all; }
 .expr-result { margin: 6px 0 0; padding: 6px 8px; background: #F6F7FB; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }
+/* 通话页：告警打给谁 / 管理主机 / 线路设置 / 最近通话 */
+.call-top { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-bottom: -4px; }
+.call-kv { grid-template-columns: 84px 1fr; row-gap: 12px; align-items: start; }
+.call-kv dt { padding-top: 5px; }
+.call-keys { display: flex; flex-direction: column; gap: 6px; }
+.call-key { display: flex; align-items: flex-start; gap: 6px; }
+.call-key > .muted { width: 12px; padding-top: 6px; text-align: right; }
+.call-key > div { flex: 1; min-width: 0; }
+.call-line { background: #fff; }
+.call-save { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

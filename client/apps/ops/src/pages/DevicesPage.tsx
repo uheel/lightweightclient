@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Empty, Input, Spin } from "antd";
+import { App, Button, Empty, Input, Select, Spin } from "antd";
 import { HddOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
-import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
+import { getAllDevices, getDeviceTypeGroups, getDeviceTypeMap, getRadars } from "../api/device";
+import { getMasters } from "../api/master";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
+import BasicDetail from "../devices/BasicDetail";
+import MasterDetail from "../devices/master/MasterDetail";
+import { CATS, catLabel, catOf, type DevCat, type DevRow } from "../devices/category";
 import { useLiveMap } from "../devices/useLiveMap";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import type { Spot } from "../rooms/qinglan";
@@ -13,7 +17,7 @@ import { GuideEmpty } from "../guide/GuideEmpty";
 
 type Filter = "all" | "online" | "offline" | "disabled";
 
-const FILTERS: { key: Filter; label: string; test: (d: Radar, l: DeviceLink) => boolean }[] = [
+const FILTERS: { key: Filter; label: string; test: (d: DevRow, l: DeviceLink) => boolean }[] = [
   { key: "all", label: "全部", test: () => true },
   { key: "online", label: "在线", test: (d, l) => l.online && !d.isDisabled },
   { key: "offline", label: "离线", test: (d, l) => !l.online && !d.isDisabled },
@@ -42,12 +46,57 @@ export function lastSeen(t?: string | number) {
   return d.isValid() ? d.fromNow() : t;
 }
 
-/** 设备工作台：左侧雷达列表（客户端筛选，↑↓ 切换），右侧设备详情 */
+/** 选中的设备类型记在本机 */
+const CAT_KEY = "ops:dev-cat";
+function savedCat(): DevCat | "all" {
+  try {
+    const v = localStorage.getItem(CAT_KEY);
+    return v && CATS.some((c) => c.key === v) ? (v as DevCat) : "all";
+  } catch {
+    return "all";
+  }
+}
+
+/**
+ * 机构里的全部设备：雷达用雷达列表（字段多），管理主机用主机列表（带 SIP），其余类型用全类型列表；
+ * 三个接口并发取，按 id 去重（同一台以前面的为准）
+ */
+async function loadAllDevices(): Promise<DevRow[]> {
+  const [radars, masters, all, groups] = await Promise.all([
+    getRadars(),
+    getMasters().catch(() => []),
+    getAllDevices().catch(() => []),
+    getDeviceTypeGroups().catch(() => new Map<number, string>()),
+  ]);
+  const seen = new Set<string>();
+  const rows: DevRow[] = [];
+  const add = (r: DevRow) => {
+    if (seen.has(r.id)) return;
+    seen.add(r.id);
+    rows.push(r);
+  };
+  for (const r of radars) add({ ...r, cat: "radar" });
+  for (const m of masters) add({ ...m, cat: "master", master: m });
+  for (const x of all)
+    add({
+      ...x,
+      deviceName: x.deviceName ?? "",
+      orgId: x.orgId ?? "",
+      orgName: x.orgName ?? "",
+      isOnline: !!x.isOnline,
+      isDisabled: !!x.isDisabled,
+      cat: catOf(x.deviceType, groups),
+    });
+  return rows;
+}
+
+/** 设备工作台：左侧设备列表（按类型、状态筛选，↑↓ 切换），右侧按类型显示对应的详情和配置 */
 export default function DevicesPage() {
   const { message } = App.useApp();
-  const [list, setList] = useState<Radar[]>([]);
+  const [list, setList] = useState<DevRow[]>([]);
   const [types, setTypes] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [cat, setCat] = useState<DevCat | "all">(savedCat);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [selId, setSelId] = useState<string>();
@@ -70,7 +119,7 @@ export default function DevicesPage() {
     setLoading(true);
     const pt = perfTimer("设备列表");
     try {
-      const l = await getRadars();
+      const l = await loadAllDevices();
       pt.lap("fetch");
       pt.info("rows", l.length);
       setList(l);
@@ -88,9 +137,11 @@ export default function DevicesPage() {
     getDeviceTypeMap().then(setTypes, () => {});
   }, [load]);
 
-  const subscribeAll = list.length <= SUBSCRIBE_ALL_MAX;
-  const selSn = list.find((d) => d.id === selId)?.sn;
-  const liveSns = useMemo(() => (subscribeAll ? list.map((d) => d.sn) : selSn ? [selSn] : []), [subscribeAll, list, selSn]);
+  // 实时推送只有雷达有
+  const radars = useMemo(() => list.filter((d) => d.cat === "radar"), [list]);
+  const subscribeAll = radars.length <= SUBSCRIBE_ALL_MAX;
+  const selSn = radars.find((d) => d.id === selId)?.sn;
+  const liveSns = useMemo(() => (subscribeAll ? radars.map((d) => d.sn) : selSn ? [selSn] : []), [subscribeAll, radars, selSn]);
   const liveMap = useLiveMap(liveSns);
   // 判断"10 分钟内有没有数据"用的当前时间，每 30 秒更新
   const [now, setNow] = useState(Date.now());
@@ -103,32 +154,50 @@ export default function DevicesPage() {
     for (const d of list) m.set(d.id, deviceLink({ live: liveMap[d.sn], platformOnline: d.isOnline, now: Math.max(now, liveMap[d.sn]?.updatedAt ?? 0) }));
     return m;
   }, [list, liveMap, now]);
-  const linkOf = (d: Radar) => links.get(d.id)!;
+  const linkOf = (d: DevRow) => links.get(d.id)!;
+
+  /** 每种类型的台数，下拉里只列机构里有的类型 */
+  const catCounts = useMemo(() => {
+    const m = new Map<DevCat, number>();
+    for (const d of list) m.set(d.cat, (m.get(d.cat) ?? 0) + 1);
+    return m;
+  }, [list]);
+  const ofCat = useMemo(() => (cat === "all" ? list : list.filter((d) => d.cat === cat)), [list, cat]);
+
+  function changeCat(c: DevCat | "all") {
+    setCat(c);
+    try {
+      localStorage.setItem(CAT_KEY, c);
+    } catch {
+      /* 存不了就只在本次生效 */
+    }
+  }
 
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.key, list.filter((d) => f.test(d, links.get(d.id)!)).length])) as Record<Filter, number>,
-    [list, links],
+    () => Object.fromEntries(FILTERS.map((f) => [f.key, ofCat.filter((d) => f.test(d, links.get(d.id)!)).length])) as Record<Filter, number>,
+    [ofCat, links],
   );
 
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const test = FILTERS.find((f) => f.key === filter)!.test;
-    return list
+    return ofCat
       .filter((d) => test(d, links.get(d.id)!))
       .filter((d) => !kw || [d.deviceName, d.sn, d.roomName, d.realName].some((v) => v?.toLowerCase().includes(kw)))
       // 在线的排前面，其次按平台记录的最近活动时间（不按实时数据排序，免得列表一直跳）
       .sort((a, b) => Number(links.get(b.id)!.online) - Number(links.get(a.id)!.online) || (b.lastActivityTime ?? "").localeCompare(a.lastActivityTime ?? ""));
-  }, [list, links, filter, q]);
+  }, [ofCat, links, filter, q]);
 
   const sel = shown.find((d) => d.id === selId) ?? list.find((d) => d.id === selId);
 
-  // 默认选中第一台
+  // 默认选中第一台；换了类型、选中的不是这一类时，改选这一类的第一台
   useEffect(() => {
-    if (!selId && shown.length) setSelId(shown[0].id);
-  }, [selId, shown]);
+    if ((!selId || !ofCat.some((d) => d.id === selId)) && shown.length) setSelId(shown[0].id);
+  }, [selId, shown, ofCat]);
 
   /** 清掉筛选并选中某台设备 */
   function focusDevice(id: string) {
+    changeCat("all");
     setFilter("all");
     setQ("");
     setSelId(id);
@@ -196,6 +265,13 @@ export default function DevicesPage() {
     el.addEventListener("pointercancel", up);
   }
 
+  /** 列表第二行 SN 后面的说明：雷达写房间，管理主机写 SIP 号和通讯录台数，其他写设备类型 */
+  function rowSub(d: DevRow) {
+    if (d.cat === "radar") return d.roomName || "未绑定房间";
+    if (d.cat === "master") return [cat === "all" && "管理主机", d.master?.sipUserName && `SIP ${d.master.sipUserName}`, `${d.master?.deviceCount ?? 0} 台雷达`].filter(Boolean).join(" · ");
+    return (d.deviceType !== undefined && types.get(d.deviceType)) || catLabel(d.cat);
+  }
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
@@ -212,20 +288,34 @@ export default function DevicesPage() {
       <section className="dev-list" style={{ width: listW }} onKeyDown={onKeyDown} hidden={listHidden}>
         <div className="dev-list-head">
           <div className="dev-list-title">
-            <h1>雷达设备</h1>
+            <h1>设备</h1>
             <span className="muted">
-              {list.length} 台 · {counts.online} 在线
+              {ofCat.length} 台 · {counts.online} 在线
             </span>
             <Button type="text" icon={<PlusOutlined />} onClick={() => setAdding(true)} title="添加设备" style={{ marginLeft: "auto" }} />
             <Button type="text" icon={<ReloadOutlined />} onClick={load} title="刷新" />
           </div>
-          <Input
-            allowClear
-            prefix={<SearchOutlined style={{ color: "#8A8FA8" }} />}
-            placeholder="名称 / SN / 房间 / 长者"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          <div className="dev-list-search">
+            <Select
+              className="dev-cat"
+              value={cat}
+              onChange={changeCat}
+              popupMatchSelectWidth={false}
+              // 选中后只显示类型名，台数在下拉里看
+              labelRender={({ value }) => (value === "all" ? "全部类型" : catLabel(value as DevCat))}
+              options={[
+                { value: "all", label: `全部类型 ${list.length}` },
+                ...CATS.filter((c) => catCounts.get(c.key) || c.key === cat).map((c) => ({ value: c.key, label: `${c.label} ${catCounts.get(c.key) ?? 0}` })),
+              ]}
+            />
+            <Input
+              allowClear
+              prefix={<SearchOutlined style={{ color: "#8A8FA8" }} />}
+              placeholder="名称 / SN / 房间 / 长者"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
           <div className="seg">
             {FILTERS.map((f) => (
               <button key={f.key} className={f.key === filter ? "on" : ""} onClick={() => setFilter(f.key)}>
@@ -255,18 +345,18 @@ export default function DevicesPage() {
                 <span className="dev-row-main">
                   <b>{d.deviceName || d.sn}</b>
                   <small>
-                    <span className="mono">{d.sn}</span> · {d.roomName || "未绑定房间"}
+                    <span className="mono">{d.sn}</span> · {rowSub(d)}
                   </small>
                 </span>
                 {l.source === "device" ? (
                   <span className={`dev-row-last${l.online ? "" : " off"}`} title="最近一次收到设备数据">
                     {lastSeen(l.at)}
                   </span>
-                ) : (
+                ) : d.cat === "radar" ? (
                   <span className="dev-row-last off plat" title="还没收到这台设备的数据，显示的是平台记录，可能有延迟">
                     {lastSeen(d.lastActivityTime)}
                   </span>
-                )}
+                ) : null}
               </div>
               );
             })
@@ -274,7 +364,7 @@ export default function DevicesPage() {
         </div>
         <div className="dev-list-foot muted">
           显示 {shown.length} / {list.length} · ↑↓ 切换
-          {!subscribeAll && <div>超过 {SUBSCRIBE_ALL_MAX} 台：只有选中的设备按实时数据判断在线，斜体为平台记录</div>}
+          {!subscribeAll && (cat === "all" || cat === "radar") && <div>超过 {SUBSCRIBE_ALL_MAX} 台：只有选中的设备按实时数据判断在线，斜体为平台记录</div>}
         </div>
       </section>
       <div
@@ -287,7 +377,7 @@ export default function DevicesPage() {
         onDoubleClick={() => saveListW(LIST_W_DEFAULT)}
       />
       <section className="dev-detail">
-        {!loading && !list.length ? (
+        {!loading && !radars.length && (cat === "all" || cat === "radar") ? (
           <GuideEmpty
             icon={<HddOutlined />}
             title="添加第一台雷达"
@@ -299,6 +389,10 @@ export default function DevicesPage() {
               添加雷达
             </Button>
           </GuideEmpty>
+        ) : sel?.cat === "master" ? (
+          <MasterDetail key={sel.id} d={sel} radars={radars} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onChanged={load} />
+        ) : sel && sel.cat !== "radar" ? (
+          <BasicDetail key={sel.id} d={sel} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onRenamed={load} />
         ) : sel ? (
           <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} spot={spot?.id === sel.id ? spot : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} onDeleted={() => onDeleted(sel.id)} />
         ) : (

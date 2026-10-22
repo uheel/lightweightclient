@@ -503,6 +503,70 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 日志 rawData 里有**明文**的 SIP 密码（`talk_auth_pass`）、远程调试 token，以及 slim 设备的 Wi‑Fi 和 MQTT 密码。展示或导出日志时必须打码
 - 只要能往 `/iot` topic 发消息，就能改设备配置、重启设备、推 OTA、开远程调试。所以 broker 一侧的 ACL 是关键安全边界，不能让第三方客户端拿到写权限
 
+## 管理主机与 SIP 通话（2026-10-22 读平台前端 `common` 模块 + 只读查询邻聚万家、李虎机构的数据和通信日志）
+
+管理主机是 deviceType 3 的硬件（SN 形如 `MNG1CB8BA…`），自己注册到 SIP 服务器，和雷达双向通话。平台当前的 SIP 服务商是"申瓯"，地址 `sip.igoodlife.com:5060`（`GET /api/sip-provider/current`）。
+
+### 一台雷达怎么接到管理主机（邻聚万家 `MNG1CB8BA433CC4` 的日志顺序）
+
+1. 雷达云对讲需要有自己的 SIP 号：`talk_local_number` / `talk_auth_pass` / `talk_sip_server`（`GET /api/device-sip/available` 取一个空闲账号）
+2. 雷达"通话配置"里选所属管理主机（`/api/device-config/call` 的 `masterId`），平台下发 `IOT.setproperty {talk_master_number: 主机的 SIP 号}`，再下发 `{talk_type_sel: 1}`（0 局域网 / 1 云对讲）
+3. 管理主机勾选覆盖哪些房间（`POST /api/master/room-keys {deviceId, sn, roomKeys:[roomId…], issued}`），平台把这些房间里的雷达作为通讯录下发给主机（`update.devices`，见下）
+4. 雷达场景的动作里加 `{type:"method", name:"Service_call_master"}`（不带参数），场景触发时雷达拨 `talk_master_number`。平台网页端限制：一个场景最多一个呼叫管理主机，且和"播放本地音频"二选一。邻聚万家的离床、跌倒、疑似跌倒、蓝牙按钮场景都是 告警 + 呼叫主机。李虎机构的距离test（…6711）也有，`talk_master_number` = 10056
+5. 手动呼叫：`POST /api/device/call {sn, account}` → `IOT.callservice Service_call_master {call_ID: account}`（号码或手机）；挂断 `Service_call_handup`
+
+### 紧急号码和场景的关系（2026-10-22 平台前端 + 8 台雷达最近一次呼出前后的通信日志）
+
+- 雷达**只在场景触发时拨号**：抽查的每一次雷达呼出，同一秒都有 `Device.postevent {Event_auto_trig:{id:场景}}`，触发的场景都带"呼叫管理主机"动作。蓝牙语音 / 按钮这类外设事件（`Event_slave_data … event:"bt"`）也是先触发场景（如"语音求助"、"蓝牙按钮"），再由场景拨号。没看到不经过场景的呼出
+- 场景里能打电话的动作有两种（平台前端 `CallMaster` / `CallAnyNumber`）：
+  - `Service_call_master`（"呼叫管理主机"）：不带参数，**拨紧急号码 `talk_master_number`**，号码是什么就拨什么，不一定是主机
+  - `Service_call_number`（"呼叫指定号码"）：动作里自带 `number`（手机号或 SIP 号，最长 14 位），不用紧急号码
+- 紧急号码的输入框可选三种类型：管理主机（主机的 SIP 号）/ 手机号 / SIP 号。"呼叫备用号码"开启后，紧急号码不通时依次拨备用号码 1～3（平台表单说明，没实测）
+- 手机号前缀按 SIP 服务器，不分本地外地：40 个机构全部 118 次雷达拨手机，经 `sip.igoodlife.com` 的 105 次全是 `0` + 手机号（152 / 153 / 155 / 189 号段都有接通），经 `rtcdev.ucpaas.com` 的全是 `0086` + 手机号，没出现过直接拨 11 位的。平台不做转换（设备照存的号码拨；网页端的号码输入框按 11 位手机号认，带 0 的会被当成 SIP 号），运维端在客户端里转换：用户只输入、只看到 11 位，存到设备时加前缀（`apps/ops/src/devices/dialNumber.ts`）
+- 没有管理主机也能用：紧急号码填手机号，云对讲下经 SIP 服务商转到电话网。通话记录里雷达拨手机 4700 次，号码前加 0，例如 `015530230672@sip.igoodlife.com:5060`。局域网模式没有服务器，只能拨到 IP 上的设备
+- 平台的"模拟设备触发场景"（`IOT.callservice Service_simulation_scene {scene_id}`）会让设备真的执行场景动作，包括拨号：2026-10-22 23:23:18 在李虎 AIO雷达（…627d）上模拟"床上坐起"，23:23:19 就有一条呼出 `015232099519@sip.igoodlife.com:5060`；另一个按钮"模拟平台触发场景"只在平台侧走告警流程，不呼叫、不播音频（按钮说明）
+- 通话记录的 `createdAt − startAt` 约等于振铃时长：上面那次未接，记录在 32 秒后生成，和 `talk_call_timeout` = 30 秒对得上；未接的通话也可能有 `audioFile`
+- 被叫是主机的 SIP 号时平台不一定认出来：东堃健康雷达拨 `60000181559272@rtcdev.ucpaas.com:25060`，记录里 `calleeDeviceType` 是 0
+
+### 局域网和云对讲的区别（2026-10-22 统计 64 个有主机的机构共 24960 条通话记录 + 雷达心跳 / 通信日志）
+
+- **云对讲**（`talk_type_sel = 1`）：雷达和主机都注册到 SIP 服务器（雷达心跳 `sip_reg: "register"`），被叫写成 `号码@sip.igoodlife.com:5060` 这类服务器地址，由服务器转接，不要求在同一网段
+- **局域网**（`talk_type_sel = 0`）：**不注册任何 SIP 服务器**（心跳 `sip_reg` 为空），雷达直接向 `紧急号码@主机IP` 发起点对点呼叫，例如 `123456@10.84.18.131`。号码基本不起作用（多数是默认值 123456），关键是主机 IP 对不对、网络能不能通
+- 局域网能用：泰康之家·鹭园 1997 次呼主机，1008 次接通，雷达 192.168.111.60 → 主机 10.84.18.131，跨网段但路由可达
+- 局域网打不通的主要原因是**雷达拨的 IP 不是主机**：
+  - 很多机构的雷达拨 `192.168.2.250`（象屿慈爱 710 次、寿福康、录屏演示、近邻驿站、启明学校…），这些机构的主机都不在这个地址，应该是出厂默认值
+  - 东堃健康的雷达拨 172.16.20.146，平台记录的主机 IP 是 192.168.5.170（主机换过 IP 或换过主机）
+- 平台从不把主机 IP 下发给雷达：type 6 的属性字典里没有主机 IP 这一项，通信日志里也没有这类下发；网页端通话表单里的隐藏字段 `talk_master_IP` 初始值是 `"123456"`，是遗留字段。雷达怎么得知主机 IP 没查到（推测是主机拿到通讯录后在局域网里通知雷达，所以要主机在线、覆盖了房间并下发过通讯录）
+- 网页端在局域网模式、主机没有 IP 时会提示"局域网呼叫未能生效：当前设备还未和管理主机关联，请确认设备已安装到房间，且在管理主机的管理房间配置中关联了此设备所在房间"
+
+### 管理主机的 MQTT 协议（和雷达不同）
+
+topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{command, data, tag, time, status, error}`，`tag` 对应请求和应答。
+
+| command | 方向 | 内容 |
+|---|---|---|
+| `heartbeat` | 上 | `{version}` |
+| `sip.register` | 上 | `status` 1 已注册 / 0 未注册，主机约每 15 秒报一次 |
+| `update.devices` / `get.devices` | 下（get 由主机发起） | 通讯录：`[{deviceId, roomName, deviceName, sn, realName, age, gender, deviceType, showRespiratoryRate, area, ip, callNum, sipAccount, callType}]`，`callNum` = 雷达 SIP 号 |
+| `update.status` | 下 | 平台持续推这些雷达的实时状态 `[{deviceId, heartRate, respirationRate, physicalActivityIndex, humanTargetNumber, humanTargetPosition, status}]` |
+| `get.property` | 下 | 读 `callNum / ip / gateway / mask` |
+| `get.uploadurl` | 主机发起 | 平台回通话录音上传地址 `http://rd.igoodlife.com/api/call-record/upload` |
+
+### 接口
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/device/v3/master-pages`、`/api/master`（CRUD） | 主机列表：`sn, deviceName, isOnline, firmwareVersion, ipAddress, sipEnable, sipServer, sipUserName, isSipRegister, sipRegisterAt, sipIssueStatus(2 = 已下发), deviceCount` |
+| `GET /api/master/available-list` | 机构里的主机（不一定带 `sipUserName`） |
+| `GET /api/master/info?deviceId=雷达` | **只返回覆盖房间里已有这台雷达所在房间的主机**（李虎 距离test 返回空，邻聚万家 卧室返回它的主机）。平台网页端"所属管理主机"下拉只用它，所以主机没覆盖这个房间时根本选不到 |
+| `GET/PUT /api/device-config/call` | 雷达通话配置。GET 返回平台记录 `{deviceId, masterId?, call:{…}}`，常常只有 `talk_sip_server`、没有 `masterId`；PUT `{masterId, call:{talk_type_sel, talk_master_number, talk_local_number, talk_auth_pass, talk_sip_server, …}, sn, deviceId, saveOnly}`，平台和记录比、只把变了的项 `IOT.setproperty` 下发，返回 seq，没变化返回 0。网页端选了主机时紧急号码填主机的 SIP 号 |
+| `GET /api/device-sip/available` | 一个空闲的 SIP 账号 `{sipAccount, sipPassword}`（网页端"随机选择 SIP"），保存通话配置时才绑给雷达 |
+| `GET/POST /api/master/room-keys`、`GET /api/device/v4/master/issue-devices-preview?deviceId=` | 主机覆盖的房间、将下发的通讯录 |
+| `GET /api/device/v4/master-sip/preview`、`POST …/enable`、`…/switch`、`…/disable {deviceId}`、`GET /api/master/sip-account-status?id=` | 给主机分配 / 换 / 停用 SIP 账号 |
+| `POST /api/device-sip/{id}/test`、`GET /api/master/read-property?sn=`、`POST /api/master/reboot?sn=`、`GET /api/master/relation-device-pages` | 测试账号、读主机属性、重启 |
+| `GET /api/call-record/pages` | 通话记录（含录音文件 `audioFile`），按请求头的机构返回，`deviceId` 参数不起作用。`callType` 1 主机→雷达(IP)、2 主机→SIP、3 雷达→主机、4 雷达→SIP、5 雷达→手机，**但不可靠**：主机呼雷达也记成 3（主叫是主机），方向要看 `callerSn` / `callerDeviceType` |
+| `/api/room/room-tree?deviceId=主机`、`/api/master/room-keys` | **按请求头的机构取数据**：在平台或上级机构下查别的机构的主机，房间树是空的，要用主机所属机构的 orgid 请求 |
+
 ## 场景模板与设备场景（2026-10-15 整理）
 
 ### 接口

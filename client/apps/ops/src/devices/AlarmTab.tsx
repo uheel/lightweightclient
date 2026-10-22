@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, InputNumber, Select, Spin, Switch, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, InputNumber, Select, Spin, Switch, Tag, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { getStoredProperties, type Radar, type StoredProperty } from "../api/device";
+import { awaitDeviceResponse, getStoredProperties, readDeviceProperties, type Radar, type StoredProperty } from "../api/device";
+import { getMasterOptions, getRadarCallConfig, type MasterOption } from "../api/master";
+import { isMobileNumber, toShownNumber } from "./dialNumber";
 import {
   fillVoiceIds,
   getDeviceScenes,
@@ -19,7 +21,7 @@ import {
   type RadarLayout,
   type Scene,
 } from "../api/scene";
-import { durationOf, maxMinutes, pickTemplates, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
+import { callsMaster, durationOf, maxMinutes, pickTemplates, playsAudio, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
 import { parseArray } from "../rooms/qinglan";
 
 /**
@@ -87,7 +89,19 @@ interface Row {
   current?: Scene;
 }
 
-export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
+export default function AlarmTab({
+  d,
+  online,
+  callable,
+  onGoCall,
+}: {
+  d: Radar;
+  online: boolean;
+  /** 这个型号能通话：每种告警可以选触发时呼叫管理主机 */
+  callable?: boolean;
+  /** 跳到通话页选所属管理主机 */
+  onGoCall?: () => void;
+}) {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -101,6 +115,12 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   const [pick, setPick] = useState<Record<string, number>>({});
   /** 输入框里改过、还没下发的持续时间（分钟） */
   const [dur, setDur] = useState<Record<string, number | null>>({});
+  /** 所属管理主机（通话页选的）；undefined = 没选 */
+  const [master, setMaster] = useState<MasterOption>();
+  /** 紧急号码和呼叫方式："拨紧急号码"动作拨的就是它（先用平台记录，在线时读设备的现值） */
+  const [emergency, setEmergency] = useState<{ number: string; type?: number }>({ number: "" });
+  /** 未开启的告警勾的"拨紧急号码"，开启时带上 */
+  const [pendingCall, setPendingCall] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string>();
   const [result, setResult] = useState<{ label: string; ok: boolean; text?: string }>();
   /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
@@ -110,12 +130,19 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
     setLoading(true);
     setError(undefined);
     try {
-      const [all, current, layouts, props] = await Promise.all([
+      const [all, current, layouts, props, mine] = await Promise.all([
         getSceneTemplates(),
         getDeviceScenes(d.id),
         d.roomId ? getRoomLayouts(d.roomId).catch(() => undefined) : undefined,
         getStoredProperties(d.sn).catch(() => ({}) as Record<string, StoredProperty>),
+        callable ? Promise.all([getRadarCallConfig(d), getMasterOptions(d)]).catch(() => undefined) : undefined,
       ]);
+      // 平台不一定记了 masterId：没记时按紧急号码对上主机的 SIP 号
+      const number = String(props.talk_master_number?.value ?? "");
+      const type = props.talk_type_sel?.value;
+      setEmergency({ number, type: type === undefined || type === null || type === "" ? undefined : Number(type) });
+      setMaster(mine?.[1].find((o) => (mine[0].masterId ? o.id === mine[0].masterId : !!o.sipUserName && o.sipUserName === number)));
+      if (callable && online && !d.isDisabled) readEmergency(mine?.[1] ?? [], mine?.[0].masterId);
       const picked = pickTemplates(all);
       const m = new Map<string, { name: string; id: string }>();
       for (const a of ALARMS) {
@@ -144,6 +171,19 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
     }
   }
 
+  /** 平台记录可能和设备不一致（在设备属性里改过、别处改过），在线时读设备上的紧急号码和呼叫方式 */
+  async function readEmergency(options: MasterOption[], masterId?: string) {
+    try {
+      const v = await awaitDeviceResponse<Record<string, unknown>>(d.sn, "get-property", () => readDeviceProperties(d.sn, ["talk_master_number", "talk_type_sel"]));
+      const number = String(v?.talk_master_number ?? "");
+      const t = v?.talk_type_sel;
+      setEmergency({ number, type: t === undefined || t === null || t === "" ? undefined : Number(t) });
+      if (!masterId) setMaster(options.find((o) => !!o.sipUserName && o.sipUserName === number));
+    } catch {
+      /* 读不到就用平台记录 */
+    }
+  }
+
   /** 平台记录不一定是设备上的（删了设备再添加时新 id 下没有记录），在线时再读一次设备，按场景名合并 */
   async function readDevice(platform: Scene[]) {
     if (!online || d.isDisabled) return setDeviceRead({ state: "skip" });
@@ -159,7 +199,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d.id]);
+  }, [d.id, callable]);
 
   const active = useMemo(() => scenes.filter((s) => !s.isDisabled), [scenes]);
   const rows: Row[] = ALARMS.map((def) => ({
@@ -200,13 +240,34 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   const defaultMinutes = (r: Row) => (r.def.duration === undefined ? undefined : Math.min(r.def.duration, maxMin));
   const durationFor = (r: Row) => (r.def.duration === undefined ? undefined : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r)));
 
-  async function apply(r: Row, on: boolean, area?: number, duration = durationFor(r)) {
+  /**
+   * 开启时要不要拨紧急号码：勾选框里改的 > 设备上现在的。
+   * 场景动作叫"呼叫管理主机"（Service_call_master），实际是拨紧急号码，号码是手机号、主机或别的 SIP 号都行
+   */
+  const callFor = (r: Row) => pendingCall[r.def.label] ?? callsMaster(r.current);
+  /** 不能勾"拨紧急号码"的原因（取消勾选总是可以） */
+  function callBlock(r: Row) {
+    if (playsAudio(defs.get(r.def.label)) || playsAudio(r.current)) return "这个告警会播放提示音，平台规定播放音频和拨号只能二选一";
+    if (!emergency.number) return "紧急号码是空的，先到“通话”页设置";
+  }
+  const isPhone = isMobileNumber(emergency.number);
+  /** 紧急号码是什么：所属主机 / 手机 / SIP 号 */
+  const emergencyText =
+    master && master.sipUserName === emergency.number ? `主机 ${master.deviceName || master.sn}` : isPhone ? "手机" : emergency.type === 0 ? "局域网模式下号码基本不起作用" : "SIP 号";
+
+  async function apply(r: Row, on: boolean, area?: number, duration = durationFor(r), call = callFor(r)) {
     const tpl = defs.get(r.def.label);
     const t = tpls.get(r.def.label);
     setBusy(r.def.label);
     setResult(undefined);
     try {
-      const list = toggleScene(scenes, r.def.names, on && tpl && t ? { name: t.name, scene: tpl, area, duration: duration ?? undefined, deviceType: d.deviceType } : undefined);
+      const list = toggleScene(
+        scenes,
+        r.def.names,
+        on && tpl && t
+          ? { name: t.name, scene: tpl, area, duration: duration ?? undefined, deviceType: d.deviceType, callMaster: callable ? call && !playsAudio(tpl) : undefined }
+          : undefined,
+      );
       const before = (await getSceneIssueStatus(d.id)).sceneIssueAt;
       await saveDeviceScenes(d.sn, list);
       const s = await waitIssued(d.id, before);
@@ -215,6 +276,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
       // 平台记录已保存，无论设备是否应答都重新读一次
       setScenes(await getDeviceScenes(d.id));
       setDur(({ [r.def.label]: _, ...rest }) => rest);
+      setPendingCall(({ [r.def.label]: _, ...rest }) => rest);
     } catch (e) {
       setResult({ label: r.def.label, ok: false, text: errText(e) });
     } finally {
@@ -322,6 +384,22 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
                   ) : a.need && a.area !== undefined ? (
                     <span className="small muted">{bed && a.area === bed.index ? `监护床 = 区域 ${bed.index}` : `区域 ${a.area}`}</span>
                   ) : null}
+                  {callable && (
+                    <Tooltip title={callFor(r) ? undefined : callBlock(r)}>
+                      <Checkbox
+                        checked={callFor(r)}
+                        disabled={!!blocked || !!busy || (!callFor(r) && !!callBlock(r))}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          // 已开启时直接重新下发，未开启的记下来，开启时带上
+                          if (on) apply(r, true, a.area, undefined, v);
+                          else setPendingCall((p) => ({ ...p, [r.def.label]: v }));
+                        }}
+                      >
+                        <span className="small">拨紧急号码</span>
+                      </Checkbox>
+                    </Tooltip>
+                  )}
                 </div>
                 <Tooltip title={why}>
                   <Switch
@@ -338,6 +416,30 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
         {result && (
           <p className={`small ${result.ok ? "muted" : "err-text"}`} style={{ marginTop: 10 }}>
             {result.label}：{result.ok ? `设备已应答（${result.text}）` : `下发失败：${result.text}`}
+          </p>
+        )}
+        {callable && (
+          <p className="muted small" style={{ marginTop: 10 }}>
+            {emergency.number ? (
+              <>
+                紧急号码 <span className="mono">{toShownNumber(emergency.number)}</span>（{emergencyText}）。勾了"拨紧急号码"的告警触发时，雷达拨这个号码
+                {emergency.type !== 0 && emergency.number === "123456" ? (
+                  <span className="err-text">；但 123456 是出厂默认号码，云对讲下拨不通任何人，先到通话页设好</span>
+                ) : emergency.type === 0 && isPhone ? (
+                  <span className="err-text">；但现在是局域网模式，没有 SIP 服务器，打不了手机，要改成云对讲</span>
+                ) : emergency.type === 0 ? (
+                  "，局域网模式下实际是直接拨主机的 IP"
+                ) : (
+                  ""
+                )}
+                。
+              </>
+            ) : (
+              <>紧急号码是空的，告警时没法拨号。</>
+            )}
+            <Button type="link" size="small" onClick={onGoCall} style={{ padding: "0 4px", height: "auto" }}>
+              {emergency.number ? "改通话设置" : "去设置"}
+            </Button>
           </p>
         )}
         <p className="muted small" style={{ marginTop: 10 }}>

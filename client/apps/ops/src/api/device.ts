@@ -52,6 +52,17 @@ export async function getDeviceTypeMap() {
   return map;
 }
 
+/** 设备类型字典：编号 → 分组（RADAR / SLAVE / WATCH / RING / GAIT / OTHER） */
+export async function getDeviceTypeGroups() {
+  const list = (await api.get<DeviceType[]>("/api/device-type/types")).data ?? [];
+  const map = new Map<number, string>();
+  for (const t of list) {
+    const code = t.deviceTypeCode ?? t.deviceType;
+    if (code !== undefined && t.groupCode) map.set(code, t.groupCode);
+  }
+  return map;
+}
+
 // ---------- 添加设备 ----------
 
 /** 雷达类的设备类型（groupCode = RADAR），用于添加设备时选择 */
@@ -563,6 +574,12 @@ function getPropertyDict(deviceTypeCode: number) {
   return p;
 }
 
+/** 这个型号能不能通话：属性字典里有呼叫方式 talk_type_sel（AIO 有，13 型跌倒终端没有） */
+export async function supportsCall(deviceTypeCode?: number) {
+  if (deviceTypeCode === undefined) return false;
+  return (await getPropertyDict(deviceTypeCode)).titles.has("talk_type_sel");
+}
+
 /**
  * 设备的属性定义 + 平台记录的值（GET /api/device-property/property-schema-values）。
  * 这个接口返回的标题、分组名是英文（2026-10-16 换了几种语言请求头都一样），中文从属性字典 /api/device-type-property/list 取。
@@ -603,12 +620,18 @@ export async function writeDeviceProperties(sn: string, properties: { propertyNa
   return (await api.post<unknown>("/api/device-property/write", { sn, properties, saveOnly })).data;
 }
 
-/** 机构里的全部设备（所有类型），选蓝牙外设用 */
+/** 机构里的全部设备（所有类型），选蓝牙外设、设备列表里的非雷达设备用 */
 export interface AnyDevice {
   id: string;
   sn: string;
   deviceName?: string;
   deviceType: number;
+  orgId?: string;
+  orgName?: string;
+  isOnline?: boolean;
+  isDisabled?: boolean;
+  firmwareVersion?: string;
+  peripheralCount?: number;
 }
 
 export async function getAllDevices() {
