@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, Select, Spin, Switch, Tag, Tooltip } from "antd";
+import { Alert, App, Button, InputNumber, Select, Spin, Switch, Tag, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import type { Radar } from "../api/device";
+import { getStoredProperties, type Radar, type StoredProperty } from "../api/device";
 import {
+  fillVoiceIds,
   getDeviceScenes,
   getRoomLayouts,
   getSceneIssueStatus,
@@ -18,7 +19,8 @@ import {
   type RadarLayout,
   type Scene,
 } from "../api/scene";
-import { pickTemplates, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
+import { durationOf, maxMinutes, pickTemplates, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
+import { parseArray } from "../rooms/qinglan";
 
 /**
  * 告警配置：单台设备上常用告警的开关，不用走批量场景。
@@ -32,6 +34,8 @@ interface AlarmDef {
   desc: string;
   /** 涉及区域时用哪个：bed 自动用监护床，pick 让用户选 */
   area?: "bed" | "pick";
+  /** 要设持续时间（分钟）时的默认值：条件持续满足这么久才告警 */
+  duration?: number;
 }
 
 const ALARMS: AlarmDef[] = [
@@ -41,7 +45,35 @@ const ALARMS: AlarmDef[] = [
   { label: "跌倒告警", names: ["跌倒告警", "跌倒报警", "确认跌倒"], desc: "确认跌倒" },
   { label: "房间滞留告警", names: ["房间滞留告警", "房间滞留"], desc: "在房间内停留过久" },
   { label: "区域滞留告警", names: ["区域滞留告警", "区域滞留"], desc: "在指定区域停留过久", area: "pick" },
+  // 2026-10-21 平台模板：6 型、13 型有（坐姿 + 最近几条区域都是 {{area}}），15 型没有
+  { label: "久坐提醒", names: ["久坐提醒"], desc: "在选定区域坐着超过设定时间", area: "pick", duration: 30 },
 ];
+
+/** 平台记录的值可能是 JSON 字符串 */
+const parseObject = (v: unknown) => {
+  if (typeof v !== "string") return v;
+  try {
+    return JSON.parse(v) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * 安装设置里的区域（属性 QL_radar_area：[[区域 ID, 类型, 8 个角], …]，场景里的区域编号就是这个 ID）。
+ * 名字从同一份安装设置的 QL_radar_design（整份布置，ranges 按位置 = 区域 ID）取，没有时按区域 ID 用房间布置里的。
+ */
+function zonesFromProps(values: Record<string, StoredProperty>, layout?: RadarLayout): LayoutRange[] {
+  const named = (parseObject(values.QL_radar_design?.value) as { ranges?: { text?: string; spaceType?: number }[] } | undefined)?.ranges;
+  return (parseArray(values.QL_radar_area?.value) ?? [])
+    .map((row) => parseArray(row))
+    .filter((r): r is unknown[] => !!r && r.length >= 2)
+    .map((r) => {
+      const index = Number(r[0]);
+      const n = named?.[index] ?? layout?.ranges.find((x) => x.index === index);
+      return { index, type: Number(r[1]), text: n?.text, spaceType: n?.spaceType };
+    });
+}
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const rangeText = (r: LayoutRange) =>
@@ -63,8 +95,12 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   const [tpls, setTpls] = useState<Map<string, { name: string; id: string }>>(new Map());
   const [defs, setDefs] = useState<Map<string, Scene>>(new Map());
   const [layout, setLayout] = useState<RadarLayout>();
-  /** 区域滞留选的区域（未开启时用） */
+  /** 安装设置（设备属性）里的区域 */
+  const [propZones, setPropZones] = useState<LayoutRange[]>([]);
+  /** 区域滞留、久坐选的区域（未开启时用） */
   const [pick, setPick] = useState<Record<string, number>>({});
+  /** 输入框里改过、还没下发的持续时间（分钟） */
+  const [dur, setDur] = useState<Record<string, number | null>>({});
   const [busy, setBusy] = useState<string>();
   const [result, setResult] = useState<{ label: string; ok: boolean; text?: string }>();
   /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
@@ -74,10 +110,11 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
     setLoading(true);
     setError(undefined);
     try {
-      const [all, current, layouts] = await Promise.all([
+      const [all, current, layouts, props] = await Promise.all([
         getSceneTemplates(),
         getDeviceScenes(d.id),
         d.roomId ? getRoomLayouts(d.roomId).catch(() => undefined) : undefined,
+        getStoredProperties(d.sn).catch(() => ({}) as Record<string, StoredProperty>),
       ]);
       const picked = pickTemplates(all);
       const m = new Map<string, { name: string; id: string }>();
@@ -95,7 +132,10 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
       setTpls(m);
       setDefs(sc);
       setScenes(current);
-      setLayout(layouts?.get(d.sn));
+      const lay = layouts?.get(d.sn);
+      setLayout(lay);
+      setPropZones(zonesFromProps(props, lay));
+      setDur({});
       setLoading(false);
       readDevice(current);
     } catch (e) {
@@ -109,7 +149,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
     if (!online || d.isDisabled) return setDeviceRead({ state: "skip" });
     setDeviceRead({ state: "reading" });
     try {
-      const merged = mergeDeviceScenes(platform, await readDeviceScenes(d.sn));
+      const merged = await fillVoiceIds(mergeDeviceScenes(platform, await readDeviceScenes(d.sn)), platform, d.id);
       setScenes(merged);
       setDeviceRead({ state: "ok", extra: merged.length - platform.length });
     } catch (e) {
@@ -129,9 +169,11 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   }));
   const others = active.filter((s) => !ALARMS.some((a) => a.names.includes(s.sceneName))).length;
 
-  const bed = layout?.ranges.find((r) => r.type === 5);
+  // 区域以安装设置为准，没读到时用房间布置
+  const ranges = propZones.length ? propZones : (layout?.ranges ?? []);
+  const bed = ranges.find((r) => r.type === 5);
   // 能选的区域：干扰区不算
-  const areaOptions = (layout?.ranges ?? []).filter((r) => r.type !== 3).map((r) => ({ value: r.index, label: rangeText(r) }));
+  const areaOptions = ranges.filter((r) => r.type !== 3).map((r) => ({ value: r.index, label: rangeText(r) }));
 
   /** 已开启场景里的区域编号 */
   const areaOf = (s?: Scene) => {
@@ -143,22 +185,28 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
   function areaFor(r: Row): { area?: number; need: boolean; why?: string } {
     const tpl = defs.get(r.def.label);
     if (!tpl || !templateAreaValues(tpl).length) return { need: false };
-    if (!layout) return { need: true, why: d.roomId ? "房间布局里没有这台雷达" : "设备未绑定房间" };
-    if (r.def.area === "bed") return bed ? { area: bed.index, need: true } : { need: true, why: "户型里没有监护床" };
+    if (!ranges.length) return { need: true, why: "安装设置里还没有区域划分" };
+    if (r.def.area === "bed") return bed ? { area: bed.index, need: true } : { need: true, why: "区域划分里没有监护床" };
     if (r.def.area === "pick") {
       const v = pick[r.def.label] ?? areaOf(r.current);
-      return v !== undefined ? { area: v, need: true } : { need: true, why: areaOptions.length ? "先选区域" : "户型里没有区域" };
+      return v !== undefined ? { area: v, need: true } : { need: true, why: areaOptions.length ? "先选区域" : "区域划分里没有可选的区域" };
     }
     return { need: true, why: "模板涉及区域，但不知道该对应哪种区域" };
   }
 
-  async function apply(r: Row, on: boolean, area?: number) {
+  /** 开启时用的持续时间：输入框里改的 > 设备上现在的 > 默认 */
+  // 13 型最多 10 分钟（每人 600 条记录），默认值也不能超过
+  const maxMin = maxMinutes(d.deviceType);
+  const defaultMinutes = (r: Row) => (r.def.duration === undefined ? undefined : Math.min(r.def.duration, maxMin));
+  const durationFor = (r: Row) => (r.def.duration === undefined ? undefined : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r)));
+
+  async function apply(r: Row, on: boolean, area?: number, duration = durationFor(r)) {
     const tpl = defs.get(r.def.label);
     const t = tpls.get(r.def.label);
     setBusy(r.def.label);
     setResult(undefined);
     try {
-      const list = toggleScene(scenes, r.def.names, on && tpl && t ? { name: t.name, scene: tpl, area } : undefined);
+      const list = toggleScene(scenes, r.def.names, on && tpl && t ? { name: t.name, scene: tpl, area, duration: duration ?? undefined, deviceType: d.deviceType } : undefined);
       const before = (await getSceneIssueStatus(d.id)).sceneIssueAt;
       await saveDeviceScenes(d.sn, list);
       const s = await waitIssued(d.id, before);
@@ -166,11 +214,19 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
       if (s.status === "ok") message.success(`${r.def.label}已${on ? "开启" : "关闭"}`);
       // 平台记录已保存，无论设备是否应答都重新读一次
       setScenes(await getDeviceScenes(d.id));
+      setDur(({ [r.def.label]: _, ...rest }) => rest);
     } catch (e) {
       setResult({ label: r.def.label, ok: false, text: errText(e) });
     } finally {
       setBusy(undefined);
     }
+  }
+
+  /** 已开启时改了持续时间：直接重新下发 */
+  function commitDuration(r: Row, area?: number) {
+    const v = dur[r.def.label];
+    if (!r.current || v == null || v === durationOf(r.current) || busy) return;
+    apply(r, true, area, v);
   }
 
   // 设备上的场景没读回来之前不让开关：保存是整体覆盖，会把只在设备上的场景删掉
@@ -219,7 +275,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
             const why = blocked ?? (on ? undefined : noTpl ?? a.why);
             const isBusy = busy === r.def.label;
             return (
-              <li key={r.def.label} className={noTpl && !on ? "muted" : undefined}>
+              <li key={r.def.label} className={[noTpl && !on && "muted", r.def.duration !== undefined && "wide"].filter(Boolean).join(" ") || undefined}>
                 <div className="alarm-name">
                   <b>{r.def.label}</b>
                   {r.current && r.current.sceneName !== (r.tpl?.name ?? r.def.label) && (
@@ -228,10 +284,27 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
                   <small>{noTpl && !on ? noTpl : r.def.desc}</small>
                 </div>
                 <div className="alarm-area">
+                  {r.def.duration !== undefined && (
+                    <InputNumber
+                      size="small"
+                      style={{ width: 150 }}
+                      min={1}
+                      max={maxMin}
+                      precision={0}
+                      prefix="超过"
+                      suffix="分钟"
+                      placeholder={String(defaultMinutes(r))}
+                      disabled={!!blocked || !!busy}
+                      value={dur[r.def.label] !== undefined ? dur[r.def.label] : on ? ((r.current && durationOf(r.current)) ?? null) : defaultMinutes(r)}
+                      onChange={(v) => setDur((m) => ({ ...m, [r.def.label]: v }))}
+                      onBlur={() => commitDuration(r, a.area)}
+                      onPressEnter={() => commitDuration(r, a.area)}
+                    />
+                  )}
                   {r.def.area === "pick" && a.need && areaOptions.length > 0 ? (
                     <Select
                       size="small"
-                      style={{ width: 200 }}
+                      style={{ width: 180 }}
                       placeholder="选区域"
                       disabled={!!blocked || !!busy}
                       value={pick[r.def.label] ?? curArea}
@@ -268,7 +341,7 @@ export default function AlarmTab({ d, online }: { d: Radar; online: boolean }) {
           </p>
         )}
         <p className="muted small" style={{ marginTop: 10 }}>
-          开启时按场景模板的默认设置下发{others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
+          开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒{others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
         </p>
       </div>
     </div>

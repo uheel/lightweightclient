@@ -7,6 +7,7 @@ import { getDeviceReport, getRoomInfo, INSTALL_DIR, INSTALL_TYPE, isSlim, WORKIN
 import { lastSeen } from "../pages/DevicesPage";
 import { evaluate, GRADE_TEXT } from "./angle";
 import AlarmTab from "./AlarmTab";
+import ExprTab from "./ExprTab";
 import AngleTab from "./AngleTab";
 import ReplayView from "./replay/ReplayView";
 import LogTable from "./LogTable";
@@ -310,6 +311,7 @@ export default function DeviceDetail({
           { key: "replay", label: "时间回溯", children: <ReplayView roomId={d.roomId} sn={d.sn} /> },
           { key: "props", label: "设备属性", children: <PropertyTab sn={d.sn} online={link.online} focusProp={spotDef?.prop && spot ? { name: spotDef.prop, seq: spot.seq } : undefined} plan={plan} roomId={d.roomId} layout={cfg as QlConfig | undefined} onLayoutSynced={() => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {})} /> },
           { key: "alarm", label: "告警配置", children: <AlarmTab d={d} online={link.online} /> },
+          { key: "expr", label: "表达式", children: <ExprTab d={d} online={link.online} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}
       />

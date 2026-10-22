@@ -534,6 +534,29 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 63 个模板：6（AIO）35 个、13（Ultra Fall）13 个、15（Ultra Plus）5 个、12（SleepSense）1 个、2 有 9 个。**同名场景在不同类型上属性名不同**：跌倒在 6 上是 `QL_fall_state`、区域是 `QL_event_area_ID`；在 13/15 上是 `QL_target_posture`、`QL_event_area`、`QL_target_event`。场景名在各类型间基本一致。
 
+### 持续时间与久坐提醒（2026-10-21 坐起测试 …627d，6 型，固件 V1.2.30.B）
+
+- 平台场景编辑页（`conditionType` 为 conditions / expression 时）有"持续时间开关"，存在场景的 `duration` 上，单位**分钟**（1～999，提示"当触发场景满足一定持续时间才生效"）。`conditionType: "timeout"` 的"超时时间"是另一个字段 `timeout`，单位**秒**，配合进入 / 退出表达式（例如延迟离床报警）
+- **6 型固件不认 `duration`**：场景带 `duration` 时整条 `IOT.settact` 设备都不应答，读回设备还是旧列表（同一列表去掉 `duration` 立即应答 201）。连试两次都这样
+- 6 型的条件字典 `SCENE_QL_RADAR` 里有 `sys_duration`"持续时间"（过度睡眠模板 `sys_duration >= 570`，按分钟就是 9.5 小时）。条件写成 `{property:"sys_duration", aggregation:"REAL", operator:">=", target:"2"}` 设备应答、读回有这一条；**不带 `aggregation`（模板里就没带）设备不应答**。实际是不是"持续满足 N 分钟才触发"还要有人在区域里坐着实测
+- 13 型的条件字典 `SCENE_CONDITION_ULTRA_FALL` 里没有 `sys_duration`，只能用 `duration`，还没在 13 型真机上验证；15 型（`SCENE_CONDITION_ULTRA`）有 `rs_inbed_duration / rs_outbed_duration`（分钟），没有久坐模板
+- 久坐提醒模板：6 型 = 最近 3 条 `QL_event_area_ID` 都是 `{{area}}` + 最近 5 条 `QL_fall_state` 至少 1 条 = 3（坐），动作是**播放语音**（`Service_play_audiofile`，不产生告警）；13 型 = 最近 5 条 `QL_target_posture` 至少 1 条 = 3 + 最近 5 条 `QL_event_area` 都是 `{{area}}`，动作是告警 `Event_auto_trig`（告警类型 `8e661285…` = "久坐告警"）。两个模板都没有时间条件
+- **6 型的区域、姿态记录是怎么来的**（坐起测试 10-08～10-21 的通信日志和 `human-position` 时间线核对）：设备 `Device.postevent` 的 `event_QL_rawdata` 里 `0x81` 帧（24 字节，`AA AA 序号 81 01 01 …`），有人时约 1 秒一帧，没人时约 32 秒一帧（第 6 字节 `0x58`，后面全 0）。第 19 字节 = 姿态（`QL_fall_state`，取值同上面的姿态枚举，3 坐、4 静止、1 行走），第 20 字节 = 人员事件（0 无、1 进入房间、2 离开房间、3 进入区域、4 离开区域），第 21 字节 = 事件区域 ID。和平台 `event-timeline` / `posture-timeline` 逐条对得上，离床告警在"离开区域 0"那一帧后 1 秒触发
+  - **区域 ID 每帧都带，但只在有事件的那一帧变**：进入房间那帧变成经过的门的 ID，进入区域变成该区域 ID，离开区域那帧还是该 ID、下一帧变 255（不在任何区域），之后一直保持到下一个事件。人在房间里走来走去、没进出区域时，区域 ID 一直是门（10-15、10-12 两段各 2 分钟都是这样）；雷达半路捡到人、没有进入事件时一直是 255（10-16 14:06）。没人的帧区域、姿态都是 0
+  - **姿态每帧都报**，"坐"持续很短：两周里 16 段"坐"，最长 34 秒，多数 2～10 秒，之后多是"静止"（4）。还没有人在这台设备前连续坐过几分钟的数据，长时间坐着会不会一直报 3 不知道
+  - 所以久坐模板里"近 3 条区域 ID 都是 X"≈ 坐下时触发过"进入区域 X"、之后还没离开（区域要画成能触发进出事件的感应区）；"近 5 条至少 1 条姿态 = 3"≈ 最近 5 秒左右报过坐。后者是三个条件里最可能撑不住 N 分钟的
+- **真人久坐实测（2026-10-21 15:37～16:06，距离测试 …6711，6 型，区域 2 = 感应区）**，测试场景都用告警动作（久坐告警），设备每次触发上报 `Event_auto_trig {id: 场景 id}`：
+  - 多目标时 `0x81` 帧第 4 字节 = 目标数、第 5 字节 = 目标编号，每个目标每秒各一帧；第 7、8 字节是有符号的 x、y（分米）。**区域、姿态记录按目标分开算**：房间里另有一人（一直"静止"、区域 255）时，"近 3 条区域 = 2 + 近 5 条至少 1 条姿态 = 3"照样触发
+  - **长时间坐着会一直报 3**：连续坐了 11 分钟，除了挪动身体的十几秒是"静止"，其余全是 3
+  - **`sys_duration` 在这台固件上不当"持续 N 分钟"用**：同样两个条件加 `sys_duration ≥ 2`（REAL），两人在房间时 4 分钟、只剩一人时 3 分 40 秒都没触发；不加的那条每 63 秒触发一次（触发间隔 1 分钟）
+  - **超时类型（`conditionType: "timeout"`）可以**：`timeout: 120`（秒），进入表达式 `COUNT_2D(QL_event_area_ID_data,"==",2,">=",3,0,3) and COUNT_2D(QL_fall_state_data,"==",3,">=",1,0,5)`，退出表达式 `COUNT_2D(QL_event_type_data,"==",4,">=",1,0,3) and COUNT_2D(QL_event_area_ID_data,"==",2,">=",1,0,3)`（离开区域 2）。坐下后 123 秒触发，**之后一直坐着不再重复**
+  - **加长记录数也可以**：近 120 条区域都是 2 + 近 120 条至少 60 条姿态 = 3，约 117 条记录（≈ 秒）后触发，之后按触发间隔每分钟重复
+  - 运维端告警配置的久坐提醒（6 型）就按超时类型生成：模板的 COUNT 条件逐条换成 `COUNT_2D(属性_data, 取值比较, 取值, 条数比较, 条数, 0, 最近几条)` 作进入表达式，退出 = 离开该区域，`timeout` = 分钟 × 60（`scenes/plan.ts` toTimeout）。13 型不收超时类型，见"场景表达式"
+  - **平台的姿态 / 事件时间线多人时丢数据**：一条 `Device.postevent` 里有几个目标的帧时，`posture-timeline`、`event-timeline` 只记第一帧（两人在房间的 15:37～15:50，坐着的目标 2 一段姿态、"进入区域 · 椅子"都没有；目标 3 的进出门也没有），而且记在帧的目标编号下。`trajectory-points` 的 `userId` 是平台自己的跟踪编号，和帧里的目标编号不一定一样（16:03～16:07 帧里只有 1 号目标，轨迹点一直是 userId 2，这段两个时间线都是空的）。运维端时间回溯在出现 userId ≥ 2 的时段改从原始帧解姿态和事件，按时间 + 位置（轨迹 x = 帧 x × 10，y = −帧 y × 10，厘米）对到轨迹目标（`devices/replay/data.ts`）
+  - 有人从旁边走过时雷达会把两个目标的轨迹接错：坐着的人被记一次"离开区域 2 / 离开房间 / 进入区域 2"（16:01:47～53），计时从头开始
+- **读回的语音动作没有 voiceId**：设备读回的"播放本地音频"只有 `audioFileName`（见过 `voiceFile.wav` 和 `voiceId.wav` 两种），`voiceId` 为 null。把读回的场景原样保存，平台拒收："播放音频动作缺少有效音频ID(VoiceId)，请使用 voices-v2 返回的 value"。语音列表 `GET /api/device-scene/voices-v2?deviceId=` → `[{label, value(voiceId), fileName(= voiceFile), type, mD5, size}]`；运维端合并读回场景后按文件名补回 `voiceId / voiceName / voiceFile`（`api/scene.ts` fillVoiceIds）
+- **带播放语音动作的场景，平台先发 `IOT.callservice Service_get_audiofile`（语音文件 url + MD5）让设备下载，设备应答后才发 `IOT.settact`**。坐起测试对这条一直没应答（等了 3 分钟以上，平常 callservice 0.1 秒内回 201），场景就一直没下发，平台记录却已经是新列表
+
 ### 区域编号
 
 - 6 型：条件里的区域值 = 区域配置里的 `index`（从 0 开始）。坐起测试（…627d）实测下发 `QL_radar_para_area: [[0,5,…],[1,4,…]]`，监护床是 0
@@ -570,6 +593,36 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 同一时段 `event-timeline` 对这台设备返回空。可能是因为房间设计里的设备没有 `rangeId`（坐起测试那台有），原因没查
 - 测试期间设备两次上报 `post [[0, 时间戳, "FHK004-51B", 1, "5"]]`，而且 seq 从 0 重新开始，看起来是设备重启了（00:52:12、00:53:07）
 - 测试房间"13型离床测试"、共用户型"通用"留在李虎机构，设备 …C50D 保持这套配置
+
+### 场景表达式（2026-10-22 平台前端 + 坐起测试 …627d 实测，6 型）
+
+场景有三种条件写法：`conditions`（条件列表，平台下发时转成 `conditions:[{property, start, end, aggregation…}]`）、`expression`（`normalExpression` 一条表达式）、`timeout`（`interExpression` / `exitExpression` + `timeout` 秒）。后两种是**设备自己求值的表达式**。
+
+**语法**（平台场景编辑页的"函数传入参数详解"，函数表来自字典）：
+
+| 字典 | 函数 | 签名 |
+|---|---|---|
+| `SCENE_THREE_PARAMS` | MAX 最大值、MIN 最小值、AVE 平均值、P2P 峰峰值、SD 标准差、REAL 实时值、SUM 求和值 | `F(arr, start=0, end=None)`，例 `AVE(XJW_human_exist_data,1,10)` |
+| `SCENE_FIVE_PARAMS` | CONS 最大连续窗口、COUNT 统计值、MAX_2D / MIN_2D / AVE_2D / P2P_2D / SD_2D / REAL_2D / SUM_2D | `F(arr, op, value, start, end)`，例 `COUNT(XJW_human_exist_data,"=",12,1,10)` |
+| `SCENE_SEVEN_PARAMS` | CONS_2D、COUNT_2D | `F(arr, op, value, count_op, count_value, start=0, end=None)`，例 `COUNT_2D(XJW_human_exist_data,"=",12,"!=",10,1,10)` |
+
+- `arr` 数据源（属性名 + `_data`），`op / count_op` 比较符（`SCENE_CONDITION_OPERATOR`：`> == >= < <= !=`），`start` 起始索引（从 0），`end` 结束索引（不含），和 Python 切片一样。条件之间用 `and` / `or`
+- **2D 函数作用在多个子列表上，任何一个子列表满足就为真**（平台原话）。人员类属性每个目标一个子列表，这就是 10-21 实测里"另一人在房间也不影响你的久坐判断"的原因
+- 属性列表字典按型号：6 型 `SCENE_RADAR_EXP_QL`（李虎机构查回来是空的）、跌倒雷达 `SCENE_RADAR_EXP_FALL_DETECTION`、人体存在 `SCENE_RADAR_EXP_HUMAN_EXISTS`、呼吸率 `SCENE_RADAR_EXP_RESPIRATORY_RATE`
+
+**在设备上直接求值**：`POST /api/device-config/verify-expression {deviceId, expression}`（返回 seq）→ 平台下发 `IOT.callservice {service_name:"Service_expression_verify", service_params:"表达式"}` → 设备先回 `code 201`，算完再发 `Device.postevent {Event_service_result:{service_name:"Service_expression_verify", service_result:"结果的文本"}}`（约 0.5 秒）。平台网页端监听 SignalR `VerifyExpression` / `VerifyExpressionResult`，但这几次实测浏览器没收到推送，结果要从通信日志按 seq 取。不保存场景、不影响设备上的场景，适合摸语法
+
+- **设备是用 Python 求值的**：`1 == 1` → `"True"`，`QL_fall_state_data` → `"[[], [], [], [], [], [], [], []]"`，`len(...)`、切片 `[:12]` 都能用。求值出错（如 `globals()`、`locals()`、不存在的名字）**没有任何回报**，只有 201
+- 函数自己报的错以文本返回：`COUNT_2D` 时 8 个子列表全空 → `"Sub_var List Empty Error"`；`COUNT` 传了空列表 → `"Var List Null Error"`
+- 已知变量（房间里没人时取的）：
+  - 每个目标一个子列表、共 8 个：`QL_fall_state_data`（姿态）、`QL_event_type_data`（人员事件）、`QL_event_area_ID_data`（事件区域 ID）；没人时子列表全空
+  - 一维、300 条：`QL_human_quantity_data`、`QL_heart_event_data`、`QL_respiratory_event_data`、`QL_respiratory_rate_data`、`QL_sleep_event_data`；没人时全是 0
+  - `sys_duration`、`sys_hour`、`sys_minute` **不是表达式变量**（条件列表里的这几个属性是另外处理的，sys_duration 实测也不起作用）
+- 还没摸清（要有人在雷达前测）：子列表最新的一条在 0 号还是末尾、每个目标存多少条、多久追加一条、目标离开后子列表是否清空；条件列表里"近 N 条"下发成 `start 0, end N−1`，和"end 不含"对照是 N 条还是 N−1 条；`expression` 类型多久求值一次、`mask_time` 怎么作用；时间段条件（`sys_time_split`）在表达式里怎么写；15 型支不支持 `Service_expression_verify`
+- **13 型不支持现场求值**（2026-10-22 ultra跌倒雷达 …C50D）：平台照样下发 `IOT.callservice Service_expression_verify`，设备不回 201 也不回结果（13 型只认 get-property / set-property / set-tact 这一套）
+- **13 型也不收超时 / 表达式场景**（同一台，2026-10-22 真人实测）：列表里有一条 `conditionType: "timeout"` 的场景，`set-tact` 就回 **`code 100`**（正常是 `code 0`），整条不生效。13 型名字（`QL_event_area_data`）、6 型名字（`QL_event_area_ID_data`）都一样，**平台自带的 13 型"离床延迟报警"模板原样下发也是 code 100**。平台不认 code 100，只是 30 秒后显示"没应答"。13 型只能用条件列表
+- **13 型用加长记录数做时长**：13 型每秒一条人员记录（`human-position/pages` 里带 `posture`、`rangeIndex`），区域条件"最近 N 条全是区域 2"在进入区域后约 N 秒触发：N = 120 / 300 / 400 分别 119 / 296 / 396 秒（离开区域 13 秒再回来后重新计时；改场景重新下发时历史记录不清）。所以每个目标至少存 400 条；**上限 600 条**（用户告知，平台前端没有这个限制，是设备侧的），所以 13 型用这个办法最长 10 分钟，告警配置里 13 型久坐时长最多填 10。长时间坐着一直报 3（坐），偶尔几秒 4 / 1。触发间隔 1 分钟时一直满足条件每 71～73 秒触发一次
+- 运维端告警配置的 13 型久坐提醒按这个生成：区域条件改成最近 分钟 × 60 条全是选的区域，坐姿条件照模板，触发间隔 = 同样的分钟数（`scenes/plan.ts` toLongWindow）。2026-10-22 用告警配置页开 3 分钟、区域 2 端到端实测：设备 `code 0`；房间里两个人，区域 2 里的人从 20:46:22 连续在区域里，20:49:20 第一次触发（≈ 178 秒）；之后 1、2 分钟时都没重复，20:52:51 第二次（间隔 211 秒：触发间隔 3 分钟到了以后，又等到姿态从"静止"变回"坐"）。坐着时姿态在 3 / 4 之间来回切，"静止"持续时坐姿条件不满足，提醒会顺延
 
 ### 户型区域字典（`ranges[]`）
 

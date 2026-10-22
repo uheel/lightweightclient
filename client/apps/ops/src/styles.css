@@ -418,13 +418,15 @@
 
 /* 告警配置 */
 .alarm-list { list-style: none; margin: 0; padding: 0; }
-.alarm-list li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #F4F5F9; }
+.alarm-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid #F4F5F9; }
 .alarm-list li:last-child { border-bottom: 0; }
 .alarm-list li.muted b { color: #8A8FA8; }
-.alarm-name { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.alarm-name { flex: 1 1 160px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .alarm-name b { font-weight: 600; }
 .alarm-name small { flex-basis: 100%; color: #8A8FA8; font-size: 12px; }
-.alarm-area { flex: none; }
+.alarm-area { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 控件多的（久坐：时长 + 区域）放到第二行 */
+.alarm-list li.wide .alarm-area { order: 1; flex: 1 1 100%; }
 
 /* ---------- 房间布置 ---------- */
 .room-list { width: 320px; }
@@ -635,3 +637,15 @@
 .space-radars li > .mono { flex: none; max-width: 45%; }
 .slot-area { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 0 24px; }
 .area-dd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* 表达式实验 */
+.expr-keys { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.expr-keys > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.expr-keys > div > .muted { width: 32px; flex: none; }
+.expr-runs { list-style: none; margin: 0; padding: 0; }
+.expr-runs li { padding: 8px 0; border-bottom: 1px solid #F4F5F9; cursor: pointer; }
+.expr-runs li:last-child { border-bottom: 0; }
+.expr-runs li:hover { background: #F8F9FC; }
+.expr-run-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.expr-run-head code { word-break: break-all; }
+.expr-result { margin: 6px 0 0; padding: 6px 8px; background: #F6F7FB; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }

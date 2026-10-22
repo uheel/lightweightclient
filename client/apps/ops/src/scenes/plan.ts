@@ -208,11 +208,76 @@ export function planDevice(opts: {
   };
 }
 
+/** 区域条件属性 → 同型号的人员事件属性（退出表达式里看"离开区域"用）：6 型 QL_event_type，13 型 QL_target_event */
+const EVENT_PROP: Record<string, string> = { QL_event_area_ID: "QL_event_type", QL_event_area: "QL_target_event" };
+
+/** COUNT 条件的表达式写法：COUNT_2D(属性_data, 取值比较, 取值, 条数比较, 条数, 0, 最近几条)，和平台模板（延迟离床报警）一致 */
+const count2d = (prop: string, countOp: string, countTarget: unknown, op: string, target: unknown, range: unknown) =>
+  `COUNT_2D(${prop}_data,"${countOp}",${countTarget},"${op}",${target},0,${range})`;
+
+/**
+ * "在区域里待够 N 分钟才提醒"（久坐）：把模板改成超时类型。
+ * 进入表达式 = 模板的 COUNT 条件逐条换成 COUNT_2D（区域 + 坐姿），退出表达式 = 离开该区域（人员事件 4 + 区域 ID），timeout = N 分钟。
+ * 2026-10-21 距离测试 …6711（6 型）真人实测：坐下后 123 秒（timeout 120）触发一次，一直坐着不重复。
+ * 条件 sys_duration、场景 duration 在 6 型上都不能这样用（前者一直不触发，后者整条下发设备不应答）。
+ */
+function toTimeout(s: Scene, minutes: number): Scene {
+  const conds = s.conditions ?? [];
+  if (!conds.length || conds.some((c) => c.aggregation !== "COUNT" || !c.property)) throw new Error("模板条件不是按记录统计的，不能设时长");
+  const area = conds.find((c) => AREA_PROPS.has(c.property!));
+  if (!area) throw new Error("模板里没有区域条件，不能设时长");
+  const inter = conds.map((c) => count2d(c.property!, c.countOperator ?? "==", c.countTarget, c.operator ?? ">=", c.target, c.range ?? 1)).join(" and ");
+  const exit = `${count2d(EVENT_PROP[area.property!]!, "==", 4, ">=", 1, 3)} and ${count2d(area.property!, "==", area.countTarget, ">=", 1, 3)}`;
+  const { conditions: _c, relation: _r, duration: _d, ...rest } = s;
+  return { ...rest, conditionType: "timeout", timeout: minutes * 60, interExpression: inter, exitExpression: exit };
+}
+
+/** 13 型每秒一条人员记录 */
+const RECORDS_PER_MINUTE = 60;
+/** 13 型每个目标最多存的记录条数（用户告知，2026-10-22）；实测 400 条可以，超过 600 的窗口永远凑不满 */
+const MAX_RECORDS = 600;
+
+/** "待够 N 分钟"最多能设多少分钟：13 型受记录条数限制，其他型号用超时类型，按平台的 1～999 */
+export const maxMinutes = (deviceType?: number) => (deviceType === 13 ? MAX_RECORDS / RECORDS_PER_MINUTE : 999);
+
+/**
+ * 13 型的"待够 N 分钟"：13 型固件不收超时 / 表达式场景（set-tact 回 code 100，平台自带的 13 型离床延迟报警模板也一样），只能用条件列表。
+ * 区域条件改成"最近 N × 60 条全是该区域"，坐姿等其他条件照模板；触发间隔设成 N 分钟，一直坐着时每 N 分钟提醒一次。
+ * 2026-10-22 ultra跌倒雷达 …C50D 真人实测：最近 120 / 300 / 400 条分别在进入区域后 119 / 296 / 396 秒触发；更长的还没测，每人存多少条不知道。
+ */
+function toLongWindow(s: Scene, minutes: number): Scene {
+  const n = minutes * RECORDS_PER_MINUTE;
+  if (n > MAX_RECORDS) throw new Error(`13 型最多 ${MAX_RECORDS / RECORDS_PER_MINUTE} 分钟（每人最多存 ${MAX_RECORDS} 条记录，每秒一条）`);
+  const conds = s.conditions ?? [];
+  const area = conds.find((c) => c.property && AREA_PROPS.has(c.property) && c.aggregation === "COUNT");
+  if (!area) throw new Error("模板里没有按记录统计的区域条件，不能设时长");
+  return {
+    ...s,
+    maskTime: minutes,
+    conditions: conds.map((c) => (c === area ? { ...c, range: String(n), operator: "==", target: String(n) } : c)),
+  };
+}
+
+/** 设时长的写法：13 型只能用加长区域条件，其他型号用超时类型 */
+const withMinutes = (s: Scene, minutes: number, deviceType?: number) => (deviceType === 13 ? toLongWindow(s, minutes) : toTimeout(s, minutes));
+
+/** 场景要待够几分钟才触发：超时类型看 timeout，13 型看区域条件的记录数（至少 1 分钟才算）；都不是时没有 */
+export function durationOf(s: Scene) {
+  if (s.conditionType === "timeout") return s.timeout ? Math.round(s.timeout / 60) : undefined;
+  const area = s.conditions?.find((c) => c.property && AREA_PROPS.has(c.property) && c.aggregation === "COUNT");
+  const n = Number(area?.range);
+  return area && area.operator === "==" && Number(area.target) === n && n >= RECORDS_PER_MINUTE ? Math.round(n / RECORDS_PER_MINUTE) : undefined;
+}
+
 /**
  * 单台设备开 / 关一个场景，返回要下发的完整列表（已停用的场景平台保存时也会清掉，这里同样不带）。
- * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area；关：去掉 names 里的所有同名场景。
+ * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area，给了 duration（分钟）时改成待够这么久才触发；关：去掉 names 里的所有同名场景。
  */
-export function toggleScene(current: Scene[], names: string[], tpl?: { name: string; scene: Scene; area?: number }) {
+export function toggleScene(
+  current: Scene[],
+  names: string[],
+  tpl?: { name: string; scene: Scene; area?: number; duration?: number; deviceType?: number },
+) {
   const list = current.filter((s) => !s.isDisabled && !names.includes(s.sceneName));
   if (tpl) {
     let scene = fromTemplate(tpl.scene);
@@ -220,6 +285,7 @@ export function toggleScene(current: Scene[], names: string[], tpl?: { name: str
       if (tpl.area === undefined) throw new Error("没有选区域");
       scene = fillArea(scene, tpl.area);
     }
+    if (tpl.duration !== undefined) scene = withMinutes(scene, tpl.duration, tpl.deviceType);
     const old = current.find((s) => !s.isDisabled && s.sceneName === tpl.name);
     list.push(old ? { ...scene, id: old.id } : scene);
   }

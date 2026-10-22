@@ -1,4 +1,5 @@
 import { api, type PerfTimer } from "@radar/core";
+import { getAllDeviceLogs, type DeviceLog } from "../../api/device";
 
 /**
  * 姿态回放的数据层（移植自油猴脚本 room-posture-replay.user.js，算法保持一致）：
@@ -208,6 +209,50 @@ export interface ReplayData {
   warnings: string[];
 }
 
+/**
+ * 一体化终端（6 型）上报的原始轨迹帧（Device.postevent 的 event_QL_rawdata，0x81 帧，有人时每个目标约 1 秒一帧）：
+ * 第 4 字节目标数、第 5 字节目标编号、第 6 字节 0x58 = 没人、第 7 / 8 字节 x / y（有符号，分米，相对雷达）、第 19 字节姿态、第 20 字节人员事件、第 21 字节事件区域 ID（255 = 不在区域）。
+ * 目标编号不等于历史轨迹点的 userId（平台自己跟踪编号：16:03～16:07 帧里只有 1 号目标，轨迹点一直是 userId 2），按位置对：轨迹点 x = 帧 x × 10、y = −帧 y × 10（厘米）。
+ * 格式和实测见 docs/site-analysis.md"持续时间与久坐提醒"。
+ */
+interface Frame {
+  t: number;
+  x: number;
+  y: number;
+  posture: number;
+  event: number;
+  area: number;
+}
+const signed = (b: number) => (b << 24) >> 24;
+
+function decodeFrames(logs: DeviceLog[]): Frame[] {
+  const out: Frame[] = [];
+  for (const l of logs) {
+    let msg: { params?: unknown };
+    try {
+      msg = JSON.parse(l.rawData ?? "");
+    } catch {
+      continue;
+    }
+    for (const p of (Array.isArray(msg.params) ? msg.params : [msg.params]) as { event_QL_rawdata?: number[][]; Timestamp?: number }[]) {
+      if (!p?.event_QL_rawdata) continue;
+      const t = p.Timestamp ? p.Timestamp * 1000 : parseTime(l.createdAt);
+      for (const f of p.event_QL_rawdata) {
+        if (f.length >= 22 && f[3] === 0x81 && f[6] !== 0x58)
+          out.push({ t, x: signed(f[7]) * 10, y: -signed(f[8]) * 10, posture: f[19], event: f[20], area: f[21] });
+      }
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/** 帧里同一目标同一姿态、间隔在这个时长内的算一段 */
+const FRAME_GAP_MS = 3000;
+/** 帧和轨迹点按时间配对的容差 */
+const FRAME_MATCH_MS = 1500;
+/** 平台姿态 / 事件时间线不可靠的时段：有 userId 从 2 起的轨迹 */
+const FIRST_MISSED_UID = 2;
+
 type Res =
   | { kind: "traj"; data: { x: number; y: number; timestamp: number; sn: string; userId: number }[] }
   | { kind: "posture"; sn: string; data: { segments?: { posture: number; userId: number; startAt: string; endAt: string }[] } }
@@ -306,10 +351,80 @@ export async function loadReplayData(
     }
   }
 
-  // 坐标系：AIO 等设备的历史点已是房间坐标；FallSense 等设备是相对雷达的坐标，需要按安装配置换算。
-  // 每台设备分别试两种解释，落在房间内的点多的那种即为正确的坐标系。
   const qcBySn: Record<string, QingLan> = {};
   for (const el of detail.elements ?? []) if (el.sn && el.qingLanConfig?.container) qcBySn[el.sn] = el.qingLanConfig;
+
+  // 平台的姿态 / 事件时间线在多人时不可靠（2026-10-21 距离测试 …6711）：一条上报里有几个目标时只记第一个，坐着的人姿态、进区域事件全都没有；
+  // 而且记在帧的目标编号下，和轨迹点的 userId 对不上。轨迹点倒是都有。所以出现 userId 2 起的轨迹的时段，姿态和进出事件全部改从设备原始帧解，
+  // 每帧按时间 + 位置对到最近的轨迹点所在目标
+  const spans: { sn: string; a: number; b: number }[] = [];
+  for (const sn of sns) {
+    const ts = [...trackMap.values()].filter((tr) => tr.sn === sn && tr.uid >= FIRST_MISSED_UID).flatMap((tr) => tr.points.map((p) => p.t)).sort((a, b) => a - b);
+    for (const t of ts) {
+      const last = spans[spans.length - 1];
+      if (last && last.sn === sn && t - last.b <= LINK_MS) last.b = t;
+      else spans.push({ sn, a: t, b: t });
+    }
+  }
+  if (spans.length) {
+    const logs = await runLimited(
+      spans.map(({ sn, a, b }) => () =>
+        getAllDeviceLogs({ sn, command: "Device.postevent", range: [fmt(a - 5000), fmt(b + 5000)], pageSize: 200, max: Math.ceil((b - a) / 1000) * 3 + 200 }).then((r) => ({ sn, list: r.list })),
+      ),
+      4,
+    );
+    pt?.lap("frames");
+    for (const r of logs) {
+      if (r instanceof Error) {
+        errors.push(new Error(`多人时目标 2 起的姿态没补上：${r.message}`));
+        continue;
+      }
+      const frames = decodeFrames(r.list);
+      if (!frames.length) continue;
+      const a = frames[0].t;
+      const b = frames[frames.length - 1].t + 999;
+      const ranges = qcBySn[r.sn]?.ranges;
+      const tracksOfSn = [...trackMap.values()].filter((tr) => tr.sn === r.sn);
+      // 这一段里平台的姿态、事件作废，换成帧里的（跨段边界的姿态段截掉段内部分）
+      for (const tr of tracksOfSn)
+        tr.postures = tr.postures.flatMap((s) => {
+          if (s.e < a || s.s > b) return [s];
+          return [...(s.s < a ? [{ ...s, e: a - 1 }] : []), ...(s.e > b ? [{ ...s, s: b + 1 }] : [])];
+        });
+      for (let i = events.length - 1; i >= 0; i--) if (events[i].sn === r.sn && events[i].t >= a && events[i].t <= b) events.splice(i, 1);
+      const sorted = tracksOfSn.map((tr) => ({ tr, pts: [...tr.points].sort((p, q) => p.t - q.t) }));
+      const owner = (f: Frame) => {
+        let best: { tr: (typeof sorted)[number]["tr"]; d: number } | undefined;
+        for (const { tr, pts } of sorted) {
+          for (let i = lowerBound(pts, f.t - FRAME_MATCH_MS, (p) => p.t); i < pts.length && pts[i].t <= f.t + FRAME_MATCH_MS; i++) {
+            const d = Math.hypot(pts[i].x - f.x, pts[i].y - f.y);
+            if (!best || d < best.d) best = { tr, d };
+          }
+        }
+        return best?.tr;
+      };
+      const open = new Map<string, { s: number; e: number; p: number }>();
+      const made: { e: number }[] = [];
+      for (const f of frames) {
+        const tr = owner(f);
+        if (!tr) continue;
+        const seg = open.get(tr.key);
+        if (seg && seg.p === f.posture && f.t - seg.e <= FRAME_GAP_MS) seg.e = f.t;
+        else if (f.posture) {
+          const next = { s: f.t, e: f.t, p: f.posture };
+          tr.postures.push(next);
+          made.push(next);
+          open.set(tr.key, next);
+        }
+        if (EVENTS[f.event]) events.push({ t: f.t, sn: r.sn, uid: tr.uid, type: f.event, range: f.area === 255 ? undefined : (ranges?.[f.area]?.text ?? `区域 ${f.area}`) });
+      }
+      // 段尾和平台一样按"最后一个样本 + 1 秒"算
+      for (const s of made) s.e += 999;
+    }
+  }
+
+  // 坐标系：AIO 等设备的历史点已是房间坐标；FallSense 等设备是相对雷达的坐标，需要按安装配置换算。
+  // 每台设备分别试两种解释，落在房间内的点多的那种即为正确的坐标系。
   const bg = detail.background ?? {};
   const inRoom = (x: number, y: number) => x >= -30 && y >= -30 && x <= (bg.width ?? 0) + 30 && y <= (bg.height ?? 0) + 30;
   const converted: string[] = [];

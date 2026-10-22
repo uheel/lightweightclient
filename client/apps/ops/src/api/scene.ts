@@ -1,5 +1,5 @@
 import { api, realtime } from "@radar/core";
-import { isResponseOk, type DeviceResponse } from "./device";
+import { getAllDeviceLogs, isResponseOk, type DeviceResponse } from "./device";
 import type { PlanElement } from "./room";
 import { installAreaOf } from "../rooms/installArea";
 
@@ -36,6 +36,10 @@ export interface Scene {
   actions?: SceneAction[];
   interExpression?: string;
   exitExpression?: string;
+  /** conditionType = "timeout" 时：满足进入表达式后持续这么多秒（期间没满足退出表达式）才执行动作 */
+  timeout?: number | null;
+  /** 平台场景编辑页的"持续时间开关"（分钟）。6 型固件不认，带了整条下发不应答（见 docs/site-analysis.md"持续时间与久坐提醒"） */
+  duration?: number | null;
   [k: string]: unknown;
 }
 
@@ -128,6 +132,50 @@ export function mergeDeviceScenes(platform: Scene[], device: Scene[]) {
   ];
 }
 
+const AUDIO_ACTION = "Service_play_audiofile";
+/** 语音文件的比对键：去掉路径和 .wav */
+const fileKey = (v: unknown) => (typeof v === "string" && v ? v.replace(/^.*\//, "").replace(/\.wav$/i, "") : undefined);
+
+interface VoiceOption {
+  label: string;
+  /** 平台保存场景时要的 voiceId */
+  value: string;
+  fileName?: string;
+}
+
+/** 设备可用的语音（平台场景编辑页"播放本地音频"的下拉） */
+export async function getSceneVoices(deviceId: string) {
+  return (await api.get<VoiceOption[]>("/api/device-scene/voices-v2", { params: { deviceId } })).data ?? [];
+}
+
+/**
+ * 从设备读回的"播放本地音频"动作只有 audioFileName，没有 voiceId（2026-10-21 距离测试读回过 voiceFile + .wav 和 voiceId + .wav 两种），
+ * 原样保存平台会拒收（"播放音频动作缺少有效音频ID(VoiceId)"）。按语音文件补上 voiceId / voiceName / voiceFile：
+ * 先找平台记录里同一个文件的动作，找不到再查 voices-v2。补不上的原样留着，保存时由平台报错。
+ */
+export async function fillVoiceIds(scenes: Scene[], platform: Scene[], deviceId: string) {
+  const missing = scenes.flatMap((s) => s.actions ?? []).filter((a) => a.name === AUDIO_ACTION && !a.voiceId);
+  if (!missing.length) return scenes;
+  const known = new Map<string, { voiceId: string; voiceName?: unknown; voiceFile?: unknown }>();
+  const add = (keys: unknown[], v: { voiceId: string; voiceName?: unknown; voiceFile?: unknown }) => {
+    for (const k of keys.map(fileKey)) if (k && !known.has(k)) known.set(k, v);
+  };
+  for (const a of platform.flatMap((s) => s.actions ?? [])) {
+    if (a.name === AUDIO_ACTION && typeof a.voiceId === "string" && a.voiceId)
+      add([a.voiceId, a.voiceFile, a.audioFileName], { voiceId: a.voiceId, voiceName: a.voiceName, voiceFile: a.voiceFile });
+  }
+  if (missing.some((a) => !known.has(fileKey(a.audioFileName) ?? ""))) {
+    for (const v of await getSceneVoices(deviceId).catch(() => [])) add([v.value, v.fileName], { voiceId: v.value, voiceName: v.label, voiceFile: v.fileName });
+  }
+  return scenes.map((s) => ({
+    ...s,
+    actions: s.actions?.map((a) => {
+      const hit = a.name === AUDIO_ACTION && !a.voiceId ? known.get(fileKey(a.audioFileName) ?? "") : undefined;
+      return hit ? { ...a, ...hit } : a;
+    }),
+  }));
+}
+
 /**
  * 保存并下发设备场景。整体覆盖：列表里没有的场景会被删除。
  * 返回下发指令的 seq。
@@ -162,12 +210,52 @@ export async function waitIssued(deviceId: string, before: string | undefined, t
   return { status: "fail", text: "30 秒内设备没有应答" } as SendState;
 }
 
+// ---------- 表达式求值 ----------
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const fmtTime = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+};
+
+export interface VerifyResult {
+  seq?: number;
+  /** 设备返回的结果文本；没有 = 超时没回（求值出错时设备只回 201，不回结果，见 docs/site-analysis.md"场景表达式"） */
+  result?: string;
+  ms: number;
+}
+
+/**
+ * 让设备当场求值一条表达式（平台下发 IOT.callservice Service_expression_verify，不保存、不影响场景）。
+ * 设备算完发 Device.postevent {Event_service_result:{service_result}}，seq 和请求的一样。
+ * 平台网页端听 SignalR VerifyExpression / VerifyExpressionResult，实测浏览器收不到，所以按 seq 从通信日志里取结果。
+ */
+export async function verifyExpression(d: { id: string; sn: string }, expression: string, timeoutMs = 15_000): Promise<VerifyResult> {
+  const t0 = Date.now();
+  const seq = (await api.post<number>("/api/device-config/verify-expression", { deviceId: d.id, expression })).data;
+  const tag = `"seq": ${seq},`;
+  while (Date.now() - t0 < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 800));
+    const { list } = await getAllDeviceLogs({ sn: d.sn, command: "Device.postevent", range: [fmtTime(t0 - 5000), fmtTime(Date.now() + 60_000)], pageSize: 100, max: 300 });
+    const hit = list.find((l) => l.rawData?.includes(tag) && l.rawData.includes("Event_service_result"));
+    if (hit) {
+      try {
+        const r = (JSON.parse(hit.rawData!) as { params?: { Event_service_result?: { service_result?: unknown } } }).params?.Event_service_result?.service_result;
+        return { seq, result: typeof r === "string" ? r : JSON.stringify(r), ms: Date.now() - t0 };
+      } catch {
+        return { seq, result: hit.rawData, ms: Date.now() - t0 };
+      }
+    }
+  }
+  return { seq, ms: Date.now() - t0 };
+}
+
 // ---------- 房间布局：区域与雷达安装区域 ----------
 
 export interface LayoutRange {
   /** 下发给设备的区域编号，从 0 开始 */
   index: number;
-  /** 2 普通床，3 干扰区，4 门，5 监护床，6 感应区，7 家具 */
+  /** 2 普通床，3 干扰区，4 门，5 监护床，6 自定义区（感应区，名字自己起），7 家具 */
   type: number;
   text?: string;
   /** 空间区域类型（字典 ROOM_SPACE_TYPE），56 马桶、57 淋浴等 */
@@ -212,5 +300,5 @@ export async function getRoomLayouts(roomId: string) {
 export const SPACE_TYPE: Record<number, string> = {
   51: "床", 52: "沙发", 53: "过道", 54: "会客", 55: "餐厅", 56: "马桶", 57: "淋浴", 58: "洗漱", 59: "更衣", 60: "阅读",
 };
-export const RANGE_TYPE: Record<number, string> = { 2: "普通床", 3: "干扰区", 4: "门", 5: "监护床", 6: "感应区", 7: "家具" };
+export const RANGE_TYPE: Record<number, string> = { 2: "普通床", 3: "干扰区", 4: "门", 5: "监护床", 6: "自定义区（感应区）", 7: "家具" };
 export { INSTALL_AREA } from "../rooms/installArea";
