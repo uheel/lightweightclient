@@ -16,7 +16,7 @@ import PropertyTab from "./PropertyTab";
 import LocationDialog from "./LocationDialog";
 import DeleteDeviceDialog from "./DeleteDeviceDialog";
 import NameEdit from "./NameEdit";
-import { radarInRoom, type QlConfig, type Spot } from "../rooms/qinglan";
+import { radarInRoom, zonesOf, type QlConfig, type Spot } from "../rooms/qinglan";
 import { flashSpot } from "../guide/flash";
 import AreaSelect from "../rooms/AreaSelect";
 import { areaText, type InstallArea } from "../rooms/installArea";
@@ -145,7 +145,14 @@ export default function DeviceDetail({
   }
   // 区域画布按房间平面图的方向画，并画出房间的墙
   const plan = useMemo(
-    () => (cfg ? { facing: cfg.installDirection, room: room?.size ? { ...room.size, radar: radarInRoom(cfg as QlConfig) } : undefined } : undefined),
+    () =>
+      cfg
+        ? {
+            facing: cfg.installDirection,
+            room: room?.size ? { ...room.size, radar: radarInRoom(cfg as QlConfig) } : undefined,
+            zones: Object.fromEntries(zonesOf(cfg as QlConfig).map((z) => [z.index, { text: z.text, spaceType: z.spaceType }])),
+          }
+        : undefined,
     [cfg, room],
   );
   const installType = cfg?.installType === 0 || cfg?.installType === 1 ? cfg.installType : undefined;

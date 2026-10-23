@@ -10,6 +10,7 @@ import {
   type Option,
   type Radar,
 } from "../api/device";
+import { createMaster, MASTER_TYPE } from "../api/master";
 import { placeInLayout, SLOT_TEXT, slotSource, type SlotSource } from "../rooms/radarSlot";
 import { SlotAreaLine } from "../rooms/AreaSelect";
 import type { InstallArea } from "../rooms/installArea";
@@ -24,9 +25,11 @@ interface Values {
   description?: string;
 }
 
-/** 添加雷达设备（字段同平台雷达设备页的"新增"） */
-export default function AddDeviceDialog({ open, existing, onClose, onCreated }: {
+/** 添加设备：雷达（字段同平台雷达设备页的"新增"）或管理主机（同平台管理主机页的"新增"：只有名称和序列号） */
+export default function AddDeviceDialog({ open, existing, defaultType, onClose, onCreated }: {
   open: boolean;
+  /** 打开时默认选中的设备类型（例如列表正按管理主机筛选时） */
+  defaultType?: number;
   /** 本机构已有的设备，用来提示 SN 重复 */
   existing: Radar[];
   onClose: () => void;
@@ -54,10 +57,12 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
   useEffect(() => {
     if (!open) return;
     form.resetFields();
+    if (defaultType !== undefined) form.setFieldsValue({ deviceType: defaultType });
     setMount(1);
-    getRadarTypes().then(setTypes, () => {});
+    // 雷达各型号 + 管理主机（字典里管理主机归在外设分组，单独加）
+    getRadarTypes().then((t) => setTypes([...t, { value: MASTER_TYPE, label: "管理主机" }]), () => setTypes([{ value: MASTER_TYPE, label: "管理主机" }]));
     getBuildingOptions().then(setBuildings, () => {});
-  }, [open, form]);
+  }, [open, form, defaultType]);
 
   useEffect(() => {
     setFloors([]);
@@ -68,9 +73,11 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     if (floorId) getRoomOptions(floorId).then(setRooms, () => {});
   }, [floorId]);
 
+  const isMaster = deviceType === MASTER_TYPE;
+
   useEffect(() => {
     setSlot(undefined);
-    if (!roomId) return;
+    if (!roomId || isMaster) return;
     let alive = true;
     slotSource({ sn: "", deviceType } as Radar, roomId).then(
       (x) => {
@@ -83,7 +90,7 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     return () => {
       alive = false;
     };
-  }, [roomId, deviceType]);
+  }, [roomId, deviceType, isMaster]);
 
   async function submit() {
     const v = await form.validateFields();
@@ -91,6 +98,13 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
     try {
       const sn = v.sn.trim();
       const deviceName = v.deviceName.trim();
+      if (v.deviceType === MASTER_TYPE) {
+        // 管理主机不装在房间里；它管哪些房间在主机详情的"覆盖房间"里勾
+        await createMaster({ sn, deviceName, description: v.description?.trim() || undefined });
+        message.success(`已添加管理主机 ${deviceName}，接着在它的"覆盖房间"里勾上要管的房间`);
+        onCreated(sn);
+        return;
+      }
       const id = await createRadar({ ...v, sn, deviceName, description: v.description?.trim() || undefined });
       let note = "";
       if (v.roomId && place && slot && slot.kind !== "has") {
@@ -140,12 +154,25 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
         >
           <Input className="mono" maxLength={64} placeholder="请输入" allowClear />
         </Form.Item>
-        <Form.Item name="deviceName" label="设备名称" rules={[{ required: true, whitespace: true, message: "请输入设备名称" }]}>
-          <Input maxLength={32} placeholder="例如 101 房间" />
-        </Form.Item>
         <Form.Item name="deviceType" label="设备类型" rules={[{ required: true, message: "请选择设备类型" }]}>
           <Select options={types} placeholder="请选择" showSearch optionFilterProp="label" />
         </Form.Item>
+        <Form.Item
+          name="deviceName"
+          label="设备名称"
+          rules={[
+            { required: true, whitespace: true, message: "请输入设备名称" },
+            // 平台限制：雷达 32 个字，管理主机 64 个字
+            { max: isMaster ? 64 : 32, message: `最多 ${isMaster ? 64 : 32} 个字` },
+          ]}
+        >
+          <Input maxLength={isMaster ? 64 : 32} placeholder={isMaster ? "例如 1 楼护士站" : "例如 101 房间"} />
+        </Form.Item>
+        {isMaster ? (
+          <p className="muted small" style={{ marginTop: -8 }}>
+            管理主机不装在房间里。添加后在它的"覆盖房间"里勾上要管的房间，主机上才有这些房间的雷达；云对讲还要给主机启用 SIP 账号。
+          </p>
+        ) : (
         <Form.Item label="安装位置" extra="可以先不填，之后再绑定房间">
           <Space.Compact block>
             <Form.Item name="buildingId" noStyle>
@@ -172,7 +199,8 @@ export default function AddDeviceDialog({ open, existing, onClose, onCreated }: 
             </Form.Item>
           </Space.Compact>
         </Form.Item>
-        {roomId && slot && slot.kind !== "has" && (
+        )}
+        {!isMaster && roomId && slot && slot.kind !== "has" && (
           <Form.Item style={{ marginTop: -12 }}>
             <Checkbox checked={place} onChange={(e) => setPlace(e.target.checked)}>
               {slot.kind === "roomType" && slot.typeName ? `从户型"${slot.typeName}"拷一个雷达位置（沿用户型里的安装方式和区域）` : SLOT_TEXT[slot.kind]}

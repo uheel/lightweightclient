@@ -40,6 +40,9 @@ const fillOf = (type: number) => {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.7)`;
 };
 
+/** 区域的名字和空间区域类型（设备不存），按区域编号 */
+export type ZoneNames = Record<number, { text?: string; spaceType?: number }>;
+
 /** 顶装 / 侧装互换时的新朝向，以及雷达在房间里的新位置（cm） */
 export interface MountChange {
   facing: number;
@@ -52,7 +55,7 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
  * 按设备上的数组更新一份区域配置；返回 config 为空表示不能自动写回（带原因）。
  * 改了安装方式时要带上 mount：探测范围换成新装法的，按雷达在房间里的新位置摆放，区域按新坐标系换回房间坐标。
  */
-export function applyDeviceArrays(c: QlConfig, written: { config?: unknown; area?: unknown }, mount?: MountChange): { config?: QlConfig; note?: string } {
+export function applyDeviceArrays(c: QlConfig, written: { config?: unknown; area?: unknown }, mount?: MountChange, names?: ZoneNames): { config?: QlConfig; note?: string } {
   const next: QlConfig = JSON.parse(JSON.stringify(c));
   const cur = toDeviceArrays(c);
   // 换回房间坐标用的那份配置：装法 / 朝向变了就用新的
@@ -109,6 +112,15 @@ export function applyDeviceArrays(c: QlConfig, written: { config?: unknown; area
       };
     });
   }
+  if (names && next.ranges) {
+    // 没填名字的保留原来的（类型改了时是类型名）；空间区域类型以编辑器为准，清掉就删掉
+    next.ranges = next.ranges.map((z, i) => {
+      const m = names[i];
+      if (!m) return z;
+      const { spaceType: _s, ...rest } = z;
+      return { ...rest, text: m.text?.trim() || z.text, ...(m.spaceType !== undefined ? { spaceType: m.spaceType } : {}) };
+    });
+  }
   if (geo !== c) next.supervision = placeSupervision(next);
   return { config: next };
 }
@@ -147,7 +159,8 @@ function replaceRadar(list: PlanElement[] | undefined, sn: string, cfg: QlConfig
   return [out, hit];
 }
 
-export async function syncLayoutFromDevice(roomId: string, sn: string, written: { config?: unknown; area?: unknown }, mount?: MountChange): Promise<SyncResult> {
+/** names：区域名字和空间区域类型；只改了这些时 written 为空，只写布置、不碰设备 */
+export async function syncLayoutFromDevice(roomId: string, sn: string, written: { config?: unknown; area?: unknown }, mount?: MountChange, names?: ZoneNames): Promise<SyncResult> {
   const design = await getRoomDesign(roomId);
   const find = (list?: PlanElement[]): PlanElement | undefined => {
     for (const e of list ?? []) {
@@ -158,7 +171,7 @@ export async function syncLayoutFromDevice(roomId: string, sn: string, written: 
   };
   const el = find(design?.elements);
   if (!design || !el?.qingLanConfig) return { changed: false, note: "这台雷达不在房间布置里，平台房间图上不会显示这些区域" };
-  const { config, note } = applyDeviceArrays(el.qingLanConfig, written, mount);
+  const { config, note } = applyDeviceArrays(el.qingLanConfig, written, mount, names);
   if (!config) return { changed: false, note };
   if (JSON.stringify(config) === JSON.stringify(el.qingLanConfig)) return { changed: false };
   const remounted = mount !== undefined || config.installType !== el.qingLanConfig.installType;

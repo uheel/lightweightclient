@@ -3,7 +3,8 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Sele
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { createSlave, getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
-import ZoneCanvas, { limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
+import ZoneCanvas, { CUSTOM, limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
+import { SPACE_TYPE } from "../api/scene";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 
 /**
@@ -35,6 +36,15 @@ export interface PlanCtx {
   deviceType?: number;
   /** 这次改了顶装 / 侧装：给用户的提示 */
   mountNotes?: string[];
+  /** 房间布置里各区域的名字和空间区域类型，按区域编号；设备不存这些，下发区域后跟着写回布置 */
+  zones?: Record<number, ZoneMeta>;
+  /** 设备绑定了房间（区分"没绑房间"和"绑了但布置里没有它"，拖不动雷达时给原因） */
+  roomBound?: boolean;
+}
+
+export interface ZoneMeta {
+  text?: string;
+  spaceType?: number;
 }
 
 export interface Structured {
@@ -462,19 +472,28 @@ const AREA_TYPES = [
   { value: 3, label: "干扰区" },
   { value: 4, label: "门" },
   { value: 5, label: "监护床" },
-  { value: 6, label: "感应区" },
+  { value: 6, label: "自定义区（感应区）" },
   { value: 7, label: "家具" },
 ];
 const AREA_COLOR: Record<number, string> = { 2: "#7C8CF5", 3: "#A0A4B8", 4: "#E09A2D", 5: "#2F9E6B", 6: "#3A86D4", 7: "#B07ACB" };
 const areaName = (t: number) => AREA_TYPES.find((a) => a.value === t)?.label ?? `类型 ${t}`;
 
-interface Area {
+interface Area extends ZoneMeta {
   id: number;
   type: number;
   x0: number;
   x1: number;
   y0: number;
   y1: number;
+}
+
+const SPACE_OPTIONS = Object.entries(SPACE_TYPE).map(([k, label]) => ({ value: Number(k), label }));
+const metaOf = (list: Area[]): Record<number, ZoneMeta> => Object.fromEntries(list.map((a) => [a.id, { text: a.text, spaceType: a.spaceType }]));
+
+/** 自定义区要起名字，场景才认得出是哪种区域（还要选空间区域类型） */
+function checkNames(list: Area[]) {
+  const bad = list.filter((a) => a.type === CUSTOM && !a.text?.trim());
+  if (bad.length) return `自定义区 ${bad.map((a) => a.id).join("、")} 还没起名字（选中后在下面填）`;
 }
 
 /** [[编号, 类型, 四个角 8 个坐标(分米)], …]；空数组表示没有配置 */
@@ -510,7 +529,7 @@ const m1 = (d: number) => (d / 10).toFixed(1);
 const CANVAS_TYPES: ZoneType[] = [
   { value: 5, label: "监护床", color: AREA_COLOR[5]!, size: [9, 20] },
   { value: 4, label: "门", color: AREA_COLOR[4]!, size: [9, 1] },
-  { value: 6, label: "感应区", color: AREA_COLOR[6]!, size: [10, 10] },
+  { value: 6, label: "自定义区（感应区）", color: AREA_COLOR[6]!, size: [10, 10] },
   { value: 2, label: "普通床", color: AREA_COLOR[2]!, size: [9, 20] },
   { value: 7, label: "家具", color: AREA_COLOR[7]!, size: [8, 5] },
   { value: 3, label: "干扰区", color: AREA_COLOR[3]!, size: [10, 10] },
@@ -539,8 +558,11 @@ const QL_RADAR_AREA: Structured = {
     return out;
   },
   Editor: ({ value, onChange, onError, disabled, ctx, setOther, setPlan }) => {
-    const list = readAreas(value);
     const plan = (ctx[PLAN_CTX] ?? {}) as PlanCtx;
+    // 名字只有在房间布置里才有地方存
+    const named = plan.facing !== undefined;
+    const list = readAreas(value).map((a) => ({ ...a, ...plan.zones?.[a.id] }));
+    const check = (next: Area[]) => checkAreas(next) ?? (named ? checkNames(next) : undefined);
     const cfgRaw = toArray(ctx.QL_radar_config);
     const cfg = cfgRaw && cfgRaw.length >= 11 ? cfgRaw.map((x) => num(x, 0)) : undefined;
     const installType = cfg?.[0] ?? 0;
@@ -557,8 +579,9 @@ const QL_RADAR_AREA: Structured = {
       setPlan({ facing: res.facing, room: plan.room && res.radar ? { ...plan.room, radar: res.radar } : plan.room, mountNotes: res.notes });
     };
     const update = (next: Area[]) => {
-      onError(checkAreas(next));
+      onError(check(next));
       onChange(writeAreas(next));
+      if (named && setPlan) setPlan({ zones: metaOf(next) });
     };
     // 拖雷达到实际安装的位置（不一定是墙的中间 / 房间正中）：区域在房间里不动，监测范围按新位置裁到墙内，下发成功后连雷达位置一起写回房间布置
     const room = plan.room;
@@ -578,8 +601,16 @@ const QL_RADAR_AREA: Structured = {
       [n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9]] = [b.x0, b.y0, b.x1, b.y0, b.x0, b.y1, b.x1, b.y1];
       setOther("QL_radar_config", n);
     };
+    // 雷达拖不动时说明缺什么、去哪补：按要先做的顺序列出（房间 → 布置 → 房间尺寸 → 安装配置）
+    const dragWhy: string[] = [];
+    if (!room) {
+      if (!plan.roomBound) dragWhy.push('雷达还没绑定房间：到"概览"里点房间旁的"设置"，选好房间并勾选放进房间布置');
+      else if (plan.facing === undefined) dragWhy.push('房间布置里没有这台雷达：到"诊断"页找到这个房间，点"放进布置"');
+      else dragWhy.push('房间布置里没有房间的宽和长：到"楼宇"里给这个房间填好尺寸');
+    }
+    if (!cfg) dragWhy.push('平台上没有这台雷达的安装配置：在"安装设置"分组点"读取本组"从设备读回；设备上也没有的话，先填好安装方式、高度和监测范围下发');
     const outside = bound ? list.filter((a) => a.type !== 3 && !inside(a, bound)) : [];
-    const err = checkAreas(list) ?? (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
+    const err = check(list) ?? (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
     return (
       <div className="st st-area">
         <div className="zc-facing">
@@ -608,13 +639,29 @@ const QL_RADAR_AREA: Structured = {
           onZones={update}
           onBound={setOther ? setBound : undefined}
           onRadar={cfg && setOther && setPlan && room ? moveRadar : undefined}
+          spaceTypes={named && setPlan ? SPACE_OPTIONS : undefined}
         />
         {plan.mountNotes && plan.mountNotes.length > 0 && (
           <p className="pp-note warn">改了安装方式或朝向：区域在房间里的位置不变，{plan.mountNotes.join("；")}。请确认高度和监测范围后再下发。</p>
         )}
         <p className="pp-note">
           {plan.facing ? "按房间平面图的方向画，粗框是房间的墙。" : "这台雷达不在房间布置里，按默认朝向画。"}区域的编号就是场景规则里引用的区域 ID。
+          {named && "自定义区（感应区）选中后填名字（沙发区、马桶区…）和空间区域类型，场景按空间区域类型找区域。"}
         </p>
+        {dragWhy.length > 0 && setOther && setPlan && (
+          <div className="pp-note warn">
+            雷达现在不能拖动到实际安装位置，{dragWhy.length > 1 ? "按顺序处理：" : "因为"}
+            {dragWhy.length > 1 ? (
+              <ol style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {dragWhy.map((w) => (
+                  <li key={w}>{w}。</li>
+                ))}
+              </ol>
+            ) : (
+              <>{dragWhy[0]}。</>
+            )}
+          </div>
+        )}
         {err && <small className="prop-err">{err}</small>}
       </div>
     );

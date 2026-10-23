@@ -59,8 +59,53 @@ export interface Master {
   updatedAt?: string;
 }
 
+/**
+ * 新增管理主机，和平台管理主机页的"新增"一样（V3 机构走通用的 POST /api/device/v3，deviceType = 3）。
+ * 平台表单只有设备名称（≤64）和序列号（≤64，全平台唯一）；SIP 账号要另外启用
+ */
+export async function createMaster(m: { deviceName: string; sn: string; description?: string }) {
+  return (await api.post<string>("/api/device/v3", { ...m, deviceType: MASTER_TYPE })).data;
+}
+
 export async function getMasters() {
   return (await api.get<Master[]>("/api/device/v3/master-pages", { params: { current: 1, pageSize: 5000 } })).data ?? [];
+}
+
+// ---------- 主机的 SIP 账号（同平台管理主机页的启用 / 更换 / 停用 SIP） ----------
+
+/** 平台挑出来的空闲 SIP 账号，确定后才绑给主机 */
+export interface SipPreview {
+  deviceId: string;
+  sipAccountId?: string;
+  /** SIP 服务商，例如"申瓯" */
+  providerName?: string;
+  sipServer?: string;
+  sipAccount?: string;
+  sipPassword?: string;
+}
+
+/**
+ * 预览一个空闲账号。启用用 preview，更换用 switch-preview（排除主机现在的账号）；
+ * "换一个"时把正在显示的账号作为 excludeSipAccount 再预览一次
+ */
+export async function previewMasterSip(m: { id: string; orgId: string }, mode: "enable" | "switch", excludeSipAccount?: string) {
+  const path = mode === "switch" ? "/api/device/v4/master-sip/switch-preview" : "/api/device/v4/master-sip/preview";
+  return (await api.get<SipPreview>(path, { params: { deviceId: m.id, excludeSipAccount }, org: await orgOf(m) })).data;
+}
+
+/** 测试账号能不能注册：{success, message, elapsedMilliseconds} */
+export async function testSipAccount(m: { orgId: string }, sipAccountId: string) {
+  return (await api.post<{ success?: boolean; message?: string; elapsedMilliseconds?: number }>(`/api/device-sip/${sipAccountId}/test`, undefined, { org: await orgOf(m) })).data;
+}
+
+/** 绑定账号并下发给主机；主机执行完会回一条 command = "sipaccount" 的设备应答 */
+export async function applyMasterSip(m: { id: string; orgId: string }, mode: "enable" | "switch", sipAccount: string) {
+  await api.post(`/api/device/v4/master-sip/${mode}`, { deviceId: m.id, sipAccount }, { org: await orgOf(m) });
+}
+
+/** 停用：主机不再用当前账号，平台解除绑定 */
+export async function disableMasterSip(m: { id: string; orgId: string }) {
+  await api.post("/api/device/v4/master-sip/disable", { deviceId: m.id }, { org: await orgOf(m) });
 }
 
 /** 主机覆盖的房间（房间 id） */
@@ -155,6 +200,15 @@ export async function getAvailableSip(radar: { orgId: string }) {
  */
 export async function saveRadarCallConfig(radar: { id: string; sn: string; orgId: string }, cfg: { masterId?: string | null; call: Record<string, unknown> }) {
   return (await api.put<number>("/api/device-config/call", { ...cfg, sn: radar.sn, deviceId: radar.id }, { org: await orgOf(radar) })).data;
+}
+
+/**
+ * 通话配置的下发状态（GET /api/device-config/status 里的 call 部分）：1 等待设备应答，2 成功，3 失败。
+ * 平台网页端保存通话配置后用它和实时推送 DeviceConfigChange {command: "write"} 判断设备收没收到
+ */
+export async function getCallIssueStatus(radar: { id: string; orgId: string }) {
+  const s = (await api.get<{ callIssueStatus?: number; callIssueAt?: string; callIssueError?: string }>("/api/device-config/status", { params: { deviceId: radar.id }, org: await orgOf(radar) })).data ?? {};
+  return { status: s.callIssueStatus, at: s.callIssueAt, error: s.callIssueError };
 }
 
 /** 通话记录 */

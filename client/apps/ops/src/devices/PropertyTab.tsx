@@ -14,7 +14,7 @@ import {
   type PropertySchema,
   type StoredProperty,
 } from "../api/device";
-import { structuredFor, PLAN_CTX, type PlanCtx } from "./propertyEditors";
+import { structuredFor, PLAN_CTX, type PlanCtx, type ZoneMeta } from "./propertyEditors";
 import { syncLayoutFromDevice } from "../rooms/syncLayout";
 import { sameArray, toDeviceArrays, validate, type QlConfig } from "../rooms/qinglan";
 import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
@@ -240,10 +240,10 @@ export default function PropertyTab({
   const ctx = useMemo(() => {
     const c: Record<string, unknown> = {};
     for (const p of schema?.properties ?? []) c[p.propertyName] = p.propertyName in edits ? edits[p.propertyName] : base(p.propertyName);
-    c[PLAN_CTX] = { ...plan, ...planEdit, deviceType: schema?.deviceTypeCode } satisfies PlanCtx;
+    c[PLAN_CTX] = { ...plan, ...planEdit, deviceType: schema?.deviceTypeCode, roomBound: !!roomId } satisfies PlanCtx;
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, stored, device, edits, plan, planEdit]);
+  }, [schema, stored, device, edits, plan, planEdit, roomId]);
 
   const visible = (p: PropertyDef) => visibleBy(p.fieldProps?.visibleExpression, ctx);
   const changed = (schema?.properties ?? []).filter((p) => !readOnly(p) && !p.isBuiltIn && visible(p) && isModified(p.propertyName));
@@ -345,7 +345,7 @@ export default function PropertyTab({
       // 按布置下发时布置本身就是来源，不用写回
       if (roomId && !fromLayout && ("QL_radar_area" in written || "QL_radar_config" in written)) {
         const mount = pe?.facing !== undefined ? { facing: pe.facing, radar: pe.room?.radar } : undefined;
-        syncLayoutFromDevice(roomId, sn, { config: written.QL_radar_config, area: written.QL_radar_area }, mount).then(
+        syncLayoutFromDevice(roomId, sn, { config: written.QL_radar_config, area: written.QL_radar_area }, mount, pe?.zones).then(
           (res) => {
             if (res.changed) {
               message.success("已同步到房间布置，平台的房间图也会跟着变");
@@ -605,6 +605,27 @@ export default function PropertyTab({
     });
   }
 
+  /** 只改了区域名字 / 空间区域类型：设备不存这些，直接写到房间布置 */
+  const namesDirty = !!roomId && !!planEdit?.zones && !sameNames(planEdit.zones, plan?.zones);
+  const [savingNames, setSavingNames] = useState(false);
+  async function saveNames() {
+    if (!roomId || !planEdit?.zones) return;
+    const bad = errors.QL_radar_area;
+    if (bad) return message.warning(bad);
+    setSavingNames(true);
+    try {
+      const res = await syncLayoutFromDevice(roomId, sn, {}, undefined, planEdit.zones);
+      if (res.note) return notification.warning({ message: "区域名字没有保存", description: res.note, duration: 10 });
+      setPlanEdit((cur) => (cur ? { ...cur, zones: undefined } : cur));
+      message.success("区域名字和空间区域类型已保存到房间布置");
+      onLayoutSynced?.();
+    } catch (e) {
+      notification.error({ message: "保存区域名字失败", description: e instanceof Error ? e.message : String(e), duration: 10 });
+    } finally {
+      setSavingNames(false);
+    }
+  }
+
   function undo() {
     setPlanEdit(undefined);
     setEdits({});
@@ -765,6 +786,17 @@ export default function PropertyTab({
           </section>
         </div>
 
+        {namesDirty && !changed.length && busy !== "set-property" && (
+          <div className="pp-bar" role="region" aria-label="未保存的区域名字">
+            <span>改了区域名字 / 空间区域类型（只存在房间布置里，不用下发）</span>
+            <Button disabled={savingNames} onClick={undo}>
+              撤销
+            </Button>
+            <Button type="primary" loading={savingNames} onClick={saveNames}>
+              保存到房间布置
+            </Button>
+          </div>
+        )}
         {(changed.length > 0 || busy === "set-property") && (
           <div className="pp-bar" role="region" aria-label="未下发的修改">
             <span>{busy === "set-property" ? "已下发，正在等设备确认…" : `改了 ${changed.length} 项：${changed.map(nameOf).join("、")}`}</span>
@@ -778,6 +810,12 @@ export default function PropertyTab({
         )}
       </div>
   );
+}
+
+function sameNames(a: Record<number, ZoneMeta>, b?: Record<number, ZoneMeta>) {
+  const norm = (m?: Record<number, ZoneMeta>) =>
+    JSON.stringify(Object.entries(m ?? {}).map(([k, v]) => [Number(k), v.text?.trim() || "", v.spaceType ?? null]).sort((x, y) => (x[0] as number) - (y[0] as number)));
+  return norm(a) === norm(b);
 }
 
 function groupsOf(s: PropertySchema) {

@@ -511,7 +511,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 
 1. 雷达云对讲需要有自己的 SIP 号：`talk_local_number` / `talk_auth_pass` / `talk_sip_server`（`GET /api/device-sip/available` 取一个空闲账号）
 2. 雷达"通话配置"里选所属管理主机（`/api/device-config/call` 的 `masterId`），平台下发 `IOT.setproperty {talk_master_number: 主机的 SIP 号}`，再下发 `{talk_type_sel: 1}`（0 局域网 / 1 云对讲）
-3. 管理主机勾选覆盖哪些房间（`POST /api/master/room-keys {deviceId, sn, roomKeys:[roomId…], issued}`），平台把这些房间里的雷达作为通讯录下发给主机（`update.devices`，见下）
+3. 管理主机勾选覆盖哪些房间（`POST /api/master/room-keys {deviceId, sn, roomKeys:[roomId…], issued}`），平台把这些房间里的雷达作为通讯录下发给主机（`update.devices`，见下）。**覆盖了房间也不一定进通讯录**：局域网模式的 AIO 要平台上存着它的 IP（属性 `net_ip`）才会进，没有就悄悄排除；云对讲的按 SIP 号进，不要 IP。2026-10-23 展厅演示 f14雷达（`…a173`，当天删掉重加，平台上没有 `net_ip`）：12:02 云对讲时随通讯录下发了（`callNum 10027, callType 1`），12:06 在平台通话配置里改成局域网后，下一次下发就没有它了；同机构局域网的 703客厅存着 `net_ip` 就在。另外它心跳里的 IP 是 192.168.5.4，和主机 172.16.1.200 不在一个网段，本来也只能用云对讲。通讯录变了平台会自动重发 `update.devices`（改通话配置、改覆盖房间都会触发）
 4. 雷达场景的动作里加 `{type:"method", name:"Service_call_master"}`（不带参数），场景触发时雷达拨 `talk_master_number`。平台网页端限制：一个场景最多一个呼叫管理主机，且和"播放本地音频"二选一。邻聚万家的离床、跌倒、疑似跌倒、蓝牙按钮场景都是 告警 + 呼叫主机。李虎机构的距离test（…6711）也有，`talk_master_number` = 10056
 5. 手动呼叫：`POST /api/device/call {sn, account}` → `IOT.callservice Service_call_master {call_ID: account}`（号码或手机）；挂断 `Service_call_handup`
 
@@ -536,7 +536,9 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 局域网打不通的主要原因是**雷达拨的 IP 不是主机**：
   - 很多机构的雷达拨 `192.168.2.250`（象屿慈爱 710 次、寿福康、录屏演示、近邻驿站、启明学校…），这些机构的主机都不在这个地址，应该是出厂默认值
   - 东堃健康的雷达拨 172.16.20.146，平台记录的主机 IP 是 192.168.5.170（主机换过 IP 或换过主机）
-- 平台从不把主机 IP 下发给雷达：type 6 的属性字典里没有主机 IP 这一项，通信日志里也没有这类下发；网页端通话表单里的隐藏字段 `talk_master_IP` 初始值是 `"123456"`，是遗留字段。雷达怎么得知主机 IP 没查到（推测是主机拿到通讯录后在局域网里通知雷达，所以要主机在线、覆盖了房间并下发过通讯录）
+- **AIO（6 型）**：平台不把主机 IP 下发给雷达。6 型属性字典里没有主机 IP 这一项，抽查的 AIO 通信日志里也没有这类下发；网页端通话表单里的隐藏字段 `talk_master_IP` 初始值是 `"123456"`，是遗留字段。雷达怎么得知主机 IP 没查到（推测是主机拿到通讯录后在局域网里通知雷达，所以要主机在线、覆盖了房间并下发过通讯录）
+- **Ultra Plus（15 型，跌倒通话监测终端）会收到主机 IP**（2026-10-23 查展厅演示 ULTRA PLUS BATHROOM `0251A0F262E8EA55`）：协议和 AIO 不同，是 slim 那套 `set-property` / `get-property`，键是 `voip_mode`（0 局域网 / 1 云对讲）、`master_number`、`master_ip`、`local_number`、`sip_passwd`、`sip_server`、`call_backup`、`backup_number1～3`、`call_timeout`、`voip_max_time`、`call_record_url`。属性字典名是 `talk_master_number`、`sip_account`、`sip_password`、`sip_server`、`call_backup`、`talk_key1～3_number`、`call_timeout`、`voip_max_time`、`master_ip`（"管理机IP地址"），**没有 `talk_type_sel`**。平台网页端用同一个通话配置表单（`talk_*` + `masterId`）保存，后端按型号转成这套键，并把所选主机的 `ipAddress` 填进 `master_ip`：09:33:49 保存后下发了 `master_ip: "172.16.1.200"`（固德来护理主机）、`master_number: "10072"`（同一台主机的 SIP 号）。一个月的日志里只有这一次 `master_ip` 下发，说明只在保存通话配置时才下发，主机换了 IP 不会自动补发，要重新保存一次
+- 15 型局域网呼主机时，通话记录的被叫只有 IP（`172.16.1.200`），没有 `号码@`
 - 网页端在局域网模式、主机没有 IP 时会提示"局域网呼叫未能生效：当前设备还未和管理主机关联，请确认设备已安装到房间，且在管理主机的管理房间配置中关联了此设备所在房间"
 
 ### 管理主机的 MQTT 协议（和雷达不同）
@@ -556,13 +558,14 @@ topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{comm
 
 | 接口 | 用途 |
 |---|---|
+| `POST /api/device/v3 {deviceType: 3, deviceName（≤64）, sn（≤64）}` | 新增主机（V3 机构，平台管理主机页的"新增"只有这两项；非 V3 走 `/api/master`）。2026-10-23 在李虎机构用测试 SN 建了再 `DELETE /api/device/v3?id=` 删掉，都正常 |
 | `GET /api/device/v3/master-pages`、`/api/master`（CRUD） | 主机列表：`sn, deviceName, isOnline, firmwareVersion, ipAddress, sipEnable, sipServer, sipUserName, isSipRegister, sipRegisterAt, sipIssueStatus(2 = 已下发), deviceCount` |
 | `GET /api/master/available-list` | 机构里的主机（不一定带 `sipUserName`） |
 | `GET /api/master/info?deviceId=雷达` | **只返回覆盖房间里已有这台雷达所在房间的主机**（李虎 距离test 返回空，邻聚万家 卧室返回它的主机）。平台网页端"所属管理主机"下拉只用它，所以主机没覆盖这个房间时根本选不到 |
 | `GET/PUT /api/device-config/call` | 雷达通话配置。GET 返回平台记录 `{deviceId, masterId?, call:{…}}`，常常只有 `talk_sip_server`、没有 `masterId`；PUT `{masterId, call:{talk_type_sel, talk_master_number, talk_local_number, talk_auth_pass, talk_sip_server, …}, sn, deviceId, saveOnly}`，平台和记录比、只把变了的项 `IOT.setproperty` 下发，返回 seq，没变化返回 0。网页端选了主机时紧急号码填主机的 SIP 号 |
 | `GET /api/device-sip/available` | 一个空闲的 SIP 账号 `{sipAccount, sipPassword}`（网页端"随机选择 SIP"），保存通话配置时才绑给雷达 |
 | `GET/POST /api/master/room-keys`、`GET /api/device/v4/master/issue-devices-preview?deviceId=` | 主机覆盖的房间、将下发的通讯录 |
-| `GET /api/device/v4/master-sip/preview`、`POST …/enable`、`…/switch`、`…/disable {deviceId}`、`GET /api/master/sip-account-status?id=` | 给主机分配 / 换 / 停用 SIP 账号 |
+| `GET /api/device/v4/master-sip/preview`、`POST …/enable`、`…/switch`、`…/disable {deviceId}`、`GET /api/master/sip-account-status?id=` | 给主机分配 / 换 / 停用 SIP 账号。流程（平台网页端，运维端 `devices/master/MasterSip.tsx` 照做）：`preview?deviceId=`（更换用 `switch-preview?deviceId=&excludeSipAccount=现在的账号`）返回 `{deviceId, sipAccountId, providerName, sipServer, sipAccount, sipPassword}`，只是挑一个空闲账号，不占用；"刷新"再预览一次并把正在显示的账号作为 `excludeSipAccount`；"测试"是 `POST /api/device-sip/{sipAccountId}/test` → `{success, message, elapsedMilliseconds}`；确定后 `POST enable / switch {deviceId, sipAccount}` 绑定并下发，主机执行完回实时推送 `DeviceResponse {command: "sipaccount", code, data:{deviceId, success}}`（deviceId 可能带横线） |
 | `POST /api/device-sip/{id}/test`、`GET /api/master/read-property?sn=`、`POST /api/master/reboot?sn=`、`GET /api/master/relation-device-pages` | 测试账号、读主机属性、重启 |
 | `GET /api/call-record/pages` | 通话记录（含录音文件 `audioFile`），按请求头的机构返回，`deviceId` 参数不起作用。`callType` 1 主机→雷达(IP)、2 主机→SIP、3 雷达→主机、4 雷达→SIP、5 雷达→手机，**但不可靠**：主机呼雷达也记成 3（主叫是主机），方向要看 `callerSn` / `callerDeviceType` |
 | `/api/room/room-tree?deviceId=主机`、`/api/master/room-keys` | **按请求头的机构取数据**：在平台或上级机构下查别的机构的主机，房间树是空的，要用主机所属机构的 orgid 请求 |
@@ -691,6 +694,7 @@ topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{comm
 ### 户型区域字典（`ranges[]`）
 
 - `type`：2 普通床，3 干扰区，4 门，5 监护床（只能有一个），6 感应区（自定义），7 家具。前端枚举里家具写成 6，但"区域type检测"户型实际保存为 7，以数据为准
+- **6 感应区就是平台的"自定义区"**：类型都是 6，名字（`text`）随便起，比如沙发区、马桶区、淋浴区。名字是自由文本，不能拿来认区域；要知道它是马桶还是淋浴，看 `spaceType`（下一条）。显示时先用 `text`，没有再用类型名
 - `spaceType`（空间区域类型，干扰区和门没有）、`spaceTypeOut`（门的"出区域类型"）：字典 `GET /sapi/code/options?codeType=ROOM_SPACE_TYPE`，51 床、52 沙发、53 过道、54 会客、55 餐厅、56 马桶、57 淋浴、58 洗漱、59 更衣、60 阅读
 - 雷达元素的 `rangeType` / `rangeName`（安装区域编号 / 别名，没填别名时是区域名）：字典 `GET /sapi/code/options?codeType=RADAR_INSTALL_AREA`，**1 卧室、2 客厅、3 厨房、7 卫生间、8 室外、9 其他**（2026-10-20 取字典核对；8 室外的说明是"只在门的出区域类型使用，不能在雷达安装区域中使用"）。之前这里记成 3 卫生间、4 厨房、5 其他，是错的。v3 房间设计里选中雷达时出现"雷达安装区域"下拉和别名输入框，写的是元素上这两个字段；户型设计写的是 `qingLanConfig.extra.installArea / installAreaAlias`，建房拷过来的元素可能只有 extra（李虎"13型离床测试"）
 - 下发给设备的 `QL_radar_para_area` 只带 `[index, type, 坐标]`，`spaceType` 不下发，只在平台侧使用

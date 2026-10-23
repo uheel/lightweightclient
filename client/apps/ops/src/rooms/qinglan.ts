@@ -16,7 +16,7 @@ export interface QlZone {
   id?: string;
   /** 平台画布上显示的编号。设备和场景用的是在 ranges 里的位置（见 zonesOf），保存布置时客户端把它重写成位置 */
   index?: number;
-  /** 2 普通床，3 干扰区，4 门，5 监护床，6 感应区，7 家具 */
+  /** 2 普通床，3 干扰区，4 门，5 监护床，6 自定义区（感应区，名字自己起），7 家具 */
   type: number;
   text?: string;
   x: number;
@@ -46,7 +46,7 @@ export interface QlConfig {
   fallTime?: number;
 }
 
-export const ZONE_TYPE: Record<number, string> = { 2: "普通床", 3: "干扰区", 4: "门", 5: "监护床", 6: "感应区", 7: "家具" };
+export const ZONE_TYPE: Record<number, string> = { 2: "普通床", 3: "干扰区", 4: "门", 5: "监护床", 6: "自定义区（感应区）", 7: "家具" };
 export const ZONE_COLOR: Record<number, string> = { 2: "#5B9BD5", 3: "#ED7D31", 4: "#3F9B3A", 5: "#E5484D", 6: "#9254DE", 7: "#8C8C8C" };
 export const MODE: Record<number, string> = { 3: "人员跟踪", 7: "跌倒监测", 11: "呼吸睡眠", 15: "床位监护" };
 export const MOUNT: Record<number, string> = { 0: "顶装", 1: "侧装" };

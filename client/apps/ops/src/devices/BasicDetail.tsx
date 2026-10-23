@@ -1,4 +1,7 @@
-import { Tabs } from "antd";
+import { useState } from "react";
+import { Button, Tabs } from "antd";
+import { DeleteOutlined } from "@ant-design/icons";
+import DeleteOtherDialog from "./DeleteOtherDialog";
 import DetailHead from "./DetailHead";
 import LogTable from "./LogTable";
 import { catLabel, type DevRow } from "./category";
@@ -10,13 +13,17 @@ export default function BasicDetail({
   listHidden,
   onToggleList,
   onRenamed,
+  onDeleted,
 }: {
   d: DevRow;
   typeName?: string;
   listHidden: boolean;
   onToggleList: () => void;
   onRenamed?: () => void;
+  /** 设备删掉了，列表要去掉它 */
+  onDeleted?: () => void;
 }) {
+  const [deleting, setDeleting] = useState(false);
   const overview = (
     <div className="detail-body">
       <div className="ops-card" style={{ maxWidth: 560 }}>
@@ -34,6 +41,12 @@ export default function BasicDetail({
           <dd>{d.isDisabled ? "已停用" : d.isOnline ? "在线" : "离线"}（平台记录）</dd>
         </dl>
       </div>
+      <div className="dev-danger">
+        <Button danger icon={<DeleteOutlined />} onClick={() => setDeleting(true)}>
+          删除设备
+        </Button>
+        <span className="muted small">长者上的关联会一起解除</span>
+      </div>
     </div>
   );
   return (
@@ -46,6 +59,15 @@ export default function BasicDetail({
           { key: "overview", label: "概览", children: overview },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}
+      />
+      <DeleteOtherDialog
+        d={d}
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => {
+          setDeleting(false);
+          onDeleted?.();
+        }}
       />
     </div>
   );

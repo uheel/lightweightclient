@@ -4,7 +4,7 @@ import { HddOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-
 import dayjs from "dayjs";
 import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
 import { getAllDevices, getDeviceTypeGroups, getDeviceTypeMap, getRadars } from "../api/device";
-import { getMasters } from "../api/master";
+import { getMasters, MASTER_TYPE } from "../api/master";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
 import BasicDetail from "../devices/BasicDetail";
@@ -390,16 +390,16 @@ export default function DevicesPage() {
             </Button>
           </GuideEmpty>
         ) : sel?.cat === "master" ? (
-          <MasterDetail key={sel.id} d={sel} radars={radars} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onChanged={load} />
+          <MasterDetail key={sel.id} d={sel} radars={radars} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onChanged={load} onDeleted={() => onDeleted(sel.id)} />
         ) : sel && sel.cat !== "radar" ? (
-          <BasicDetail key={sel.id} d={sel} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onRenamed={load} />
+          <BasicDetail key={sel.id} d={sel} typeName={types.get(sel.deviceType!)} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onRenamed={load} onDeleted={() => onDeleted(sel.id)} />
         ) : sel ? (
           <DeviceDetail key={sel.id} d={sel} live={liveMap[sel.sn]} typeName={sel.deviceType !== undefined ? types.get(sel.deviceType) : undefined} spot={spot?.id === sel.id ? spot : undefined} listHidden={listHidden} onToggleList={() => setListHidden((v) => !v)} onMoved={load} onDeleted={() => onDeleted(sel.id)} />
         ) : (
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
       </section>
-      <AddDeviceDialog open={adding} existing={list} onClose={() => setAdding(false)} onCreated={onCreated} />
+      <AddDeviceDialog open={adding} existing={list} defaultType={cat === "master" ? MASTER_TYPE : undefined} onClose={() => setAdding(false)} onCreated={onCreated} />
     </div>
   );
 }

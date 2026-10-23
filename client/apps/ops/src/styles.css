@@ -664,3 +664,7 @@
 .call-key > div { flex: 1; min-width: 0; }
 .call-line { background: #fff; }
 .call-save { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 管理主机 SIP 账号：标题右侧的操作按钮、启用 / 更换对话框里的账号信息 */
+.sip-actions { margin-left: auto; display: flex; gap: 6px; font-weight: 400; }
+.sip-kv { grid-template-columns: 88px 1fr; row-gap: 10px; padding: 12px 14px; border: 1px solid #EEF0F5; border-radius: 8px; background: #FAFBFD; }
+.sip-kv dd { display: flex; align-items: center; gap: 4px; }

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Button, Select } from "antd";
+import { Button, Input, Select } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
 /**
@@ -19,7 +19,14 @@ export interface DmRect {
 export interface CanvasZone extends DmRect {
   id: number;
   type: number;
+  /** 区域名字（只存在房间布置里，设备不认）；自定义区靠它区分沙发区、马桶区… */
+  text?: string;
+  /** 空间区域类型（字典 ROOM_SPACE_TYPE），场景按它找马桶区、淋浴区 */
+  spaceType?: number;
 }
+
+/** 自定义区（感应区）：名字自己起，空间区域类型决定场景认它是哪种区域 */
+export const CUSTOM = 6;
 
 export interface ZoneType {
   value: number;
@@ -161,6 +168,7 @@ export default function ZoneCanvas({
   onZones,
   onBound,
   onRadar,
+  spaceTypes,
 }: {
   installType: number;
   facing: number;
@@ -179,6 +187,8 @@ export default function ZoneCanvas({
   onBound?: (b: DmRect) => void;
   /** 拖雷达到房间里的新位置（cm，平面图坐标）；侧装只能沿墙挪，限制由调用方做。不在房间布置里时不能拖 */
   onRadar?: (to: { x: number; y: number }) => void;
+  /** 能给自定义区填名字和空间区域类型时给出选项（雷达在房间布置里才有地方存） */
+  spaceTypes?: { value: number; label: string }[];
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [sel, setSel] = useState<Target>();
@@ -378,6 +388,7 @@ export default function ZoneCanvas({
   }
 
   const selZone = sel?.kind === "zone" ? zones[sel.index] : undefined;
+  const setZone = (p: Partial<CanvasZone>) => sel?.kind === "zone" && onZones(zones.map((q, j) => (j === sel.index ? { ...q, ...p } : q)));
   const pb = bound && planRect(bound);
   const lim = planRect(limit);
   const boundGrip = (g: Grip) => !g.x !== !g.y && !(g.y === "y0" && installType === 1);
@@ -461,7 +472,7 @@ export default function ZoneCanvas({
                   onPointerDown={(e) => begin(e, { kind: "zone", index: i })}
                 />
                 <text x={r.x + fs * 0.3} y={r.y + (r.h > fs * 1.6 ? fs * 1.1 : -fs * 0.35)} fontSize={fs} className="zc-label" fill={t?.color ?? "#666"}>
-                  {z.id} {t?.label ?? `类型 ${z.type}`}
+                  {z.id} {z.text || t?.label || `类型 ${z.type}`}
                 </text>
               </g>
             );
@@ -501,8 +512,33 @@ export default function ZoneCanvas({
               disabled={disabled}
               popupMatchSelectWidth={false}
               options={types.map((t) => ({ value: t.value, label: t.label, disabled: t.value === 5 && selZone.type !== 5 && zones.some((z) => z.type === 5) }))}
-              onChange={(v: number) => onZones(zones.map((q, j) => (sel?.kind === "zone" && j === sel.index ? { ...q, type: v } : q)))}
+              onChange={(v: number) => onZones(zones.map((q, j) => (sel?.kind === "zone" && j === sel.index ? { ...q, type: v, text: undefined, spaceType: undefined } : q)))}
             />
+            {selZone.type === CUSTOM && spaceTypes && (
+              <>
+                <Input
+                  size="small"
+                  value={selZone.text ?? ""}
+                  placeholder="名字，如马桶区"
+                  maxLength={20}
+                  disabled={disabled}
+                  status={selZone.text?.trim() ? undefined : "warning"}
+                  style={{ width: 120 }}
+                  onChange={(e) => setZone({ text: e.target.value })}
+                />
+                <Select
+                  size="small"
+                  value={selZone.spaceType}
+                  placeholder="空间区域类型"
+                  allowClear
+                  disabled={disabled}
+                  popupMatchSelectWidth={false}
+                  status={selZone.spaceType === undefined ? "warning" : undefined}
+                  options={spaceTypes}
+                  onChange={(v?: number) => setZone({ spaceType: v })}
+                />
+              </>
+            )}
             <span className="zc-id" title="场景规则里用这个编号引用区域">
               编号 {selZone.id}
             </span>

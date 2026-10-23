@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Tabs } from "antd";
+import { Button, Tabs } from "antd";
+import { DeleteOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { lastSeen } from "../../pages/DevicesPage";
 import DetailHead from "../DetailHead";
@@ -7,6 +8,8 @@ import LogTable from "../LogTable";
 import type { DevRow } from "../category";
 import MasterRooms from "./MasterRooms";
 import CallRecords from "./CallRecords";
+import MasterSipActions from "./MasterSip";
+import DeleteOtherDialog from "../DeleteOtherDialog";
 
 const fmt = (t?: string) => (t ? `${dayjs(t).format("YYYY-MM-DD HH:mm:ss")}（${lastSeen(t)}）` : "—");
 
@@ -18,6 +21,7 @@ export default function MasterDetail({
   listHidden,
   onToggleList,
   onChanged,
+  onDeleted,
 }: {
   d: DevRow;
   /** 机构里的雷达，用来显示每个房间有几台、哪些没进通讯录 */
@@ -27,9 +31,12 @@ export default function MasterDetail({
   onToggleList: () => void;
   /** 改名、改覆盖房间后，设备列表要重新取 */
   onChanged?: () => void;
+  /** 主机删掉了，列表要去掉它 */
+  onDeleted?: () => void;
 }) {
   const m = d.master;
   const [tab, setTab] = useState("overview");
+  const [deleting, setDeleting] = useState(false);
   const sipText = !m?.sipEnable ? "未启用" : m.isSipRegister ? "已注册" : "未注册";
 
   const overview = (
@@ -69,7 +76,10 @@ export default function MasterDetail({
           </dl>
         </div>
         <div className="ops-card">
-          <h2>SIP 账号</h2>
+          <h2>
+            SIP 账号
+            {m && <MasterSipActions m={m} onChanged={() => onChanged?.()} />}
+          </h2>
           <dl className="kv">
             <dt>状态</dt>
             <dd>{sipText}</dd>
@@ -83,9 +93,15 @@ export default function MasterDetail({
             <dd>{m?.sipIssueStatus === 2 ? `已下发 ${m.sipIssueAt ?? ""}` : m?.sipEnable ? "未下发" : "—"}</dd>
           </dl>
           <p className="muted small" style={{ marginTop: 10 }}>
-            主机和雷达都注册到 SIP 服务器后才能互相拨打。雷达选了这台主机后，平台把雷达的紧急号码设成这里的 SIP 号，告警场景里的"呼叫管理主机"就拨这个号。
+            主机和雷达都注册到 SIP 服务器后才能互相拨打。主机按"覆盖房间"的通讯录主动呼叫雷达；告警要打到主机，就在雷达的通话页把紧急号码或备用号码选成这台主机。
           </p>
         </div>
+      </div>
+      <div className="dev-danger">
+        <Button danger icon={<DeleteOutlined />} onClick={() => setDeleting(true)}>
+          删除设备
+        </Button>
+        <span className="muted small">覆盖房间和通讯录会一起解除</span>
       </div>
     </div>
   );
@@ -110,6 +126,15 @@ export default function MasterDetail({
           { key: "calls", label: "通话记录", children: <CallRecords sn={d.sn} sip={m?.sipUserName} orgId={d.orgId} /> },
           { key: "log", label: "通信日志", children: <LogTable sn={d.sn} /> },
         ]}
+      />
+      <DeleteOtherDialog
+        d={d}
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => {
+          setDeleting(false);
+          onDeleted?.();
+        }}
       />
     </div>
   );

@@ -14,6 +14,7 @@ import {
 import {
   addRoomToMaster,
   getAvailableSip,
+  getCallIssueStatus,
   getMasterOptions,
   getRadarCallConfig,
   saveRadarCallConfig,
@@ -126,6 +127,9 @@ const shown = (stored: string | undefined, masters: MasterOption[]) => {
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** 下发结果：ok 设备确认了，nochange 没有要下发的，pending 30 秒内没确认（已保存，设备晚点生效），fail 设备报错 */
+type Issued = { kind: "ok" | "nochange" | "pending" } | { kind: "fail"; text: string };
+
 /** 选呼叫对象：类型 + 号码 / 主机 */
 function TargetPicker({ value, onChange, masters, disabled }: { value: Target; onChange: (t: Target) => void; masters: MasterOption[]; disabled?: boolean }) {
   const err = targetError(value, masters);
@@ -189,7 +193,8 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
   const [record, setRecord] = useState(0);
   /** 新分配、还没保存的 SIP 账号 */
   const [newSip, setNewSip] = useState<{ sipAccount?: string; sipPassword?: string }>();
-  const [saving, setSaving] = useState(false);
+  /** saving = 正在提交，waiting = 已下发、等设备确认 */
+  const [saving, setSaving] = useState<"saving" | "waiting">();
   const [adding, setAdding] = useState(false);
 
   async function readDevice() {
@@ -302,7 +307,7 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
     const bad = [emergency, ...backups].map((t) => targetError(t, masters)).find(Boolean);
     if (!lan && bad) return message.warning(bad);
     if (!lan && !localSip) return message.warning("云对讲需要雷达自己的 SIP 号，先在“线路设置”里分配一个");
-    setSaving(true);
+    setSaving("saving");
     try {
       const call: Record<string, unknown> = { talk_type_sel: type, talk_master_number: targetNumber, talk_call_number_bak: targetBak };
       KEY_NAMES.forEach((k, i) => (call[k] = targetKeys[i] ?? ""));
@@ -311,47 +316,84 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
       // 不带的项平台按原值处理；SIP 账号只在新分配时带
       if (sipServer) call.talk_sip_server = sipServer;
       if (newSip) Object.assign(call, { talk_local_number: newSip.sipAccount, talk_auth_pass: newSip.sipPassword });
-      const r1 = await awaitSet(() => saveRadarCallConfig(d, { masterId: masterId ?? null, call }));
+      const r1 = await awaitIssued(() => saveRadarCallConfig(d, { masterId: masterId ?? null, call }), true);
       // 通话录音不在平台的通话配置里，单独写属性
-      let r2: "ok" | "nochange" = "nochange";
-      if (record !== (cur.record ?? 0)) r2 = await awaitSet(async () => Number(await writeDeviceProperties(d.sn, [{ propertyName: "call_record_EN", value: record }], false)));
-      message.success(r1 === "nochange" && r2 === "nochange" ? "已保存，设备上的设置本来就是这样" : "已保存并下发，设备已应答");
+      let r2: Issued = { kind: "nochange" };
+      if (record !== (cur.record ?? 0)) r2 = await awaitIssued(async () => Number(await writeDeviceProperties(d.sn, [{ propertyName: "call_record_EN", value: record }], false)), false);
+      const fail = [r1, r2].find((r) => r.kind === "fail");
+      if (fail) message.error(`已保存到平台，但设备返回错误：${fail.text}`);
+      else if ([r1, r2].some((r) => r.kind === "pending")) message.warning({ content: "已保存并下发，设备 30 秒内还没确认。设备离线或繁忙时会晚一点生效，稍后点右上角重新读取核对", duration: 8 });
+      else message.success(r1.kind === "nochange" && r2.kind === "nochange" ? "已保存，设备上的设置本来就是这样" : "已保存并下发，设备已确认");
       await load();
     } catch (e) {
       message.error(`保存失败：${errText(e)}`);
     } finally {
-      setSaving(false);
+      setSaving(undefined);
     }
   }
 
-  /** 等设备对 set-property 的应答；平台返回 0 / -1 表示没有要下发的变化 */
-  function awaitSet(send: () => Promise<number | undefined>) {
-    return new Promise<"ok" | "nochange">((resolve, reject) => {
+  /**
+   * 下发后等设备确认。平台对通话配置（PUT /api/device-config/call）的确认有三种来路，哪个先到用哪个：
+   * 实时推送 DeviceConfigChange {sn, command: "write"}（平台网页端认这个）、DeviceResponse（set-property），
+   * 以及轮询 /api/device-config/status 的 callIssueAt 变了、状态不再是"等待"。属性写入（config = false）只等 DeviceResponse。
+   * 平台返回 0 / -1 表示没有要下发的变化；30 秒没确认算 pending（已保存，设备晚点生效），不当失败
+   */
+  async function awaitIssued(send: () => Promise<number | undefined>, config: boolean): Promise<Issued> {
+    const before = config ? (await getCallIssueStatus(d).catch(() => undefined))?.at : undefined;
+    return new Promise<Issued>((resolve, reject) => {
       let seq: string | undefined;
+      let settled = false;
       const early: DeviceResponse[] = [];
-      const off = realtime.on("DeviceResponse", (payload) => {
-        const r = payload as DeviceResponse;
-        if (r?.sn !== d.sn || r.command !== "set-property") return;
-        if (seq === undefined) early.push(r);
-        else take(r);
-      });
-      const timer = window.setTimeout(() => done(() => reject(new Error("已保存到平台，但 30 秒内设备没有应答"))), 30_000);
-      function done(fn: () => void) {
-        off();
+      const offs = [
+        realtime.on("DeviceResponse", (payload) => {
+          const r = payload as DeviceResponse;
+          if (r?.sn !== d.sn || r.command !== "set-property") return;
+          if (seq === undefined) early.push(r);
+          else take(r);
+        }),
+        ...(config
+          ? [
+              realtime.on("DeviceConfigChange", (payload) => {
+                const r = payload as { sn?: string; command?: string };
+                if (seq !== undefined && r?.sn === d.sn && r.command === "write") done({ kind: "ok" });
+              }),
+            ]
+          : []),
+      ];
+      const timer = window.setTimeout(() => done({ kind: "pending" }), 30_000);
+      let poll: number | undefined;
+      function done(v: Issued) {
+        if (settled) return;
+        settled = true;
+        offs.forEach((off) => off());
         clearTimeout(timer);
-        fn();
+        clearInterval(poll);
+        resolve(v);
       }
       function take(r: DeviceResponse) {
         if (r.seq !== undefined && r.seq !== null && String(r.seq) !== seq) return;
-        done(() => (isResponseOk(r.code) ? resolve("ok") : reject(new Error(`${r.message || "设备返回错误"}（code ${r.code}）`))));
+        done(isResponseOk(r.code) ? { kind: "ok" } : { kind: "fail", text: `${r.message || "设备返回错误"}（code ${r.code}）` });
       }
       send().then(
         (s) => {
-          if (!s || s < 0) return done(() => resolve("nochange"));
+          if (!s || s < 0) return done({ kind: "nochange" });
           seq = String(s);
+          setSaving("waiting");
           early.forEach(take);
+          if (config)
+            poll = window.setInterval(async () => {
+              const st = await getCallIssueStatus(d).catch(() => undefined);
+              if (!st?.at || st.at === before || st.status === 1) return;
+              done(st.status === 2 ? { kind: "ok" } : { kind: "fail", text: st.error || "设备返回错误" });
+            }, 2000);
         },
-        (e) => done(() => reject(e)),
+        (e) => {
+          if (settled) return;
+          settled = true;
+          offs.forEach((off) => off());
+          clearTimeout(timer);
+          reject(e);
+        },
       );
     });
   }
@@ -371,7 +413,7 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
     <div className="detail-body call-page">
       <div className="call-top">
         <span className="muted small">{reading ? "正在读设备…" : cur.from === "device" ? "按设备读回的显示" : "按平台记录显示"}</span>
-        <Button size="small" type="text" icon={<ReloadOutlined />} disabled={saving || reading} onClick={load} title="重新读取" />
+        <Button size="small" type="text" icon={<ReloadOutlined />} disabled={!!saving || reading} onClick={load} title="重新读取" />
       </div>
       {blocked && <Alert type="warning" showIcon message={`${blocked}，改了也发不到设备`} />}
 
@@ -549,8 +591,8 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
       />
 
       <div className="call-save">
-        <Button type="primary" loading={saving} disabled={!changes.length || !!blocked || reading} onClick={save}>
-          保存并下发
+        <Button type="primary" loading={!!saving} disabled={!changes.length || !!blocked || reading} onClick={save}>
+          {saving === "waiting" ? "已下发，等设备确认…" : "保存并下发"}
         </Button>
         <span className="muted small">{changes.length ? changes.join("；") : "没有改动"}</span>
       </div>
