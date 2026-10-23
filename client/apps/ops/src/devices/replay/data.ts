@@ -1,5 +1,6 @@
 import { api, type PerfTimer } from "@radar/core";
 import { getAllDeviceLogs, type DeviceLog } from "../../api/device";
+import { getRoomView } from "../../api/roomView";
 
 /**
  * 姿态回放的数据层（移植自油猴脚本 room-posture-replay.user.js，算法保持一致）：
@@ -98,7 +99,7 @@ export interface RoomDetail {
 }
 
 export async function getRoomDetail(roomId: string) {
-  return (await api.get<RoomDetail>("/api/room-view/v3/detail", { params: { roomId } })).data;
+  return getRoomView<RoomDetail>(roomId);
 }
 
 // ---------- 工具 ----------

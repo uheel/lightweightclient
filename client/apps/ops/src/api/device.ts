@@ -2,6 +2,7 @@ import dayjs from "dayjs";
 import { api, realtime } from "@radar/core";
 import type { PlanElement } from "./room";
 import { installAreaOf, type InstallArea } from "../rooms/installArea";
+import { getRoomView } from "./roomView";
 
 /** 运维端专用：设备相关接口（用户端不使用，不放进 core） */
 
@@ -266,7 +267,7 @@ export interface RoomInfo {
 
 /** 房间详情：位置与每台雷达的安装配置（安装方式、方向、高度、工作模式） */
 export async function getRoomInfo(roomId: string): Promise<RoomInfo> {
-  const d = (await api.get<RoomDetail>("/api/room-view/v3/detail", { params: { roomId } })).data;
+  const d = await getRoomView<RoomDetail>(roomId);
   const configs = new Map<string, QingLanConfig>();
   const radars: RoomInfo["radars"] = [];
   const walk = (list?: RoomElement[]) => {
