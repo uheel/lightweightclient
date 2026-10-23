@@ -30,6 +30,13 @@ export const AREA_NEED: Record<string, AreaNeed> = {
   久坐提醒: space(52, "沙发区域"),
 };
 
+/** 能填"离开多久后告警"（分钟）的场景：不填 = 模板原样，一离开就告警 */
+export const LEAVE_DELAY = new Set(["离床告警"]);
+/** 平台自带的延迟离床模板：6 型区域写死成 1（一般是门），13 型下发回 code 100，用离床告警 + 离开分钟数代替 */
+export const DELAY_TEMPLATES = new Set(["延迟离床报警", "离床延迟报警"]);
+/** 13 型不收超时类型场景，离开多久表达不了 */
+export const leaveDelayOk = (deviceType?: number) => deviceType !== 13;
+
 /** 只适合某类房间的场景：雷达安装区域要对得上 */
 export const INSTALL_NEED: Record<string, number> = { 进入卧室: BEDROOM, 进入客厅: 2, 进入卫生间: BATHROOM };
 
@@ -129,8 +136,10 @@ export function planDevice(opts: {
   /** 型号 + 场景名 → 模板场景定义 */
   templateScene: (deviceType: number | undefined, name: string) => Scene | undefined;
   overwrite: boolean;
+  /** 场景名 → 离开多少分钟后告警（只对 LEAVE_DELAY 里的场景） */
+  leaveMinutes?: Record<string, number>;
 }): DevicePlan {
-  const { device, current, layout, choices, templateScene, overwrite } = opts;
+  const { device, current, layout, choices, templateScene, overwrite, leaveMinutes } = opts;
   const list = current.filter((s) => !s.isDisabled);
   const dropped = current.length - list.length;
   const ops: SceneOp[] = [];
@@ -153,8 +162,13 @@ export function planDevice(opts: {
       ops.push({ name, kind: "skip", note: "这个型号没有该场景模板" });
       continue;
     }
-    if (at >= 0 && !overwrite) {
-      ops.push({ name, kind: "same", note: "已启用，保持原设置" });
+    // 填了离开分钟数：13 型按一离开就告警；不勾覆盖时，设备上的分钟数和填的一样才算不变
+    const leave = LEAVE_DELAY.has(name) ? leaveMinutes?.[name] : undefined;
+    const delay = leave !== undefined && leaveDelayOk(device.deviceType) ? leave : undefined;
+    const delayNote =
+      leave === undefined ? undefined : delay !== undefined ? `离开 ${delay} 分钟后告警` : "13 型不收延迟场景，按一离开就告警";
+    if (at >= 0 && !overwrite && (leave === undefined || durationOf(list[at]!) === delay)) {
+      ops.push({ name, kind: "same", note: ["已启用，保持原设置", delayNote].filter(Boolean).join("；") });
       continue;
     }
     const inst = INSTALL_NEED[name];
@@ -187,6 +201,15 @@ export function planDevice(opts: {
       const fixed = before.filter((v) => v !== "{{area}}" && v !== String(r.index));
       note = `${need.label} = 区域 ${r.index}${fixed.length ? `（模板里写的是 ${fixed.join(" / ")}）` : ""}`;
     }
+    if (delay !== undefined) {
+      try {
+        scene = toTimeout(scene, delay, "leave");
+      } catch (e) {
+        ops.push({ name, kind: "skip", note: e instanceof Error ? e.message : String(e) });
+        continue;
+      }
+    }
+    if (delayNote) note = [note, delayNote].filter(Boolean).join(" · ");
 
     if (at >= 0) {
       list[at] = { ...scene, id: list[at]!.id };

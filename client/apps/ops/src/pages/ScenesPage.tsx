@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Empty, Input, Progress, Segmented, Select, Space, Steps, Table, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, Empty, Input, InputNumber, Progress, Segmented, Select, Space, Steps, Table, Tag, Tooltip } from "antd";
 import type { TableColumnsType } from "antd";
 import { ArrowLeftOutlined, ReloadOutlined, SearchOutlined, SendOutlined } from "@ant-design/icons";
 import { getDeviceTypeMap, getRadars, type Radar } from "../api/device";
@@ -17,7 +17,7 @@ import {
   type SceneTemplate,
   type SendState,
 } from "../api/scene";
-import { AREA_NEED, INSTALL_NEED, pickTemplates, planDevice, pool, tplKey, type Choice, type DevicePlan, type OpKind } from "../scenes/plan";
+import { AREA_NEED, DELAY_TEMPLATES, INSTALL_NEED, LEAVE_DELAY, pickTemplates, planDevice, pool, tplKey, type Choice, type DevicePlan, type OpKind } from "../scenes/plan";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -48,6 +48,8 @@ export default function ScenesPage() {
   // 第 2 步
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [overwrite, setOverwrite] = useState(false);
+  /** 离床告警的"离开多少分钟后告警"，不填 = 一离开就告警 */
+  const [leaveMin, setLeaveMin] = useState<Record<string, number | null>>({});
 
   // 第 3 步
   const [plans, setPlans] = useState<DevicePlan[]>([]);
@@ -171,7 +173,11 @@ export default function ScenesPage() {
       title: "需要",
       width: 150,
       render: (_, r) =>
-        AREA_NEED[r.name] ? (
+        DELAY_TEMPLATES.has(r.name) ? (
+          <Tooltip title="平台自带的延迟离床模板：6 型区域写死成 1（一般是门），13 型设备不收。建议改用离床告警，填离开多少分钟后告警">
+            <span className="small warn-text">建议用离床告警 + 离开分钟数</span>
+          </Tooltip>
+        ) : AREA_NEED[r.name] ? (
           <span className="small">户型里的{AREA_NEED[r.name]!.label}</span>
         ) : INSTALL_NEED[r.name] !== undefined ? (
           <span className="small">装在{INSTALL_AREA[INSTALL_NEED[r.name]!]}的雷达</span>
@@ -183,16 +189,34 @@ export default function ScenesPage() {
       title: "操作",
       width: 200,
       render: (_, r) => (
-        <Segmented<Choice>
-          size="small"
-          value={choices[r.name] ?? "keep"}
-          onChange={(v) => setChoices((c) => ({ ...c, [r.name]: v }))}
-          options={[
-            { value: "keep", label: "不变" },
-            { value: "enable", label: "启用" },
-            { value: "disable", label: "禁用" },
-          ]}
-        />
+        <div className="scene-choice">
+          <Segmented<Choice>
+            size="small"
+            value={choices[r.name] ?? "keep"}
+            onChange={(v) => setChoices((c) => ({ ...c, [r.name]: v }))}
+            options={[
+              { value: "keep", label: "不变" },
+              { value: "enable", label: "启用" },
+              { value: "disable", label: "禁用" },
+            ]}
+          />
+          {LEAVE_DELAY.has(r.name) && choices[r.name] === "enable" && (
+            <Tooltip title="不填 = 一离开就告警；填了 = 离开后这么久还没回到监护床才告警。13 型设备不收延迟场景，仍按一离开就告警下发">
+              <InputNumber
+                size="small"
+                style={{ width: 170, marginTop: 6 }}
+                min={1}
+                max={999}
+                precision={0}
+                prefix="离开"
+                suffix="分钟后"
+                placeholder="立即"
+                value={leaveMin[r.name] ?? null}
+                onChange={(v) => setLeaveMin((m) => ({ ...m, [r.name]: v }))}
+              />
+            </Tooltip>
+          )}
+        </div>
       ),
     },
   ];
@@ -249,6 +273,7 @@ export default function ScenesPage() {
           choices: list,
           templateScene: (t, name) => defs.get(tplKey(t, name)),
           overwrite,
+          leaveMinutes: Object.fromEntries(Object.entries(leaveMin).filter((e): e is [string, number] => e[1] != null)),
         });
       } catch (e) {
         out[i] = { device, ops: [], dropped: 0, error: errText(e) };

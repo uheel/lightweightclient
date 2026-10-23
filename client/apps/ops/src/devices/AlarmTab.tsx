@@ -21,7 +21,7 @@ import {
   type RadarLayout,
   type Scene,
 } from "../api/scene";
-import { callsMaster, durationOf, maxMinutes, pickTemplates, playsAudio, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
+import { callsMaster, durationOf, leaveDelayOk, maxMinutes, pickTemplates, playsAudio, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
 import { parseArray } from "../rooms/qinglan";
 
 /**
@@ -251,7 +251,7 @@ export default function AlarmTab({
         : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r));
   const hasMinutes = (r: Row) => r.def.duration !== undefined || !!r.def.leaveDelay;
   /** 13 型不收超时类型场景，离开多久表达不了（久坐那种"待够"可以用加长记录数） */
-  const noLeaveDelay = d.deviceType === 13 ? "13 型不收延迟（超时类型）场景，只能一离开就告警" : undefined;
+  const noLeaveDelay = !leaveDelayOk(d.deviceType) ? "13 型不收延迟（超时类型）场景，只能一离开就告警" : undefined;
 
   /**
    * 开启时要不要拨紧急号码：勾选框里改的 > 设备上现在的。
