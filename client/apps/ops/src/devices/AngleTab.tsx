@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Segmented, Spin, Tooltip } from "antd";
 import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, QuestionCircleFilled } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { getHeartbeats, getHeartbeatsSince, isSlim, RECENT_HB_MS, SLIM_ANGLE_LOOKBACK_MS, writeDeviceProperties, type Heartbeat } from "../api/device";
+import { getHeartbeats, getHeartbeatsSince, getLatestAngle, isSlim, RECENT_HB_MS, writeDeviceProperties, type Heartbeat } from "../api/device";
 import { ANGLE_STD, AXES, AXIS_COLOR, deg, evaluate, GRADE_COLOR, heartbeatInterval, signed, type Axis } from "./angle";
 import { BubbleLevel, PitchView } from "./angleviews/Gauges";
 import AttitudeView from "./angleviews/AttitudeView";
@@ -107,7 +107,8 @@ export default function AngleTab({ sn, deviceType, installType, online }: { sn: 
         const t0 = dayjs().subtract(minutes, "minute");
         const [inWin, before] = await Promise.all([
           getHeartbeats(sn, [t0.format(FMT), dayjs().add(1, "minute").format(FMT)], Math.min(30000, minutes * 2 + 20), deviceType),
-          slim ? getHeartbeats(sn, [dayjs(Date.now() - SLIM_ANGLE_LOOKBACK_MS).format(FMT), t0.format(FMT)], 1, deviceType) : Promise.resolve([]),
+          // 用本机记着的最近一次角度，不再每次往回查半年；最近一次落在窗内时窗内已经有了
+          slim ? getLatestAngle(sn, deviceType).then((hb) => (hb && hb.t < t0.valueOf() ? [hb] : [])) : Promise.resolve([]),
         ]);
         let hist = [...before.filter((p) => !inWin.length || p.t < inWin[0].t), ...inWin];
         if (!hist.length && !slim && minutes * 60e3 < RECENT_HB_MS) hist = await getHeartbeatsSince(sn);

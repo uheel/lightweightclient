@@ -396,9 +396,43 @@ export function getHeartbeatsSince(sn: string, from = Date.now() - RECENT_HB_MS,
   return getHeartbeats(sn, [dayjs(from).format(LOG_FMT), dayjs().add(1, "minute").format(LOG_FMT)], limit, deviceType);
 }
 
-/** 最近一次角度：AIO 每分钟带一次，查最近 2 小时；Ultra 系列只在变化时报，查最近半年 */
+/**
+ * Ultra 系列最近一次角度记在本机：查过到哪个时间、查到的角度。下次只查那之后的一段。
+ * 平台按 rawData 子串筛时耗时和时间范围成正比（2026-10-23 藕塘社区实测：1 天 0.17 秒、7 天 0.6 秒、30 天 2.9 秒、
+ * 半年 2.5–12 秒，没有角度的设备最慢），快速开始逐台查半年要几分钟。
+ */
+interface SlimAngleCache {
+  /** 查到这个时间（本机时钟，毫秒）为止 */
+  to: number;
+  hb?: Heartbeat;
+}
+/** 往回多查一段，免得本机时钟比平台快时漏掉 */
+const SLIM_ANGLE_OVERLAP_MS = 10 * 60e3;
+const slimAngleKey = (sn: string) => `ops:slim-angle:${sn}`;
+
+async function getLatestSlimAngle(sn: string, deviceType?: number) {
+  let cached: SlimAngleCache | undefined;
+  try {
+    cached = JSON.parse(localStorage.getItem(slimAngleKey(sn)) ?? "null") ?? undefined;
+  } catch {
+    /* 读不到就从头查 */
+  }
+  const now = Date.now();
+  const from = cached ? Math.max(cached.to - SLIM_ANGLE_OVERLAP_MS, now - SLIM_ANGLE_LOOKBACK_MS) : now - SLIM_ANGLE_LOOKBACK_MS;
+  const list = await getHeartbeatsSince(sn, from, 1, deviceType);
+  const hb = list[list.length - 1] ?? cached?.hb;
+  try {
+    localStorage.setItem(slimAngleKey(sn), JSON.stringify({ to: now, hb } satisfies SlimAngleCache));
+  } catch {
+    /* 存不了下次就再查一遍 */
+  }
+  return hb;
+}
+
+/** 最近一次角度：AIO 每分钟带一次，查最近 2 小时；Ultra 系列只在变化时报，查最近半年（本机记着查过的部分，见 getLatestSlimAngle） */
 export async function getLatestAngle(sn: string, deviceType?: number) {
-  const list = isSlim(deviceType) ? await getHeartbeatsSince(sn, Date.now() - SLIM_ANGLE_LOOKBACK_MS, 1, deviceType) : await getHeartbeatsSince(sn, undefined, 8, deviceType);
+  if (isSlim(deviceType)) return getLatestSlimAngle(sn, deviceType);
+  const list = await getHeartbeatsSince(sn, undefined, 8, deviceType);
   return list[list.length - 1];
 }
 
