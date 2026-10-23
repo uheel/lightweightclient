@@ -38,10 +38,12 @@ interface AlarmDef {
   area?: "bed" | "pick";
   /** 要设持续时间（分钟）时的默认值：条件持续满足这么久才告警 */
   duration?: number;
+  /** 可选的"离开多久后告警"（分钟）：不填 = 一离开就告警（模板原样）；填了 = 离开后这么久还没回到区域才告警 */
+  leaveDelay?: boolean;
 }
 
 const ALARMS: AlarmDef[] = [
-  { label: "离床告警", names: ["离床告警", "离床报警"], desc: "离开监护床超过设定时间", area: "bed" },
+  { label: "离床告警", names: ["离床告警", "离床报警"], desc: "离开监护床；可设离开多久还没回来才告警", area: "bed", leaveDelay: true },
   { label: "床上坐起告警", names: ["床上坐起告警", "床上坐起", "坐起告警"], desc: "在监护床上坐起", area: "bed" },
   { label: "疑似跌倒", names: ["疑似跌倒", "疑似跌倒告警"], desc: "检测到疑似跌倒，尽快查看" },
   { label: "跌倒告警", names: ["跌倒告警", "跌倒报警", "确认跌倒"], desc: "确认跌倒" },
@@ -238,7 +240,18 @@ export default function AlarmTab({
   // 13 型最多 10 分钟（每人 600 条记录），默认值也不能超过
   const maxMin = maxMinutes(d.deviceType);
   const defaultMinutes = (r: Row) => (r.def.duration === undefined ? undefined : Math.min(r.def.duration, maxMin));
-  const durationFor = (r: Row) => (r.def.duration === undefined ? undefined : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r)));
+  /** 离开多久后告警：输入框清空 = 不延迟，所以不能用 ?? 往后退 */
+  const durationFor = (r: Row) =>
+    r.def.leaveDelay
+      ? r.def.label in dur
+        ? (dur[r.def.label] ?? undefined)
+        : r.current && durationOf(r.current)
+      : r.def.duration === undefined
+        ? undefined
+        : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r));
+  const hasMinutes = (r: Row) => r.def.duration !== undefined || !!r.def.leaveDelay;
+  /** 13 型不收超时类型场景，离开多久表达不了（久坐那种"待够"可以用加长记录数） */
+  const noLeaveDelay = d.deviceType === 13 ? "13 型不收延迟（超时类型）场景，只能一离开就告警" : undefined;
 
   /**
    * 开启时要不要拨紧急号码：勾选框里改的 > 设备上现在的。
@@ -265,7 +278,7 @@ export default function AlarmTab({
         scenes,
         r.def.names,
         on && tpl && t
-          ? { name: t.name, scene: tpl, area, duration: duration ?? undefined, deviceType: d.deviceType, callMaster: callable ? call && !playsAudio(tpl) : undefined }
+          ? { name: t.name, scene: tpl, area, duration: duration ?? undefined, mode: r.def.leaveDelay ? "leave" : "stay", deviceType: d.deviceType, callMaster: callable ? call && !playsAudio(tpl) : undefined }
           : undefined,
       );
       const before = (await getSceneIssueStatus(d.id)).sceneIssueAt;
@@ -284,10 +297,11 @@ export default function AlarmTab({
     }
   }
 
-  /** 已开启时改了持续时间：直接重新下发 */
+  /** 已开启时改了持续时间：直接重新下发（离开多久清空 = 改回一离开就告警） */
   function commitDuration(r: Row, area?: number) {
-    const v = dur[r.def.label];
-    if (!r.current || v == null || v === durationOf(r.current) || busy) return;
+    if (!(r.def.label in dur) || !r.current || busy) return;
+    const v = dur[r.def.label] ?? undefined;
+    if ((v === undefined && !r.def.leaveDelay) || v === durationOf(r.current)) return;
     apply(r, true, area, v);
   }
 
@@ -337,7 +351,7 @@ export default function AlarmTab({
             const why = blocked ?? (on ? undefined : noTpl ?? a.why);
             const isBusy = busy === r.def.label;
             return (
-              <li key={r.def.label} className={[noTpl && !on && "muted", r.def.duration !== undefined && "wide"].filter(Boolean).join(" ") || undefined}>
+              <li key={r.def.label} className={[noTpl && !on && "muted", hasMinutes(r) && "wide"].filter(Boolean).join(" ") || undefined}>
                 <div className="alarm-name">
                   <b>{r.def.label}</b>
                   {r.current && r.current.sceneName !== (r.tpl?.name ?? r.def.label) && (
@@ -346,6 +360,25 @@ export default function AlarmTab({
                   <small>{noTpl && !on ? noTpl : r.def.desc}</small>
                 </div>
                 <div className="alarm-area">
+                  {r.def.leaveDelay && (
+                    <Tooltip title={noLeaveDelay ?? "不填 = 一离开就告警；填了 = 离开后这么久还没回到监护床才告警，中途回来就不告警"}>
+                      <InputNumber
+                        size="small"
+                        style={{ width: 170 }}
+                        min={1}
+                        max={maxMin}
+                        precision={0}
+                        prefix="离开"
+                        suffix="分钟后"
+                        placeholder="立即"
+                        disabled={!!blocked || !!busy || !!noLeaveDelay}
+                        value={r.def.label in dur ? dur[r.def.label] : ((r.current && durationOf(r.current)) ?? null)}
+                        onChange={(v) => setDur((m) => ({ ...m, [r.def.label]: v }))}
+                        onBlur={() => commitDuration(r, a.area)}
+                        onPressEnter={() => commitDuration(r, a.area)}
+                      />
+                    </Tooltip>
+                  )}
                   {r.def.duration !== undefined && (
                     <InputNumber
                       size="small"
@@ -443,7 +476,7 @@ export default function AlarmTab({
           </p>
         )}
         <p className="muted small" style={{ marginTop: 10 }}>
-          开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒{others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
+          开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒；离床告警填了"离开多久"时，离开监护床这么久还没回来才告警（设备自己计时，不填就一离开就告警）{others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
         </p>
       </div>
     </div>

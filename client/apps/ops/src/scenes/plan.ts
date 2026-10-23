@@ -215,19 +215,23 @@ const EVENT_PROP: Record<string, string> = { QL_event_area_ID: "QL_event_type", 
 const count2d = (prop: string, countOp: string, countTarget: unknown, op: string, target: unknown, range: unknown) =>
   `COUNT_2D(${prop}_data,"${countOp}",${countTarget},"${op}",${target},0,${range})`;
 
+/** 时长从什么时候起算：stay = 在区域里待够 N 分钟（久坐，离开区域就重新计时）；leave = 离开区域 N 分钟还没回来（离床，回到区域就取消） */
+export type DurationMode = "stay" | "leave";
+
 /**
- * "在区域里待够 N 分钟才提醒"（久坐）：把模板改成超时类型。
- * 进入表达式 = 模板的 COUNT 条件逐条换成 COUNT_2D（区域 + 坐姿），退出表达式 = 离开该区域（人员事件 4 + 区域 ID），timeout = N 分钟。
- * 2026-10-21 距离测试 …6711（6 型）真人实测：坐下后 123 秒（timeout 120）触发一次，一直坐着不重复。
+ * 把模板改成超时类型（"延迟表达式"，设备自己计时，不受记录条数限制）。
+ * 进入表达式 = 模板的 COUNT 条件逐条换成 COUNT_2D，timeout = N 分钟；退出表达式看 mode：
+ * stay（久坐：区域 + 坐姿）退出 = 离开该区域（人员事件 4 + 区域 ID）；leave（离床：离开事件 4 + 监护床）退出 = 回到该区域（人员事件 3 + 区域 ID）。
+ * 2026-10-21 距离测试 …6711（6 型）真人实测久坐：坐下后 123 秒（timeout 120）触发一次，一直坐着不重复。
  * 条件 sys_duration、场景 duration 在 6 型上都不能这样用（前者一直不触发，后者整条下发设备不应答）。
  */
-function toTimeout(s: Scene, minutes: number): Scene {
+function toTimeout(s: Scene, minutes: number, mode: DurationMode = "stay"): Scene {
   const conds = s.conditions ?? [];
   if (!conds.length || conds.some((c) => c.aggregation !== "COUNT" || !c.property)) throw new Error("模板条件不是按记录统计的，不能设时长");
   const area = conds.find((c) => AREA_PROPS.has(c.property!));
   if (!area) throw new Error("模板里没有区域条件，不能设时长");
   const inter = conds.map((c) => count2d(c.property!, c.countOperator ?? "==", c.countTarget, c.operator ?? ">=", c.target, c.range ?? 1)).join(" and ");
-  const exit = `${count2d(EVENT_PROP[area.property!]!, "==", 4, ">=", 1, 3)} and ${count2d(area.property!, "==", area.countTarget, ">=", 1, 3)}`;
+  const exit = `${count2d(EVENT_PROP[area.property!]!, "==", mode === "leave" ? 3 : 4, ">=", 1, 3)} and ${count2d(area.property!, "==", area.countTarget, ">=", 1, 3)}`;
   const { conditions: _c, relation: _r, duration: _d, ...rest } = s;
   return { ...rest, conditionType: "timeout", timeout: minutes * 60, interExpression: inter, exitExpression: exit };
 }
@@ -258,8 +262,12 @@ function toLongWindow(s: Scene, minutes: number): Scene {
   };
 }
 
-/** 设时长的写法：13 型只能用加长区域条件，其他型号用超时类型 */
-const withMinutes = (s: Scene, minutes: number, deviceType?: number) => (deviceType === 13 ? toLongWindow(s, minutes) : toTimeout(s, minutes));
+/** 设时长的写法：13 型只能用加长区域条件（只能表达"待够"，离开多久表达不了），其他型号用超时类型 */
+function withMinutes(s: Scene, minutes: number, deviceType?: number, mode: DurationMode = "stay") {
+  if (deviceType !== 13) return toTimeout(s, minutes, mode);
+  if (mode === "leave") throw new Error("13 型不收超时类型场景，离开多久后告警设不了");
+  return toLongWindow(s, minutes);
+}
 
 /** 场景要待够几分钟才触发：超时类型看 timeout，13 型看区域条件的记录数（至少 1 分钟才算）；都不是时没有 */
 export function durationOf(s: Scene) {
@@ -271,7 +279,7 @@ export function durationOf(s: Scene) {
 
 /**
  * 单台设备开 / 关一个场景，返回要下发的完整列表（已停用的场景平台保存时也会清掉，这里同样不带）。
- * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area，给了 duration（分钟）时改成待够这么久才触发；关：去掉 names 里的所有同名场景。
+ * 开：用模板场景替换同名场景（没有就加上），涉及区域时填 area，给了 duration（分钟）时按 mode 改成待够 / 离开这么久才触发；关：去掉 names 里的所有同名场景。
  */
 /** 场景动作：呼叫管理主机（雷达拨紧急号码 talk_master_number，不带参数）、播放本地音频 */
 export const CALL_MASTER = "Service_call_master";
@@ -290,7 +298,7 @@ export function withCallMaster(s: Scene, on: boolean): Scene {
 export function toggleScene(
   current: Scene[],
   names: string[],
-  tpl?: { name: string; scene: Scene; area?: number; duration?: number; deviceType?: number; callMaster?: boolean },
+  tpl?: { name: string; scene: Scene; area?: number; duration?: number; mode?: DurationMode; deviceType?: number; callMaster?: boolean },
 ) {
   const list = current.filter((s) => !s.isDisabled && !names.includes(s.sceneName));
   if (tpl) {
@@ -299,7 +307,7 @@ export function toggleScene(
       if (tpl.area === undefined) throw new Error("没有选区域");
       scene = fillArea(scene, tpl.area);
     }
-    if (tpl.duration !== undefined) scene = withMinutes(scene, tpl.duration, tpl.deviceType);
+    if (tpl.duration !== undefined) scene = withMinutes(scene, tpl.duration, tpl.deviceType, tpl.mode);
     if (tpl.callMaster !== undefined) scene = withCallMaster(scene, tpl.callMaster);
     const old = current.find((s) => !s.isDisabled && s.sceneName === tpl.name);
     list.push(old ? { ...scene, id: old.id } : scene);
