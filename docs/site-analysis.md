@@ -512,6 +512,8 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 1. 雷达云对讲需要有自己的 SIP 号：`talk_local_number` / `talk_auth_pass` / `talk_sip_server`（`GET /api/device-sip/available` 取一个空闲账号）
 2. 雷达"通话配置"里选所属管理主机（`/api/device-config/call` 的 `masterId`），平台下发 `IOT.setproperty {talk_master_number: 主机的 SIP 号}`，再下发 `{talk_type_sel: 1}`（0 局域网 / 1 云对讲）
 3. 管理主机勾选覆盖哪些房间（`POST /api/master/room-keys {deviceId, sn, roomKeys:[roomId…], issued}`），平台把这些房间里的雷达作为通讯录下发给主机（`update.devices`，见下）。**覆盖了房间也不一定进通讯录**：局域网模式的 AIO 要平台上存着它的 IP（属性 `net_ip`）才会进，没有就悄悄排除；云对讲的按 SIP 号进，不要 IP。2026-10-23 展厅演示 f14雷达（`…a173`，当天删掉重加，平台上没有 `net_ip`）：12:02 云对讲时随通讯录下发了（`callNum 10027, callType 1`），12:06 在平台通话配置里改成局域网后，下一次下发就没有它了；同机构局域网的 703客厅存着 `net_ip` 就在。另外它心跳里的 IP 是 192.168.5.4，和主机 172.16.1.200 不在一个网段，本来也只能用云对讲。通讯录变了平台会自动重发 `update.devices`（改通话配置、改覆盖房间都会触发）
+   - **云对讲的雷达也要有 IP，主机才呼得出去**（同一台 f14雷达继续实测）：12:11:31 下发的通讯录里它只有 `callNum: 10060, callType: 1`、没有 `ip`，主机上点它没反应、没有任何通话记录；12:15:11 在设备属性里读网络信息后"仅保存"，平台存下 `net_ip: 192.168.5.4`，12:17:45 重发的通讯录里多了 `ip`，12:18:02 主机呼雷达就接通了。主机和雷达不在一个网段，所以这次实际是经 SIP 服务器拨的，IP 只是主机界面上"能不能点"的门槛（主机端的限制或 bug）。雷达删掉重加、或者平台从没读过它的网络信息时就会缺 `net_ip`
+   - 主机呼雷达的通话记录：`callerIdentifier` 是主机 SIP 号，`rawCalleeNumber` 记的是主机自己的 `10072@sip.igoodlife.com`，`callType` 记成 3，被叫要看 `calleeDeviceName / calleeIdentifier`
 4. 雷达场景的动作里加 `{type:"method", name:"Service_call_master"}`（不带参数），场景触发时雷达拨 `talk_master_number`。平台网页端限制：一个场景最多一个呼叫管理主机，且和"播放本地音频"二选一。邻聚万家的离床、跌倒、疑似跌倒、蓝牙按钮场景都是 告警 + 呼叫主机。李虎机构的距离test（…6711）也有，`talk_master_number` = 10056
 5. 手动呼叫：`POST /api/device/call {sn, account}` → `IOT.callservice Service_call_master {call_ID: account}`（号码或手机）；挂断 `Service_call_handup`
 

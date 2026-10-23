@@ -17,7 +17,9 @@ import {
   getCallIssueStatus,
   getMasterOptions,
   getRadarCallConfig,
+  reissueMasterContacts,
   saveRadarCallConfig,
+  syncRadarIp,
   type MasterOption,
   type RadarCallConfig,
 } from "../api/master";
@@ -240,6 +242,7 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
       if (online && !d.isDisabled) {
         const dev = await readDevice();
         if (dev) fill(dev, ms, c);
+        autoSyncIp(ms);
       }
     } catch (e) {
       message.error(`读取通话设置失败：${errText(e)}`);
@@ -251,6 +254,19 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.id]);
+
+  /**
+   * 不打扰用户地把雷达 IP 补到平台：平台没存（或不是现在的 IP）时从设备读、只保存到平台，
+   * 补了就让覆盖这个房间的主机重新下发通讯录——通讯录里雷达没有 IP，主机上点它没反应（云对讲也一样）
+   */
+  async function autoSyncIp(ms: MasterOption[]) {
+    try {
+      if ((await syncRadarIp(d.sn)) !== "saved") return;
+      await Promise.all(ms.filter((m) => m.covers).map((m) => reissueMasterContacts({ id: m.id, sn: m.sn, orgId: d.orgId }).catch(() => {})));
+    } catch {
+      /* 补不上不影响通话设置，下次打开再试 */
+    }
+  }
 
   const master = masters.find((m) => m.id === masterId);
   const lan = type === 0;

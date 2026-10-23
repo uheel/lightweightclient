@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, App, Button, Empty, Space, Spin, Table, Tag, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
-import { getMasterContacts, getMasterRoomKeys, getMasterRoomTree, saveMasterRoomKeys, type MasterContact, type RoomTreeNode } from "../../api/master";
+import { supportsCall } from "../../api/device";
+import { getMasterContacts, getMasterRoomKeys, getMasterRoomTree, saveMasterRoomKeys, syncRadarIp, type MasterContact, type RoomTreeNode } from "../../api/master";
 import type { DevRow } from "../category";
 
 /** 树里所有房间（叶子）的 id */
@@ -84,6 +85,8 @@ export default function MasterRooms({ d, radars, onSaved }: { d: DevRow; radars:
   async function save(issued: boolean) {
     setSaving(issued ? "issue" : "save");
     try {
+      // 下发前先把这些房间里在线雷达的 IP 补到平台：通讯录里雷达没有 IP，主机上点它没反应（云对讲也一样）
+      if (issued) await syncIps(checked);
       await saveMasterRoomKeys(d, checked, issued);
       message.success(issued ? "已保存并下发通讯录到主机" : "已保存");
       await load();
@@ -93,6 +96,13 @@ export default function MasterRooms({ d, radars, onSaved }: { d: DevRow; radars:
     } finally {
       setSaving(undefined);
     }
+  }
+
+  /** 选中房间里在线、能通话的雷达：平台没存 IP 的从设备读回、只保存到平台；读不到的跳过，不拦下发 */
+  async function syncIps(roomIds: string[]) {
+    const targets = roomIds.flatMap((id) => radarsByRoom.get(id) ?? []).filter((r) => r.isOnline && !r.isDisabled);
+    const callable = (await Promise.all(targets.map((r) => supportsCall(r.deviceType).catch(() => false)))).map((ok, i) => (ok ? targets[i] : undefined)).filter(Boolean) as DevRow[];
+    await Promise.all(callable.map((r) => syncRadarIp(r.sn, 8000).catch(() => "skip")));
   }
 
   if (loading && !rooms) return <Spin style={{ margin: 40 }} />;

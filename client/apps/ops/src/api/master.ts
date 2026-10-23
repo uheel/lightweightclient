@@ -1,4 +1,5 @@
 import { api, findOrg, getOrgTree, session } from "@radar/core";
+import { awaitDeviceResponse, getStoredProperties, readDeviceProperties, writeDeviceProperties } from "./device";
 
 /**
  * 管理主机（deviceType 3）：自己注册到 SIP 服务器，和雷达双向通话。
@@ -168,6 +169,41 @@ export async function getMasterOptions(radar: { id: string; orgId: string }): Pr
   const list = all.map((m) => ({ ...m, ...byId.get(m.id), covers: byId.has(m.id) }));
   for (const m of covering) if (!list.some((x) => x.id === m.id)) list.push({ ...m, covers: true });
   return list;
+}
+
+// ---------- 雷达 IP 补到平台（主机通讯录要用） ----------
+
+/** 平台属性名 → 读回时可能出现的报文键（AIO 用 net_local_*，slim 用属性名本身） */
+const NET_KEYS: Record<string, string[]> = {
+  net_ip: ["net_ip", "net_local_IP"],
+  net_mask: ["net_mask", "net_local_mask"],
+  net_gateway: ["net_gateway", "net_local_gateway"],
+  net_dns: ["net_dns", "net_local_DNS"],
+  net_dhcp: ["net_dhcp", "net_DHCP_EN"],
+};
+
+/**
+ * 平台上没存雷达的 IP（或存的不是现在的 IP）时，从设备读网络信息、只保存到平台（不下发设备）。
+ * 主机通讯录里雷达没有 IP 时，主机上点它没反应——云对讲也一样（2026-10-23 f14雷达实测，见 docs"管理主机与 SIP 通话"）；
+ * 雷达删掉重加、平台没读过网络信息时就会缺。设备离线、读不到时什么都不做。返回 saved 表示补了
+ */
+export async function syncRadarIp(sn: string, timeoutMs = 10_000): Promise<"saved" | "same" | "skip"> {
+  const stored = await getStoredProperties(sn).catch(() => ({}) as Record<string, { value?: unknown }>);
+  const read = await awaitDeviceResponse<Record<string, unknown>>(sn, "get-property", () => readDeviceProperties(sn, Object.keys(NET_KEYS)), timeoutMs).catch(() => undefined);
+  if (!read) return "skip";
+  const props = Object.entries(NET_KEYS)
+    .map(([name, keys]) => ({ propertyName: name, value: keys.map((k) => read[k]).find((v) => v !== undefined && v !== null && v !== "") }))
+    .filter((p) => p.value !== undefined);
+  const ip = props.find((p) => p.propertyName === "net_ip")?.value;
+  if (!ip) return "skip";
+  if (String(stored.net_ip?.value ?? "") === String(ip)) return "same";
+  await writeDeviceProperties(sn, props, true);
+  return "saved";
+}
+
+/** 按现在的覆盖房间重新下发一次通讯录（平台按最新的雷达信息生成，例如刚补上的 IP） */
+export async function reissueMasterContacts(m: { id: string; sn: string; orgId: string }) {
+  await saveMasterRoomKeys(m, await getMasterRoomKeys(m), true);
 }
 
 /** 把一个房间加进主机的覆盖房间并下发通讯录 */
