@@ -282,8 +282,8 @@ export default function AlarmTab({
           : undefined,
       );
       const before = (await getSceneIssueStatus(d.id)).sceneIssueAt;
-      await saveDeviceScenes(d.sn, list);
-      const s = await waitIssued(d.id, before);
+      const seq = await saveDeviceScenes(d.sn, list);
+      const s = await waitIssued(d, before, seq);
       setResult({ label: r.def.label, ok: s.status === "ok", text: s.text });
       if (s.status === "ok") message.success(`${r.def.label}已${on ? "开启" : "关闭"}`);
       // 平台记录已保存，无论设备是否应答都重新读一次

@@ -197,15 +197,44 @@ export async function getSceneIssueStatus(deviceId: string) {
 
 export type SendState = { status: "waiting" | "sending" | "ok" | "fail"; text?: string };
 
-/** 下发后等设备应答：轮询下发状态，直到时间变了且不再是"等待" */
-export async function waitIssued(deviceId: string, before: string | undefined, timeoutMs = 30_000) {
-  const end = Date.now() + timeoutMs;
+const parseLogTime = (s: string) => Date.parse(s.replace(" ", "T"));
+
+/**
+ * 13 型回的 set-tact：平台不更新这类设备的下发状态（2026-10-23 录屏演示 …D339：设备 0.7 秒回 code 0，scene-status 一直是 0、没有 sceneIssueAt），
+ * 从通信日志里找。先按 seq 对，对不上时取发送之后最近的一条应答。code 100 = 设备不收这类场景（超时 / 表达式）
+ */
+async function setTactReply(sn: string, seq: number | undefined, t0: number): Promise<SendState | undefined> {
+  const { list } = await getAllDeviceLogs({ sn, command: "set-tact", range: [fmtTime(t0 - 5000), fmtTime(Date.now() + 60_000)], pageSize: 20, max: 20 });
+  const replies = list
+    .map((l) => {
+      try {
+        return { at: parseLogTime(l.createdAt), ...(JSON.parse(l.rawData ?? "") as { seq?: number; code?: number }) };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((r): r is { at: number; seq?: number; code: number } => r?.code !== undefined);
+  const r = replies.find((x) => seq !== undefined && x.seq === seq) ?? replies.find((x) => x.at >= t0 - 2000);
+  if (!r) return;
+  if (isResponseOk(r.code)) return { status: "ok", text: fmtTime(r.at) };
+  return { status: "fail", text: r.code === 100 ? "设备不收这类场景（code 100）" : `设备返回错误（code ${r.code}）` };
+}
+
+/**
+ * 下发后等设备应答：轮询下发状态，直到时间变了且不再是"等待"；
+ * 下发状态没变时再看通信日志里设备回的 set-tact（13 型平台不更新下发状态）。seq = saveDeviceScenes 的返回值
+ */
+export async function waitIssued(d: { id: string; sn: string }, before: string | undefined, seq?: number, timeoutMs = 30_000) {
+  const t0 = Date.now();
+  const end = t0 + timeoutMs;
   while (Date.now() < end) {
     await new Promise((r) => setTimeout(r, 2000));
-    const s = await getSceneIssueStatus(deviceId);
+    const s = await getSceneIssueStatus(d.id);
     if (s.sceneIssueAt && s.sceneIssueAt !== before && s.sceneIssueStatus !== 1) {
       return s.sceneIssueStatus === 2 ? ({ status: "ok", text: s.sceneIssueAt } as SendState) : ({ status: "fail", text: s.sceneIssueError || "设备返回错误" } as SendState);
     }
+    const r = await setTactReply(d.sn, seq, t0).catch(() => undefined);
+    if (r) return r;
   }
   return { status: "fail", text: "30 秒内设备没有应答" } as SendState;
 }

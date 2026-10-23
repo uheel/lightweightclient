@@ -316,8 +316,8 @@ export default function ScenesPage() {
       upd(p.device.id, { status: "sending" });
       try {
         const before = (await getSceneIssueStatus(p.device.id)).sceneIssueAt;
-        await saveDeviceScenes(p.device.sn, p.scenes!);
-        upd(p.device.id, await waitIssued(p.device.id, before));
+        const seq = await saveDeviceScenes(p.device.sn, p.scenes!);
+        upd(p.device.id, await waitIssued(p.device, before, seq));
       } catch (e) {
         upd(p.device.id, { status: "fail", text: errText(e) });
       }
