@@ -457,10 +457,13 @@
 .plan-container { fill: none; stroke: #B3B7C9; stroke-width: 1; stroke-dasharray: 3 5; }
 .plan-bound { fill: #3B4FD8; fill-opacity: 0.04; stroke: #3B4FD8; stroke-width: 1.5; stroke-dasharray: 10 6; }
 .plan-supervision { fill: none; stroke: #E5484D; stroke-width: 1.5; stroke-dasharray: 2 4; }
-.plan-radar { fill: #3B4FD8; stroke: #fff; stroke-width: 3; }
-.plan-radar.missing { fill: #B3B7C9; }
-.plan-look { stroke: #3B4FD8; stroke-width: 3; stroke-linecap: round; }
-.plan-label { fill: #26339A; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+/* 雷达用中性灰的空心方块，和实时目标（实心彩色圆点）区分开 */
+.plan-radar-box { fill: #fff; stroke: #4A4F66; stroke-width: 2.5; }
+.plan-radar-lens { fill: #4A4F66; }
+.plan-radar.missing .plan-radar-box { stroke: #B3B7C9; stroke-dasharray: 4 3; }
+.plan-radar.missing .plan-radar-lens { fill: #B3B7C9; }
+.plan-look { stroke: #4A4F66; stroke-width: 3; stroke-linecap: round; }
+.plan-label { fill: #4A4F66; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
 .plan-zone-text { font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
 .plan-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; }
 .plan-legend span { display: inline-flex; align-items: center; gap: 5px; }

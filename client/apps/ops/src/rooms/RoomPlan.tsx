@@ -83,7 +83,7 @@ export default function RoomPlan({
           const y = r.element?.y ?? 0;
           return (
             <g key={r.sn} opacity={dim ? 0.35 : 1}>
-              <circle cx={x} cy={y} r={fs * 0.55} className="plan-radar missing" />
+              <RadarMark x={x} y={y} fs={fs} missing />
               <text x={x} y={y - fs} textAnchor="middle" fontSize={fs} className="plan-label">
                 {r.label}（未配置）
               </text>
@@ -115,7 +115,7 @@ export default function RoomPlan({
               );
             })}
             {look && <line x1={rd.x} y1={rd.y} x2={rd.x + look[0] * fs * 2.2} y2={rd.y + look[1] * fs * 2.2} className="plan-look" />}
-            <circle cx={rd.x} cy={rd.y} r={fs * 0.55} className="plan-radar" />
+            <RadarMark x={rd.x} y={rd.y} fs={fs} />
             <text x={rd.x} y={rd.y + (look && look[1] > 0 ? -fs * 0.9 : fs * 1.6)} textAnchor="middle" fontSize={fs} className="plan-label">
               {r.label}
             </text>
@@ -153,6 +153,17 @@ export default function RoomPlan({
         {typeof children === "function" ? children(fs) : children}
       </g>
     </svg>
+  );
+}
+
+/** 雷达画成圆角方块（设备外壳）+ 中间小圆（镜头），灰色空心；实时目标是实心彩色圆点，两者一眼能分开 */
+function RadarMark({ x, y, fs, missing }: { x: number; y: number; fs: number; missing?: boolean }) {
+  const s = fs * 1.1;
+  return (
+    <g className={`plan-radar${missing ? " missing" : ""}`}>
+      <rect x={x - s / 2} y={y - s / 2} width={s} height={s} rx={s * 0.22} className="plan-radar-box" />
+      <circle cx={x} cy={y} r={s * 0.2} className="plan-radar-lens" />
+    </g>
   );
 }
 

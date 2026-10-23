@@ -100,9 +100,10 @@
 .room-plan.dark .plan-room { stroke: var(--m-plan-wall); }
 .room-plan.dark .plan-container { stroke: var(--m-plan-line); }
 .room-plan.dark .plan-bound { fill: var(--m-accent); fill-opacity: 0.05; stroke: var(--m-border-hover); }
-.room-plan.dark .plan-radar { fill: var(--m-accent); stroke: var(--m-bg); }
-.room-plan.dark .plan-look { stroke: var(--m-accent); }
-.room-plan.dark .plan-label { fill: var(--m-accent-text); stroke: var(--m-plan); }
+.room-plan.dark .plan-radar-box { fill: var(--m-plan); stroke: var(--m-text-2); }
+.room-plan.dark .plan-radar-lens { fill: var(--m-text-2); }
+.room-plan.dark .plan-look { stroke: var(--m-text-2); }
+.room-plan.dark .plan-label { fill: var(--m-text-2); stroke: var(--m-plan); }
 .room-plan.dark .plan-zone-text { stroke: var(--m-plan); }
 .room-plan.dark rect[stroke="#B3B7C9"] { stroke: var(--m-plan-line); }
 .room-plan.dark text[fill="#5B6078"] { fill: var(--m-muted); }
