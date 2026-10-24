@@ -807,6 +807,24 @@ topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{comm
 - 坐起测试 09-29 的通信日志里，18:54:35 户型保存后，18:55 有两次 2 m 的下发，18:57 又有两次 3 m 的下发，每次都间隔约 3 秒成对出现。结合上面的实测，应该是有人手动点了下发
 - 设备收到的报文键是 `QL_radar_para_config / QL_radar_para_area`（见上面"雷达属性"一节）
 
+### 家具图库和布置元素能存哪些字段（2026-10-24 读平台 `common` 模块 + 在李虎"测试"房间实测，测完已清空）
+
+**家具图库 `GET /api/room-element/list`**
+- 户型 / 房间设计左侧"元素"面板就是这个接口，平台统一一份（平台机构和李虎机构取到的都是同样的 91 件，2023-05 起由平台管理员维护）。每件 `{id, title, imageUrl, width?, height?, description?}`；`imageUrl` 是文件 id，图片地址是 `/sapi/oss/<imageUrl>`（PNG）
+- `list` 返回的 `title` 按账号语言翻译（英文界面是 "Double bed 1"，带 `locale: zh-CN` 请求头也一样），`GET /api/room-element/pages?pageSize=200` 返回原始中文标题（"双人床1"），另外带 `sortOrder`、创建人。增删改是同一路径的通用 CRUD（`/api/room-element`）
+- 约一半带默认尺寸（厘米，`description` 里写成 "180x200cm"）：床 150 / 180 × 200、单人床 120 × 200、马桶 50 × 75 / 75 × 40、蹲便器 45 × 60、浴缸 170 × 85、洗手池 60 × 45、三人沙发 210 × 90、双人沙发 140 × 90、单人沙发 85～90 见方、茶几 100 × 100、电视柜 180～210 × 45、衣柜 120 × 60、床头柜 50 × 45、书桌 120 × 60、餐桌 150～180、盆栽 60 × 60、灶台 90 × 50、冰箱 60 × 60。门、柜子、保险柜、电风扇、SOS、雷达等早期的图没有尺寸
+- 风格混杂：门、马桶、蹲便器、沙发、餐桌、浴缸、双人床1.5m 等是黑白线稿；床、沙发、茶几、床头柜、衣柜、盆栽、灶台等是写实俯视照片（白底或透明底）；还有门 1 / 门 2（开门弧线）、电风扇、SOS 这类图标。门框都画在图片上边，**门 1 铰链在右、门 2 铰链在左**，双门两扇从两边往中间开
+- 拖进画布后元素是 `{type: 4, src: "/sapi/oss/<imageUrl>", x, y, width, height}`，**不记录来自图库哪一件**；要知道是什么家具只能用 `src` 反查图库
+
+**`POST /api/room/v3/design` 会丢掉不认识的字段**
+- 元素上保存得下的字段只有：`id、type、x、y、width、height、rotation、src、name、text、fill、stroke、strokeWidth、cornerRadius、fontSize、children`，以及设备 / 床位用的 `sn、deviceType、deviceName、rangeType、rangeName、bedName`（读回时平台还会补一个 `isOnline: false`）
+- 被丢掉的有：`scaleX / scaleY`（所以不能镜像，只能旋转）、`opacity`、`offsetX / offsetY`、`points`（线条的顶点也存不下）、`description`、`extra`、`deviceId`、`bedId`、`visible`、`zIndex`，以及任何自定义字段（试过 `kind`、`decor`、`tag`、`category`、`elementId`、`imageUrl`）
+- `id` 必须是 32 位十六进制才会保存，写 `decotest0001` 读回时 `id` 直接没了
+- `rotation` 以元素左上角 `(x, y)` 为轴（Konva 默认），单位度
+- Group（type 1）的 `children` 原样保留，子元素一样按上面的字段过滤
+- `roomStyle` 也一样过滤，能存 `name`，自定义字段被丢掉
+- 所以要给家具存"这是什么"，只能放在 `name`（或 `text`）这种平台能保留的字符串字段里，或者用 `src` 对照图库反查
+
 ## 楼栋、楼层、房间、床位的增删改（2026-10-19 读平台前端代码 + 在李虎机构用临时楼栋实测，测完已删除）
 
 都是 SDBPage 的通用接口（见"通用 CRUD 页面"），下面只记和通用规则不一样、或者容易出事的地方。

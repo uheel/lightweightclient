@@ -32,6 +32,8 @@ export async function getRooms() {
 export interface PlanElement {
   id?: string;
   type: number;
+  /** 装修的家具存中文名（"双人床"），见 rooms/furniture/catalog.ts */
+  name?: string;
   x?: number;
   y?: number;
   width?: number;
@@ -41,6 +43,7 @@ export interface PlanElement {
   text?: string;
   fill?: string;
   stroke?: string;
+  strokeWidth?: number;
   sn?: string;
   deviceId?: string;
   deviceName?: string;

@@ -55,7 +55,7 @@ const fits = (d: Radar) => (e: PlanElement) => e.deviceType === undefined || d.d
 const isPlaceholder = (d: Radar) => (e: PlanElement) => !e.sn && !e.deviceId && !!e.qingLanConfig && fits(d)(e);
 
 /** 元素 id 要是 32 位十六进制，平台会丢掉其他格式的 id（2026-10-18 实测） */
-const newId = () =>
+export const newId = () =>
   crypto.randomUUID?.().replace(/-/g, "") ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /** 空白默认配置：侧装在上墙中间、往下看，顶装在房间正中；床位监护，2.8 m，监测范围裁到墙内，没有区域 */

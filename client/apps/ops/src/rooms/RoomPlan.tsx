@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { assetUrl } from "@radar/core";
 import type { PlanElement, RoomDesign } from "../api/room";
+import { FurnitureShape } from "./furniture/icons";
 import { boundRect, containerRect, facingOf, mountOf, radarInRoom, supervisionRect, ZONE_COLOR, ZONE_TYPE, zoneRect, zonesOf, type QlConfig, type QlRect } from "./qinglan";
 
 export interface PlanRadar {
@@ -59,6 +60,8 @@ export default function RoomPlan({
   const base = { x: view.x - PAD, y: view.y - PAD, w: view.width + PAD * 2, h: view.height + PAD * 2 };
   const { v, svgRef, contentRef, panning, onPointerDown, onPointerMove, onPointerUp, reset } = useZoom(base, zoomable);
   const vb = `${v.x} ${v.y} ${v.w} ${v.h}`;
+  // 网格 pattern 每张图单独起 id：监控模式盖在房间布置页上面时两张图同时在页面里，同名 id 会用到另一张图的网格（颜色、线宽都不对）
+  const gridId = `plan-grid-${useId().replace(/[^\w-]/g, "")}`;
   const bg = design?.roomStyle;
   const others = (design?.elements ?? []).filter((e) => e.type !== 3);
   // 文字大小跟着图的尺寸走，保证缩放后还看得清；放大后按比例缩小，屏幕上保持一样大
@@ -68,7 +71,7 @@ export default function RoomPlan({
   const staticLayer = useMemo(
     () => (
       <>
-      <rect x={room.x} y={room.y} width={room.width} height={room.height} fill="url(#plan-grid)" />
+      <rect x={room.x} y={room.y} width={room.width} height={room.height} fill={`url(#${gridId})`} />
       {bg?.type === 4 && bg.src && <image href={assetUrl(bg.src)} x={0} y={0} width={room.width} height={room.height} preserveAspectRatio="none" opacity={0.55} />}
       {others.map((e, i) => (
         <PlanShape key={e.id ?? i} e={e} />
@@ -143,7 +146,7 @@ export default function RoomPlan({
       onDoubleClick={reset}
     >
       <defs>
-        <pattern id="plan-grid" width="50" height="50" patternUnits="userSpaceOnUse">
+        <pattern id={gridId} width="50" height="50" patternUnits="userSpaceOnUse">
           <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#EEF0F5" strokeWidth="1" />
         </pattern>
       </defs>
@@ -267,12 +270,10 @@ function useZoom(base: Box, enabled?: boolean) {
   };
 }
 
-/** 平面图上的家具、文字、线条（只读展示） */
+/** 平面图上的家具、文字（只读展示） */
 function PlanShape({ e }: { e: PlanElement }) {
   const x = e.x ?? 0;
   const y = e.y ?? 0;
-  const w = e.width ?? 0;
-  const h = e.height ?? 0;
   const tf = e.rotation ? `rotate(${e.rotation} ${x} ${y})` : undefined;
   if (e.type === 1)
     return (
@@ -280,8 +281,7 @@ function PlanShape({ e }: { e: PlanElement }) {
         {(e.children ?? []).filter((c) => c.type !== 3).map((c, i) => <PlanShape key={c.id ?? i} e={c} />)}
       </g>
     );
-  if (e.type === 4 && e.src) return <image href={assetUrl(e.src)} x={x} y={y} width={w} height={h} transform={tf} preserveAspectRatio="none" opacity={0.7} />;
-  if (e.type === 2) return <rect x={x} y={y} width={w} height={h} transform={tf} fill={e.fill && e.fill !== "#fff" ? e.fill : "none"} fillOpacity={0.3} stroke={e.stroke ?? "#B3B7C9"} strokeWidth={1} />;
+  if (e.type === 4 || e.type === 2) return <FurnitureShape e={e} />;
   if (e.type === 5 && e.text)
     return (
       <text x={x} y={y + 14} transform={tf} fontSize={14} fill={e.fill ?? "#5B6078"}>

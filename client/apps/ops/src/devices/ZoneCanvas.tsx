@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button, Input, Select } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
@@ -191,6 +191,8 @@ export default function ZoneCanvas({
   spaceTypes?: { value: number; label: string }[];
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
+  // 网格 pattern 单独起 id，页面里有两张画布时不会串用对方的网格
+  const gridId = `zc-grid-${useId().replace(/[^\w-]/g, "")}`;
   const [sel, setSel] = useState<Target>();
   /** 删除区域后编号前移的提示 */
   const [shifted, setShifted] = useState<string>();
@@ -417,11 +419,11 @@ export default function ZoneCanvas({
           aria-label="区域画布"
         >
           <defs>
-            <pattern id="zc-grid" x={0} y={0} width={10} height={10} patternUnits="userSpaceOnUse">
+            <pattern id={gridId} x={0} y={0} width={10} height={10} patternUnits="userSpaceOnUse">
               <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#E6E8F0" strokeWidth={0.15} />
             </pattern>
           </defs>
-          <rect x={vx} y={vy} width={vw} height={vh} fill="url(#zc-grid)" />
+          <rect x={vx} y={vy} width={vw} height={vh} fill={`url(#${gridId})`} />
           <rect x={lim.x} y={lim.y} width={lim.w} height={lim.h} className="zc-limit" />
           {roomRect && <rect x={roomRect.x} y={roomRect.y} width={roomRect.w} height={roomRect.h} className="zc-room" />}
           {bedRange &&
