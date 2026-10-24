@@ -269,7 +269,7 @@ export const maxMinutes = (deviceType?: number) => (deviceType === 13 ? MAX_RECO
 
 /**
  * 13 型的"待够 N 分钟"：13 型固件不收超时 / 表达式场景（set-tact 回 code 100，平台自带的 13 型离床延迟报警模板也一样），只能用条件列表。
- * 区域条件改成"最近 N × 60 条全是该区域"，坐姿等其他条件照模板；触发间隔设成 N 分钟，一直坐着时每 N 分钟提醒一次。
+ * 区域、坐姿条件都改成"最近 N × 60 条全满足"（全是该区域、全是坐）；触发间隔设成 N 分钟，一直坐着时每 N 分钟提醒一次。
  * 2026-10-22 ultra跌倒雷达 …C50D 真人实测：最近 120 / 300 / 400 条分别在进入区域后 119 / 296 / 396 秒触发；更长的还没测，每人存多少条不知道。
  */
 function toLongWindow(s: Scene, minutes: number): Scene {
@@ -278,10 +278,11 @@ function toLongWindow(s: Scene, minutes: number): Scene {
   const conds = s.conditions ?? [];
   const area = conds.find((c) => c.property && AREA_PROPS.has(c.property) && c.aggregation === "COUNT");
   if (!area) throw new Error("模板里没有按记录统计的区域条件，不能设时长");
+  // 区域和坐姿都按时长取同样的条数、条条满足（模板的坐姿只看最近 5 条，下发后人一坐下、区域凑满就触发）
   return {
     ...s,
     maskTime: minutes,
-    conditions: conds.map((c) => (c === area ? { ...c, range: String(n), operator: "==", target: String(n) } : c)),
+    conditions: conds.map((c) => (c.aggregation === "COUNT" ? { ...c, range: String(n), operator: "==", target: String(n) } : c)),
   };
 }
 
