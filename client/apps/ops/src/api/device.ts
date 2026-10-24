@@ -30,7 +30,23 @@ export interface Radar {
 /** 当前机构的全部雷达（数量不大，一次取完，在客户端筛选） */
 export async function getRadars() {
   const res = await api.get<Radar[]>("/api/device/v3/radar-pages", { params: { current: 1, pageSize: 5000 } });
+  for (const d of res.data ?? []) deviceIdCache.set(d.sn, Promise.resolve(d.id));
   return res.data ?? [];
+}
+
+/** SN → deviceId（raw-values 只认 deviceId）。getRadars 取过的直接用，没有时按 SN 查一次 */
+const deviceIdCache = new Map<string, Promise<string | undefined>>();
+
+function deviceIdOf(sn: string) {
+  let p = deviceIdCache.get(sn);
+  if (!p) {
+    p = api
+      .get<Radar[]>("/api/device/v3/radar-pages", { params: { current: 1, pageSize: 20 }, filter: { sn } })
+      .then((r) => (r.data ?? []).find((d) => d.sn === sn)?.id);
+    p.then((id) => !id && deviceIdCache.delete(sn), () => deviceIdCache.delete(sn));
+    deviceIdCache.set(sn, p);
+  }
+  return p;
 }
 
 export interface DeviceType {
@@ -595,18 +611,32 @@ interface RawSchema {
   values?: Record<string, StoredProperty>;
 }
 
-/** 属性字典的中文标题、分组名（按设备类型缓存） */
-const dictCache = new Map<number, Promise<{ titles: Map<string, string>; groups: Map<string, string> }>>();
+/**
+ * 属性字典（按设备类型缓存）：中文标题、分组名，以及全部属性定义。
+ * visibleScope（分组和属性都有）：1 全部可见，2 后台可见，3 全部隐藏。
+ */
+interface PropertyDict {
+  titles: Map<string, string>;
+  groups: Map<string, string>;
+  /** 字典里的全部分组（不管可见范围），按平台顺序 */
+  allGroups: PropertyGroup[];
+  /** 字典里的全部属性定义 */
+  all: (PropertyDef & { visibleScope?: number })[];
+}
+
+const dictCache = new Map<number, Promise<PropertyDict>>();
 
 function getPropertyDict(deviceTypeCode: number) {
   let p = dictCache.get(deviceTypeCode);
   if (!p) {
     p = Promise.all([
-      api.get<{ propertyName: string; title: string }[]>("/api/device-type-property/list", { params: { deviceTypeCode } }),
+      api.get<(PropertyDef & { visibleScope?: number })[]>("/api/device-type-property/list", { params: { deviceTypeCode } }),
       api.get<{ stringCode?: string; code?: number; label: string }[]>("/api/device-type-property/property-groups", { params: { deviceTypeCode } }),
     ]).then(([l, g]) => ({
       titles: new Map((l.data ?? []).map((x) => [x.propertyName, x.title])),
       groups: new Map((g.data ?? []).map((x) => [x.stringCode ?? String(x.code), x.label])),
+      allGroups: (g.data ?? []).map((x) => ({ stringCode: x.stringCode ?? String(x.code), label: x.label })),
+      all: l.data ?? [],
     }));
     p.catch(() => dictCache.delete(deviceTypeCode));
     dictCache.set(deviceTypeCode, p);
@@ -620,28 +650,73 @@ export async function supportsCall(deviceTypeCode?: number) {
   return (await getPropertyDict(deviceTypeCode)).titles.has("talk_type_sel");
 }
 
+/** raw-values 的一条：值按类型放在 jsonValue / intValue / stringValue / shortValue … 里 */
+interface RawValue extends Omit<StoredProperty, "value"> {
+  propertyName: string;
+  [k: string]: unknown;
+}
+
 /**
- * 设备的属性定义 + 平台记录的值（GET /api/device-property/property-schema-values）。
- * 这个接口返回的标题、分组名是英文（2026-10-16 换了几种语言请求头都一样），中文从属性字典 /api/device-type-property/list 取。
- * 平台已经去掉了隐藏的属性。
+ * 平台记录的全部值（GET /api/device-property/raw-values?deviceId=），包括隐藏分组里的属性；
+ * 没有 deliveryError、updatedAt、updatedBy。找不到 deviceId 时返回空
+ */
+async function getRawValues(sn: string): Promise<Record<string, StoredProperty>> {
+  const deviceId = await deviceIdOf(sn);
+  if (!deviceId) return {};
+  const list = (await api.get<RawValue[]>("/api/device-property/raw-values", { params: { deviceId } })).data ?? [];
+  const out: Record<string, StoredProperty> = {};
+  for (const r of list) {
+    const key = Object.keys(r).find((k) => k.endsWith("Value"));
+    out[r.propertyName] = {
+      value: key ? r[key] : undefined,
+      deliveryStatus: r.deliveryStatus,
+      deliveryAt: r.deliveryAt,
+      deliveryByUserName: r.deliveryByUserName,
+    };
+  }
+  return out;
+}
+
+/** schema-values 的值（字段全，但去掉了隐藏的属性）盖在 raw-values（全部属性）上 */
+function mergeValues(raw: Record<string, StoredProperty>, schema: Record<string, StoredProperty> | undefined) {
+  return { ...raw, ...schema };
+}
+
+/**
+ * 设备的属性定义 + 平台记录的值。
+ * property-schema-values 返回的标题、分组名是英文（2026-10-16 换了几种语言请求头都一样），中文从属性字典取。
+ * 平台按"设备类型属性分组配置"的可见范围去掉隐藏分组（例如 6 型"安装设置"设成全部隐藏，QL_radar_config 等就没了），
+ * 定义和值都去掉；这里用属性字典把隐藏分组和里面的属性补回来（单个属性设成全部隐藏的仍不显示），
+ * 值用 raw-values 补。隐藏只影响平台网页显示，下发、读取照常（2026-10-24 李虎 AIO雷达2 实测）。
  */
 export async function getPropertySchema(sn: string): Promise<PropertySchema> {
-  const d = (await api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } })).data ?? {};
+  const [d, raw] = await Promise.all([
+    api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } }).then((r) => r.data ?? {}),
+    getRawValues(sn).catch(() => ({})),
+  ]);
   const dict = d.deviceTypeCode !== undefined ? await getPropertyDict(d.deviceTypeCode).catch(() => undefined) : undefined;
+  const platformGroups = (d.groups ?? []).map((g) => g.stringCode ?? String(g.code));
+  const platformProps = d.properties ?? [];
+  // 只补平台去掉的分组里的属性；可见分组里平台没给的（iccid、imei 等）是平台别的规则去掉的，不动
+  const hiddenGroups = new Set((dict?.allGroups ?? []).map((g) => g.stringCode).filter((c) => !platformGroups.includes(c)));
+  const restored = (dict?.all ?? []).filter((p) => p.visibleScope !== 3 && p.propertyGroupStringCode !== undefined && hiddenGroups.has(p.propertyGroupStringCode));
   return {
     deviceTypeCode: d.deviceTypeCode,
-    groups: (d.groups ?? []).map((g) => {
-      const code = g.stringCode ?? String(g.code);
-      return { stringCode: code, label: dict?.groups.get(code) ?? g.label };
-    }),
-    properties: (d.properties ?? []).map((p) => ({ ...p, title: dict?.titles.get(p.propertyName) ?? p.title })),
-    values: d.values ?? {},
+    groups: dict
+      ? dict.allGroups.filter((g) => platformGroups.includes(g.stringCode) || restored.some((p) => p.propertyGroupStringCode === g.stringCode))
+      : (d.groups ?? []).map((g) => ({ stringCode: g.stringCode ?? String(g.code), label: g.label })),
+    properties: [...platformProps, ...restored].map((p) => ({ ...p, title: dict?.titles.get(p.propertyName) ?? p.title })),
+    values: mergeValues(raw, d.values),
   };
 }
 
-/** 只取平台记录的值（下发后刷新状态用） */
+/** 只取平台记录的值（下发后刷新状态用），包括隐藏分组里的属性 */
 export async function getStoredProperties(sn: string) {
-  return (await api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } })).data?.values ?? {};
+  const [schema, raw] = await Promise.all([
+    api.get<RawSchema>("/api/device-property/property-schema-values", { params: { sn } }).then((r) => r.data?.values),
+    getRawValues(sn).catch(() => ({})),
+  ]);
+  return mergeValues(raw, schema);
 }
 
 /**
