@@ -15,7 +15,7 @@ let orgTree: ReturnType<typeof getOrgTree> | undefined;
  * 主机相关的房间接口按请求头的机构取数据：在平台或上级机构下看别的机构的主机时，房间树是空的。
  * 所以这些请求固定用主机所属机构发（orgType 从机构树查，查不到按普通机构 2）
  */
-async function orgOf(m: { orgId: string }): Promise<Org | undefined> {
+export async function orgOf(m: { orgId: string }): Promise<Org | undefined> {
   if (!m.orgId || session.get()?.orgId === m.orgId) return undefined;
   orgTree ??= getOrgTree().catch(() => []);
   const node = findOrg(await orgTree, m.orgId);

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, Checkbox, InputNumber, Select, Spin, Switch, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, Input, InputNumber, Modal, Select, Spin, Switch, Tag, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { awaitDeviceResponse, getStoredProperties, readDeviceProperties, type Radar, type StoredProperty } from "../api/device";
+import { awaitDeviceResponse, getStoredProperties, readDeviceProperties, writeDeviceProperties, type Radar, type StoredProperty } from "../api/device";
+import { alertTypeOf, getAlertTypeConfig, setTtsVoiceMessage, TTS_MAX_LENGTH, TTS_PHONE, TTS_VARIABLES, type AlertTypeConfig } from "../api/alertType";
 import { getMasterOptions, getRadarCallConfig, type MasterOption } from "../api/master";
 import { isMobileNumber, toShownNumber } from "./dialNumber";
 import {
@@ -104,7 +105,9 @@ export default function AlarmTab({
   /** 跳到通话页选所属管理主机 */
   onGoCall?: () => void;
 }) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  /** 13 型不能拨紧急号码，告警时改由平台的 SIP 服务商给设备的语音留言电话打电话播留言 */
+  const tts = d.deviceType === 13;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [scenes, setScenes] = useState<Scene[]>([]);
@@ -123,6 +126,12 @@ export default function AlarmTab({
   const [emergency, setEmergency] = useState<{ number: string; type?: number }>({ number: "" });
   /** 未开启的告警勾的"拨紧急号码"，开启时带上 */
   const [pendingCall, setPendingCall] = useState<Record<string, boolean>>({});
+  /** 语音留言电话（平台属性 tts-phone）；editing = 正在改的输入 */
+  const [ttsPhone, setTtsPhone] = useState<{ value: string; editing?: string; saving?: boolean }>({ value: "" });
+  /** 告警类型 → 所属机构的配置（语音留言开关和内容） */
+  const [ttsCfg, setTtsCfg] = useState<Map<string, AlertTypeConfig>>(new Map());
+  /** 正在填留言内容的告警 */
+  const [ttsDraft, setTtsDraft] = useState<{ label: string; alertTypeId: string; content: string }>();
   const [busy, setBusy] = useState<string>();
   const [result, setResult] = useState<{ label: string; ok: boolean; text?: string }>();
   /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
@@ -158,6 +167,12 @@ export default function AlarmTab({
           if (s) sc.set(label, s);
         }),
       );
+      if (tts) {
+        setTtsPhone({ value: String(props[TTS_PHONE]?.value ?? "") });
+        const ids = new Set([...sc.values(), ...current].map(alertTypeOf).filter((x): x is string => !!x));
+        const cfgs = await Promise.all([...ids].map((id) => getAlertTypeConfig(id, d).catch(() => undefined)));
+        setTtsCfg(new Map(cfgs.filter((c): c is AlertTypeConfig => !!c).map((c) => [c.alertTypeId, c])));
+      }
       setTpls(m);
       setDefs(sc);
       setScenes(current);
@@ -272,6 +287,53 @@ export default function AlarmTab({
   const emergencyText =
     master && master.sipUserName === emergency.number ? `主机 ${master.deviceName || master.sn}` : isPhone ? "手机" : emergency.type === 0 ? "局域网模式下号码基本不起作用" : "SIP 号";
 
+  /** 告警触发的告警类型：设备上的场景优先，没开启时看模板 */
+  const alertTypeFor = (r: Row) => alertTypeOf(r.current) ?? alertTypeOf(defs.get(r.def.label));
+  const ttsOn = (id?: string) => !!(id && ttsCfg.get(id)?.enableTtsVoiceMessage);
+
+  /** 保存语音留言开关 / 内容到告警类型的机构配置 */
+  async function saveTts(label: string, alertTypeId: string, enable: boolean, content?: string) {
+    setBusy(label);
+    try {
+      await setTtsVoiceMessage(alertTypeId, d, enable, content);
+      const cfg = await getAlertTypeConfig(alertTypeId, d);
+      setTtsCfg((m) => new Map(m).set(alertTypeId, cfg));
+      message.success(`${label}的语音留言已${enable ? "开启" : "关闭"}`);
+      return true;
+    } catch (e) {
+      message.error(`保存语音留言失败：${errText(e)}`);
+      return false;
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  /** 勾选 = 先填留言内容再保存；取消 = 确认后关闭（机构里同类告警都不再打） */
+  function toggleTts(r: Row, alertTypeId: string, on: boolean) {
+    const cur = ttsCfg.get(alertTypeId)?.ttsVoiceMessageContent;
+    if (on) return setTtsDraft({ label: r.def.label, alertTypeId, content: cur || `#DeviceName# 发生${r.def.label}，请及时处理。` });
+    modal.confirm({
+      title: `关闭${r.def.label}的语音留言？`,
+      content: `语音留言按告警类型对整个机构生效，关闭后机构里所有设备的${r.def.label}都不再打语音留言电话。`,
+      okText: "关闭",
+      onOk: () => saveTts(r.def.label, alertTypeId, false),
+    });
+  }
+
+  async function saveTtsPhone() {
+    const v = (ttsPhone.editing ?? "").trim().replace(/[\s-]/g, "");
+    if (v && !isMobileNumber(v)) return message.error("请填 11 位手机号");
+    setTtsPhone((p) => ({ ...p, saving: true }));
+    try {
+      await writeDeviceProperties(d.sn, [{ propertyName: TTS_PHONE, value: v }], true);
+      setTtsPhone({ value: v });
+      message.success(v ? "语音留言电话已保存" : "已清空语音留言电话");
+    } catch (e) {
+      message.error(`保存失败：${errText(e)}`);
+      setTtsPhone((p) => ({ ...p, saving: false }));
+    }
+  }
+
   async function apply(r: Row, on: boolean, area?: number, duration = durationFor(r), call = callFor(r)) {
     const tpl = defs.get(r.def.label);
     const t = tpls.get(r.def.label);
@@ -354,6 +416,7 @@ export default function AlarmTab({
             const noTpl = !r.tpl ? `平台上还没有这个型号的"${r.def.label}"模板` : !defs.get(r.def.label) ? "读取模板失败" : undefined;
             const why = blocked ?? (on ? undefined : noTpl ?? a.why);
             const isBusy = busy === r.def.label;
+            const ttsAlert = tts ? alertTypeFor(r) : undefined;
             return (
               <li key={r.def.label} className={[noTpl && !on && "muted", hasMinutes(r) && "wide"].filter(Boolean).join(" ") || undefined}>
                 <div className="alarm-name">
@@ -440,6 +503,38 @@ export default function AlarmTab({
                       </Checkbox>
                     </Tooltip>
                   )}
+                  {tts && ttsAlert && (
+                    <Tooltip
+                      title={
+                        ttsOn(ttsAlert)
+                          ? `留言：${ttsCfg.get(ttsAlert)?.ttsVoiceMessageContent ?? ""}`
+                          : !ttsPhone.value
+                            ? "先在下面填语音留言电话"
+                            : !ttsCfg.has(ttsAlert)
+                              ? "没读到这个告警类型的配置"
+                              : undefined
+                      }
+                    >
+                      <Checkbox
+                        checked={ttsOn(ttsAlert)}
+                        disabled={!!busy || !ttsCfg.has(ttsAlert) || (!ttsOn(ttsAlert) && !ttsPhone.value)}
+                        onChange={(e) => toggleTts(r, ttsAlert, e.target.checked)}
+                      >
+                        <span className="small">语音留言</span>
+                      </Checkbox>
+                    </Tooltip>
+                  )}
+                  {tts && ttsAlert && ttsOn(ttsAlert) && (
+                    <Button
+                      type="link"
+                      size="small"
+                      disabled={!!busy}
+                      style={{ padding: 0, height: "auto" }}
+                      onClick={() => setTtsDraft({ label: r.def.label, alertTypeId: ttsAlert, content: ttsCfg.get(ttsAlert)?.ttsVoiceMessageContent ?? "" })}
+                    >
+                      改留言
+                    </Button>
+                  )}
                 </div>
                 <Tooltip title={why}>
                   <Switch
@@ -482,6 +577,71 @@ export default function AlarmTab({
             </Button>
           </p>
         )}
+        {tts && (
+          <div className="muted small" style={{ marginTop: 10 }}>
+            语音留言电话{" "}
+            {ttsPhone.editing !== undefined ? (
+              <>
+                <Input
+                  size="small"
+                  style={{ width: 150 }}
+                  autoFocus
+                  placeholder="11 位手机号"
+                  value={ttsPhone.editing}
+                  disabled={ttsPhone.saving}
+                  onChange={(e) => setTtsPhone((p) => ({ ...p, editing: e.target.value }))}
+                  onPressEnter={saveTtsPhone}
+                />
+                <Button type="link" size="small" loading={ttsPhone.saving} onClick={saveTtsPhone} style={{ padding: "0 4px", height: "auto" }}>
+                  保存
+                </Button>
+                <Button type="link" size="small" disabled={ttsPhone.saving} onClick={() => setTtsPhone((p) => ({ value: p.value }))} style={{ padding: 0, height: "auto" }}>
+                  取消
+                </Button>
+              </>
+            ) : (
+              <>
+                {ttsPhone.value ? <span className="mono">{ttsPhone.value}</span> : "还没填"}
+                <Button type="link" size="small" onClick={() => setTtsPhone((p) => ({ ...p, editing: p.value }))} style={{ padding: "0 4px", height: "auto" }}>
+                  {ttsPhone.value ? "修改" : "去填写"}
+                </Button>
+              </>
+            )}
+            。13 型不能拨紧急号码；勾了"语音留言"的告警触发时，平台通过 SIP 服务商给这个号码打电话，播放留言内容。语音留言按告警类型对整个机构生效：勾选或取消会影响机构里所有填了语音留言电话的设备。
+          </div>
+        )}
+        <Modal
+          open={!!ttsDraft}
+          title={`${ttsDraft?.label ?? ""}的语音留言内容`}
+          okText="保存并开启"
+          okButtonProps={{ disabled: !ttsDraft?.content.trim(), loading: !!ttsDraft && busy === ttsDraft.label }}
+          onCancel={() => setTtsDraft(undefined)}
+          onOk={async () => {
+            if (ttsDraft && (await saveTts(ttsDraft.label, ttsDraft.alertTypeId, true, ttsDraft.content.trim()))) setTtsDraft(undefined);
+          }}
+          destroyOnHidden
+        >
+          <Input.TextArea
+            rows={3}
+            maxLength={TTS_MAX_LENGTH}
+            showCount
+            value={ttsDraft?.content}
+            onChange={(e) => setTtsDraft((t) => t && { ...t, content: e.target.value })}
+          />
+          <p className="muted small" style={{ marginTop: 14 }}>
+            点下面的变量插到末尾，打电话时换成实际内容：
+          </p>
+          <div>
+            {TTS_VARIABLES.map((v) => (
+              <Tag key={v.token} style={{ cursor: "pointer" }} onClick={() => setTtsDraft((t) => t && { ...t, content: t.content + v.token })}>
+                {v.label}
+              </Tag>
+            ))}
+          </div>
+          <p className="muted small" style={{ marginTop: 10 }}>
+            保存到这个告警类型的机构配置，机构里所有设备的{ttsDraft?.label}都用这段留言。
+          </p>
+        </Modal>
         <p className="muted small" style={{ marginTop: 10 }}>
           开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒
           {delayOk

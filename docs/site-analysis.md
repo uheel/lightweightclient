@@ -544,6 +544,18 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 15 型局域网呼主机时，通话记录的被叫只有 IP（`172.16.1.200`），没有 `号码@`
 - 网页端在局域网模式、主机没有 IP 时会提示"局域网呼叫未能生效：当前设备还未和管理主机关联，请确认设备已安装到房间，且在管理主机的管理房间配置中关联了此设备所在房间"
 
+### 语音留言（TTS 电话，2026-10-24 读平台前端"告警事件类型"页 + 只读查询李虎机构）
+
+13 型不能拨紧急号码（属性字典里没有 `talk_type_sel`），告警时改用平台的语音留言：平台配的 SIP 服务商（申瓯，日志页"TTS 呼叫 `shenou-tts`"）给个人手机打电话，播一段文字转语音的留言。开启要两步：
+
+1. **设备的语音留言电话**：属性 `tts-phone`（标题"语音留言电话"，`isPlatformOnly`，只存平台不下发设备）。1 / 6 / 12 / 13 / 15 型的属性字典里都有。写法同其他属性：`POST /api/device-property/write {sn, properties:[{propertyName:"tts-phone", value}], saveOnly:true}`
+2. **告警类型开启语音留言**：`GET /api/alert-type/config?alertTypeId=` / `PUT /api/alert-type/config`，字段 `enableTtsVoiceMessage`（开关）、`ttsVoiceMessageContent`（留言，≤ 512 字），同一份配置里还有 `enableUnprocessedCalls / timeoutForUnprocessedCalls / alertSoundPlayCount` 和推送开关（`enableSettings、disableNotifyWx…`）
+   - **按机构存，看请求头 `orgid`**：不带时读不到；李虎机构已开离床告警（`#DeviceName# 发生离床告警，请及时处理。`）、跌倒告警，同样的告警类型在移动爱家没配过（返回只有 `succeeded`）。所以开关对机构里所有设备生效，不能按设备开
+   - PUT 是整份覆盖：平台网页端把表单全部字段带上、去掉 `ttsVoiceMessageReceivers` 再保存。客户端先 GET 现在的配置，只改这两项
+   - 留言变量：`#DeviceName#` 设备名称、`#MemberName#` 人员姓名、`#BuildingName#` 楼栋、`#FloorName#` 楼层、`#RoomName#` 房间、`#BedName#` 床位
+- 场景触发哪个告警类型看场景动作：`{name:"Event_auto_trig", type:"trigger", alertTypeId}`。13 型模板：离床告警 `bcd0b61d…`、床上坐起 `011bd593…`、疑似跌倒 `d4b95322…`、跌倒告警 `e141180a…`、久坐提醒 → 久坐告警 `8e661285…`、紧急求助 `2d8a24b4…`
+- 运维端告警配置（13 型）：底部填语音留言电话（11 位手机号）；每个告警有"语音留言"勾选框，没填电话时不能勾；勾选时先填留言内容（默认 `#DeviceName# 发生<告警名>，请及时处理。`），保存到该告警类型的机构配置；取消勾选要确认（整个机构都关）。告警类型按设备上的场景取，没开启的按模板取（`api/alertType.ts`）
+
 ### 管理主机的 MQTT 协议（和雷达不同）
 
 topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{command, data, tag, time, status, error}`，`tag` 对应请求和应答。
