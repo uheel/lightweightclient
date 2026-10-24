@@ -616,7 +616,12 @@ export default function PropertyTab({
     try {
       const res = await syncLayoutFromDevice(roomId, sn, {}, undefined, planEdit.zones);
       if (res.note) return notification.warning({ message: "区域名字没有保存", description: res.note, duration: 10 });
-      setPlanEdit((cur) => (cur ? { ...cur, zones: undefined } : cur));
+      // 要把 zones 这个键删掉：留成 undefined 的话 { ...plan, ...planEdit } 会把布置里读回的名字也盖成空（显示成默认名）
+      setPlanEdit((cur) => {
+        if (!cur) return cur;
+        const { zones: _saved, ...rest } = cur;
+        return Object.keys(rest).length ? rest : undefined;
+      });
       message.success("区域名字和空间区域类型已保存到房间布置");
       onLayoutSynced?.();
     } catch (e) {
