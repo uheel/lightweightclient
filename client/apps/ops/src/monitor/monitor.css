@@ -155,7 +155,7 @@
 .room-plan.dark .fur .fur-line, .room-plan.dark .fur .fur-arc { stroke: var(--m-plan-line); }
 .room-plan.dark .fur .fur-plant { fill: color-mix(in srgb, #5FA36A 30%, var(--m-plan)); stroke: color-mix(in srgb, #5FA36A 60%, var(--m-plan)); }
 .room-plan.dark .fur .fur-leaf { stroke: var(--m-text-2); }
-.room-plan.dark .fur .fur-sill { stroke: var(--m-plan); }
+.room-plan.dark .fur .fur-sill { fill: var(--m-plan); }
 .room-plan.dark .fur .fur-window { fill: color-mix(in srgb, #5B8DD6 25%, var(--m-plan)); stroke: color-mix(in srgb, #5B8DD6 60%, var(--m-plan)); }
 .room-plan.dark .fur .fur-wall { fill: var(--m-plan-wall); }
 .room-plan.zoomable { cursor: grab; touch-action: none; user-select: none; }

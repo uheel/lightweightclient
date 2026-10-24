@@ -1,12 +1,23 @@
 import { useId, useRef, useState } from "react";
 import { Button, Input, Select } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import type { PlanElement, RoomDesign } from "../api/room";
+import RoomBackdrop from "../rooms/RoomBackdrop";
 
 /**
  * 区域画布：在平面图方向上拖动区域、拖边角改大小，监测范围也直接拖边。界面上不出现坐标数字。
  * 内部全部用设备坐标（分米，以雷达为原点）：设备只认这个，也正好是设备的精度（10 cm）。
  * 画的时候按房间平面图的方向转一下（和平台网页端、运维端"诊断"页一致）。
  */
+
+/** 区域画布上的房间：外框（cm）、雷达在房间里的位置，以及用来画家具的布置元素 */
+export interface CanvasRoom {
+  width: number;
+  height: number;
+  radar: { x: number; y: number };
+  roomStyle?: RoomDesign["roomStyle"];
+  elements?: PlanElement[];
+}
 
 /** 设备坐标里的矩形，分米 */
 export interface DmRect {
@@ -180,7 +191,7 @@ export default function ZoneCanvas({
   mode?: number;
   zones: CanvasZone[];
   /** 房间外框（cm，平面图坐标）和雷达在房间里的位置；不在房间布置里时没有 */
-  room?: { width: number; height: number; radar: { x: number; y: number } };
+  room?: CanvasRoom;
   types: ZoneType[];
   disabled?: boolean;
   onZones: (z: CanvasZone[]) => void;
@@ -425,7 +436,23 @@ export default function ZoneCanvas({
           </defs>
           <rect x={vx} y={vy} width={vw} height={vh} fill={`url(#${gridId})`} />
           <rect x={lim.x} y={lim.y} width={lim.w} height={lim.h} className="zc-limit" />
+          {/* 房间里的家具（装修）：按房间坐标（cm）画，换算到以雷达为原点的分米；只看不能点 */}
+          {room && (
+            <RoomBackdrop
+              size={room}
+              roomStyle={room.roomStyle}
+              elements={room.elements}
+              grid={false}
+              outline={false}
+              className="zc-backdrop"
+              transform={`translate(${-room.radar.x / 10} ${-room.radar.y / 10}) scale(0.1)`}
+              layer="base"
+            />
+          )}
           {roomRect && <rect x={roomRect.x} y={roomRect.y} width={roomRect.w} height={roomRect.h} className="zc-room" />}
+          {room && (
+            <RoomBackdrop size={room} elements={room.elements} className="zc-doors" transform={`translate(${-room.radar.x / 10} ${-room.radar.y / 10}) scale(0.1)`} layer="doors" />
+          )}
           {bedRange &&
             (() => {
               const b = planRect(bedRange);

@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { Button, InputNumber, Popconfirm, Select, Space, Tooltip } from "antd";
-import { CloseOutlined, DeleteOutlined, DisconnectOutlined, PlusOutlined } from "@ant-design/icons";
+import { CloseOutlined, DeleteOutlined, DisconnectOutlined, FormatPainterOutlined, PlusOutlined } from "@ant-design/icons";
 import type { Radar, RoomDevice } from "../api/device";
-import type { Room } from "../api/room";
+import { getRoomDesign, radarElements, roomSize, type Room, type RoomDesign } from "../api/room";
 import type { BedRow } from "../api/space";
+import RoomPlan from "../rooms/RoomPlan";
+import DecorDialog from "../rooms/furniture/DecorDialog";
+import { isDecor } from "../rooms/furniture/catalog";
 import EditableText from "./EditableText";
 
 const occupied = (b: BedRow) => b.bedStatus === 2 || !!b.realName;
 
-/** 楼宇页右侧的房间面板：改名、改尺寸、管床位（空床直接办入住、给床位绑本房间的设备），看绑了哪些雷达 */
+/** 楼宇页右侧的房间面板：改名、改尺寸、装修（摆家具）、管床位（空床直接办入住、给床位绑本房间的设备），看绑了哪些雷达 */
 export default function RoomPanel({
   room,
   place,
@@ -51,6 +54,21 @@ export default function RoomPanel({
     setL(room.roomLong ?? 4);
   }, [room.id, room.roomWidth, room.roomLong]);
   const sizeChanged = w !== (room.roomWidth ?? 4) || l !== (room.roomLong ?? 4);
+  // 装修预览用的房间布置：换房间、改尺寸后重取
+  const [design, setDesign] = useState<RoomDesign | null>();
+  const [decor, setDecor] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setDesign(undefined);
+    getRoomDesign(room.id).then(
+      (d) => live && setDesign(d ?? null),
+      () => live && setDesign(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [room.id, room.roomWidth, room.roomLong]);
+  const furnitureCount = design ? (design.elements ?? []).filter(isDecor).length : 0;
 
   const wrap = (key: string, fn: () => Promise<void>) => async () => {
     setBusy(key);
@@ -85,6 +103,26 @@ export default function RoomPanel({
         )}
       </Space>
       <div className="muted small space-hint">只改房间外框，里面的家具和区域位置不动</div>
+
+      <h3>
+        装修 {design && <span className="muted">{furnitureCount ? `${furnitureCount} 件家具` : "还没摆家具"}</span>}
+      </h3>
+      <button type="button" className="space-decor" onClick={() => setDecor(true)} title="打开装修，在房间里摆床、沙发、马桶等家具">
+        {design ? (
+          <RoomPlan
+            design={design}
+            size={roomSize(design, room)}
+            radars={radarElements(design).map((e) => ({ sn: e.sn ?? e.id ?? "", label: "", config: e.qingLanConfig, element: e }))}
+            className="space-decor-plan"
+          />
+        ) : (
+          <span className="muted small">{design === null ? "房间布置读不到" : "加载中…"}</span>
+        )}
+      </button>
+      <Button size="small" icon={<FormatPainterOutlined />} onClick={() => setDecor(true)}>
+        装修
+      </Button>
+      {decor && <DecorDialog room={room} design={design ?? undefined} onClose={() => setDecor(false)} onSaved={setDesign} />}
 
       <h3>
         床位 <span className="muted">{beds.length}</span>

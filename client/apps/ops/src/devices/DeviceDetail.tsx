@@ -149,7 +149,7 @@ export default function DeviceDetail({
       cfg
         ? {
             facing: cfg.installDirection,
-            room: room?.size ? { ...room.size, radar: radarInRoom(cfg as QlConfig) } : undefined,
+            room: room?.size ? { ...room.size, radar: radarInRoom(cfg as QlConfig), roomStyle: room.roomStyle, elements: room.elements } : undefined,
             zones: Object.fromEntries(zonesOf(cfg as QlConfig).map((z) => [z.index, { text: z.text, spaceType: z.spaceType }])),
           }
         : undefined,

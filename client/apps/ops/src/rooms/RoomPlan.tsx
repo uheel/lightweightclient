@@ -1,8 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { assetUrl } from "@radar/core";
 import type { PlanElement, RoomDesign } from "../api/room";
-import { FurnitureShape } from "./furniture/icons";
+import RoomBackdrop from "./RoomBackdrop";
 import { boundRect, containerRect, facingOf, mountOf, radarInRoom, supervisionRect, ZONE_COLOR, ZONE_TYPE, zoneRect, zonesOf, type QlConfig, type QlRect } from "./qinglan";
 
 export interface PlanRadar {
@@ -39,6 +38,7 @@ export default function RoomPlan({
   focusZone,
   className,
   zoomable,
+  showZones = true,
   children,
 }: {
   design?: RoomDesign;
@@ -49,6 +49,8 @@ export default function RoomPlan({
   className?: string;
   /** 滚轮缩放（以鼠标位置为中心）、拖动平移、双击复位 */
   zoomable?: boolean;
+  /** 画雷达的监测边界、探测范围、监护区和区域；关掉时只剩房间、家具、雷达和叠加内容 */
+  showZones?: boolean;
   /**
    * 叠加在最上层的内容（房间坐标，1 = 1 cm），例如监控模式的实时目标。
    * 传函数时拿到当前的文字大小（缩放后文字保持屏幕上一样大）
@@ -60,10 +62,6 @@ export default function RoomPlan({
   const base = { x: view.x - PAD, y: view.y - PAD, w: view.width + PAD * 2, h: view.height + PAD * 2 };
   const { v, svgRef, contentRef, panning, onPointerDown, onPointerMove, onPointerUp, reset } = useZoom(base, zoomable);
   const vb = `${v.x} ${v.y} ${v.w} ${v.h}`;
-  // 网格 pattern 每张图单独起 id：监控模式盖在房间布置页上面时两张图同时在页面里，同名 id 会用到另一张图的网格（颜色、线宽都不对）
-  const gridId = `plan-grid-${useId().replace(/[^\w-]/g, "")}`;
-  const bg = design?.roomStyle;
-  const others = (design?.elements ?? []).filter((e) => e.type !== 3);
   // 文字大小跟着图的尺寸走，保证缩放后还看得清；放大后按比例缩小，屏幕上保持一样大
   const fs = Math.max(11, Math.round(Math.max(view.width, view.height) / 34)) * (v.w / base.w);
 
@@ -71,12 +69,7 @@ export default function RoomPlan({
   const staticLayer = useMemo(
     () => (
       <>
-      <rect x={room.x} y={room.y} width={room.width} height={room.height} fill={`url(#${gridId})`} />
-      {bg?.type === 4 && bg.src && <image href={assetUrl(bg.src)} x={0} y={0} width={room.width} height={room.height} preserveAspectRatio="none" opacity={0.55} />}
-      {others.map((e, i) => (
-        <PlanShape key={e.id ?? i} e={e} />
-      ))}
-      <rect x={room.x} y={room.y} width={room.width} height={room.height} className="plan-room" />
+      <RoomBackdrop size={size} roomStyle={design?.roomStyle} elements={design?.elements} />
 
       {radars.map((r) => {
         const c = r.config;
@@ -101,10 +94,10 @@ export default function RoomPlan({
         const hasBed = zonesOf(c).some((z) => z.type === 5);
         return (
           <g key={r.sn} opacity={dim ? 0.35 : 1}>
-            <rect x={cont.x} y={cont.y} width={cont.width} height={cont.height} className="plan-container" />
-            <rect x={b.x} y={b.y} width={b.width} height={b.height} className="plan-bound" />
-            {hasBed && <rect x={sup.x} y={sup.y} width={sup.width} height={sup.height} className="plan-supervision" />}
-            {zonesOf(c).map((z) => {
+            {showZones && <rect x={cont.x} y={cont.y} width={cont.width} height={cont.height} className="plan-container" />}
+            {showZones && <rect x={b.x} y={b.y} width={b.width} height={b.height} className="plan-bound" />}
+            {showZones && hasBed && <rect x={sup.x} y={sup.y} width={sup.width} height={sup.height} className="plan-supervision" />}
+            {(showZones ? zonesOf(c) : []).map((z) => {
               const zr = zoneRect(c, z);
               const color = ZONE_COLOR[z.type] ?? "#999";
               const focused = focusZone === z.index && (focusSn === undefined || focusSn === r.sn);
@@ -128,7 +121,7 @@ export default function RoomPlan({
       </>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [design, size.width, size.height, radars, focusSn, focusZone, fs],
+    [design, size.width, size.height, radars, focusSn, focusZone, fs, showZones],
   );
 
   return (
@@ -145,11 +138,6 @@ export default function RoomPlan({
       onPointerCancel={onPointerUp}
       onDoubleClick={reset}
     >
-      <defs>
-        <pattern id={gridId} width="50" height="50" patternUnits="userSpaceOnUse">
-          <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#EEF0F5" strokeWidth="1" />
-        </pattern>
-      </defs>
       {/* 拖动时直接改这个 g 的 transform（不经过 React），松手再写回 viewBox */}
       <g ref={contentRef}>
         {staticLayer}
@@ -268,25 +256,4 @@ function useZoom(base: Box, enabled?: boolean) {
     onPointerUp: end,
     reset: () => enabled && setZoom(null),
   };
-}
-
-/** 平面图上的家具、文字（只读展示） */
-function PlanShape({ e }: { e: PlanElement }) {
-  const x = e.x ?? 0;
-  const y = e.y ?? 0;
-  const tf = e.rotation ? `rotate(${e.rotation} ${x} ${y})` : undefined;
-  if (e.type === 1)
-    return (
-      <g transform={`translate(${x} ${y})${e.rotation ? ` rotate(${e.rotation})` : ""}`}>
-        {(e.children ?? []).filter((c) => c.type !== 3).map((c, i) => <PlanShape key={c.id ?? i} e={c} />)}
-      </g>
-    );
-  if (e.type === 4 || e.type === 2) return <FurnitureShape e={e} />;
-  if (e.type === 5 && e.text)
-    return (
-      <text x={x} y={y + 14} transform={tf} fontSize={14} fill={e.fill ?? "#5B6078"}>
-        {e.text}
-      </text>
-    );
-  return null;
 }

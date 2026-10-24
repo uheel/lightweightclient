@@ -319,6 +319,23 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
   );
 }
 
+/** 监控平面图是否画雷达区域：每台电脑自己记住，换房间、下次打开都沿用 */
+const ZONES_KEY = "RC_MONITOR_ZONES";
+function savedShowZones() {
+  try {
+    return localStorage.getItem(ZONES_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function saveShowZones(on: boolean) {
+  try {
+    localStorage.setItem(ZONES_KEY, on ? "1" : "0");
+  } catch {
+    /* 存不了就只在本次生效 */
+  }
+}
+
 function Kpi({ label, value, total, tone }: { label: string; value: number; total?: number; tone?: "ok" | "alert" }) {
   return (
     <div className={`mon-kpi${tone === "alert" ? " alert" : ""}`}>
@@ -385,6 +402,7 @@ function RoomLive({
   const others = devices.filter((x) => !beds.includes(x));
   const vitals = new Map(beds.map((x) => [x.sn, bedVitals(live[x.sn], now)]));
   const [focusSn, setFocusSn] = useState<string>();
+  const [showZones, setShowZones] = useState(savedShowZones);
 
   return (
     <section className="mon-live-room" aria-label="房间实时">
@@ -401,6 +419,19 @@ function RoomLive({
           )}
         </div>
         <div className="mon-actions">
+          {devices.length > 0 && (
+            <button
+              className="mon-btn"
+              aria-pressed={showZones}
+              title={showZones ? "隐藏雷达的监测范围和区域，只看房间、家具和人" : "显示雷达的监测范围和区域（床、门、感应区）"}
+              onClick={() => {
+                setShowZones(!showZones);
+                saveShowZones(!showZones);
+              }}
+            >
+              {showZones ? "隐藏区域" : "显示区域"}
+            </button>
+          )}
           {devices.length > 0 && (
             <button className="mon-btn" onClick={() => onReplay(devices.length > 1 ? undefined : devices[0].sn)}>
               时间回溯
@@ -422,7 +453,7 @@ function RoomLive({
         ) : !d ? (
           <div className="mon-empty">加载房间布置…</div>
         ) : (
-          <RoomPlan key={room.id} design={d} size={size} radars={planRadars} className="dark" zoomable focusSn={focusSn}>
+          <RoomPlan key={room.id} design={d} size={size} radars={planRadars} className="dark" zoomable focusSn={focusSn} showZones={showZones}>
             {(fs) => (
               <>
                 {beds.map((b) => {

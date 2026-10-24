@@ -154,6 +154,12 @@ export function furnitureOf(e: PlanElement): FurnitureDef | undefined {
   return e.type === 4 ? byImage.get(imageId(e.src) ?? "") : undefined;
 }
 
+/** 门：在底图里放到墙和房间外框之后画，门洞才能把墙挖开 */
+export const isDoor = (e: PlanElement) => {
+  const k = furnitureOf(e)?.kind;
+  return k === "door" || k === "door-right" || k === "double-door";
+};
+
 /** 装修编辑的元素：顶层的图片（type 4）和矩形（type 2），包括认不出的平台家具 */
 export const isDecor = (e: PlanElement) => e.type === 4 || e.type === 2;
 

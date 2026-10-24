@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { App, Button, Empty, Modal, Tag, Tooltip } from "antd";
+import { Button, Empty, Tag, Tooltip } from "antd";
 import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, FormatPainterOutlined, SyncOutlined } from "@ant-design/icons";
-import { roomSize, type PlanElement } from "../api/room";
-import FurnitureEditor from "./furniture/FurnitureEditor";
+import { roomSize, type RoomDesign } from "../api/room";
+import DecorDialog from "./furniture/DecorDialog";
 import { RECORD_TEXT, type Level, type RadarReport, type RoomReport } from "./check";
 import type { Issue } from "./qinglan";
 import { describeDiff, facingText, MODE, modeOf, MOUNT, mountOf, parseArray, sameArray, ZONE_COLOR, ZONE_TYPE, zonesOf } from "./qinglan";
@@ -78,14 +78,12 @@ export default function RoomDetail({
   fixing?: boolean;
   /** 改这台雷达的安装区域（保存布置） */
   onArea?: (r: RadarReport, a: InstallArea | null) => Promise<void>;
-  /** 保存装修（只存布置，不下发） */
-  onDecor?: (items: PlanElement[]) => Promise<void>;
+  /** 装修保存后带回最新布置（只存布置，不下发）；不传就不显示装修入口 */
+  onDecor?: (d: RoomDesign) => void;
 }) {
   const { room, design, radars } = report;
-  const { modal } = App.useApp();
   const [focus, setFocus] = useState<{ sn?: string; zone?: number }>({});
-  const [decor, setDecor] = useState<{ items: PlanElement[]; dirty: boolean } | null>(null);
-  const [savingDecor, setSavingDecor] = useState(false);
+  const [decor, setDecor] = useState(false);
   const size = roomSize(design, room);
   const place = [room.buildingName, room.floorName].filter(Boolean).join(" / ");
   const label = (r: RadarReport) => r.device?.deviceName || r.element?.deviceName || r.sn || "未绑设备";
@@ -119,7 +117,7 @@ export default function RoomDetail({
       <div className="ops-card room-plan-card" onMouseLeave={() => setFocus({})}>
         {onDecor && (
           <Tooltip title="在平面图上摆床、沙发、马桶等家具，只是给人看的，不下发到设备">
-            <Button size="small" className="room-plan-decor" icon={<FormatPainterOutlined />} onClick={() => setDecor({ items: [], dirty: false })}>
+            <Button size="small" className="room-plan-decor" icon={<FormatPainterOutlined />} onClick={() => setDecor(true)}>
               装修
             </Button>
           </Tooltip>
@@ -150,34 +148,7 @@ export default function RoomDetail({
         </div>
       </div>
 
-      {decor && onDecor && (
-        <Modal
-          open
-          title={`装修 · ${room.roomName}`}
-          width="min(1360px, 96vw)"
-          centered
-          okText="保存"
-          okButtonProps={{ disabled: !decor.dirty }}
-          confirmLoading={savingDecor}
-          maskClosable={false}
-          onOk={async () => {
-            setSavingDecor(true);
-            try {
-              await onDecor(decor.items);
-              setDecor(null);
-            } finally {
-              setSavingDecor(false);
-            }
-          }}
-          onCancel={() =>
-            decor.dirty
-              ? modal.confirm({ title: "放弃没保存的装修？", okText: "放弃", okButtonProps: { danger: true }, cancelText: "继续编辑", onOk: () => setDecor(null) })
-              : setDecor(null)
-          }
-        >
-          <FurnitureEditor design={design} size={size} radars={radars.flatMap((r) => (r.config ? [r.config] : []))} saving={savingDecor} onChange={(items, dirty) => setDecor({ items, dirty })} />
-        </Modal>
-      )}
+      {decor && onDecor && <DecorDialog room={room} design={design} onClose={() => setDecor(false)} onSaved={onDecor} />}
 
       {radars.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这个房间没有雷达" />}
       {radars.map((r) => (

@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import { api, realtime } from "@radar/core";
-import type { PlanElement } from "./room";
+import type { PlanElement, RoomDesign } from "./room";
 import { installAreaOf, type InstallArea } from "../rooms/installArea";
 import { getRoomView } from "./roomView";
 
@@ -247,8 +247,8 @@ interface RoomElement {
 interface RoomDetail {
   roomId: string;
   roomName: string;
-  /** 房间外框，cm */
-  background?: { width?: number; height?: number };
+  /** 房间外框，cm；type 4 且带 src 时是户型底图 */
+  background?: { width?: number; height?: number; type?: number; src?: string };
   buildingName?: string;
   floorName?: string;
   elements?: RoomElement[];
@@ -259,6 +259,9 @@ export interface RoomInfo {
   place: string;
   /** 房间外框尺寸，cm */
   size?: { width: number; height: number };
+  /** 外框样式（户型底图）和布置里的元素：区域画布在下面画出家具（见 rooms/RoomBackdrop.tsx） */
+  roomStyle?: RoomDesign["roomStyle"];
+  elements?: PlanElement[];
   /** sn → 安装配置 */
   configs: Map<string, QingLanConfig>;
   /** 布置里装着设备的雷达（一个房间可以有几台：卧室一台、卫生间一台） */
@@ -282,6 +285,8 @@ export async function getRoomInfo(roomId: string): Promise<RoomInfo> {
     roomName: d?.roomName ?? "",
     place: [d?.buildingName, d?.floorName, d?.roomName].filter(Boolean).join(" / "),
     size: d?.background?.width && d.background.height ? { width: d.background.width, height: d.background.height } : undefined,
+    roomStyle: d?.background,
+    elements: d?.elements as PlanElement[] | undefined,
     configs,
     radars,
   };

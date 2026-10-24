@@ -473,7 +473,7 @@
 .fur .fur-plant { fill: #DCEBD9; stroke: #9FBF98; stroke-width: 1; }
 .fur .fur-arc { fill: none; stroke: #A9AEC2; stroke-width: 1; stroke-dasharray: 4 3; }
 .fur .fur-leaf { stroke: #7D839B; stroke-width: 3; stroke-linecap: round; }
-.fur .fur-sill { stroke: #FAFBFD; stroke-width: 5; }
+.fur .fur-sill { fill: #FAFBFD; stroke: none; }
 .fur .fur-window { fill: #E3EEFB; stroke: #8FA9CC; stroke-width: 1.5; }
 .fur .fur-wall { fill: #7D839B; stroke: none; }
 .room-plan-card { position: relative; }
@@ -553,6 +553,11 @@
 .zc-stage:focus-visible { border-color: #3B4FD8; }
 .zc-stage svg { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; }
 .zc-stage svg.dragging { cursor: grabbing; }
+/* 区域画布下面的家具：淡一些，不挡区域，也不接鼠标 */
+.zc-backdrop { opacity: 0.75; pointer-events: none; }
+/* 门不透明：门洞要完全盖住墙 */
+.zc-doors { pointer-events: none; }
+.zc-doors .fur-arc, .zc-doors .fur-leaf { opacity: 0.75; }
 .zc-limit { fill: none; stroke: #C9CCDA; stroke-width: 0.15; stroke-dasharray: 0.6 0.6; }
 .zc-room { fill: none; stroke: #1B1D2E; stroke-width: 0.45; pointer-events: none; }
 .zc-bound { fill: #3B4FD8; fill-opacity: 0.04; stroke: #3B4FD8; stroke-width: 0.2; stroke-dasharray: 1 0.6; cursor: pointer; }
@@ -631,6 +636,10 @@
 .space-panel h3 { margin: 14px 0 4px; font-size: 13px; font-weight: 600; display: flex; gap: 6px; }
 .space-panel h3 .muted { font-weight: 400; }
 .space-hint { margin-top: 2px; }
+/* 房间面板里的装修预览：点一下打开装修 */
+.space-decor { flex: none; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 60px; padding: 0; border: 1px solid #E8EAF2; border-radius: 6px; background: #FAFBFD; cursor: pointer; }
+.space-decor:hover { border-color: #C9D0FA; }
+.space-decor .room-plan.space-decor-plan { height: 170px; pointer-events: none; }
 .space-beds-list, .space-radars { list-style: none; margin: 0 0 6px; padding: 0; }
 .space-beds-list li, .space-radars li { display: flex; align-items: center; gap: 8px; min-height: 30px; border-bottom: 1px solid #F4F5F9; font-size: 13px; }
 .space-beds-list li .editable { min-width: 0; }

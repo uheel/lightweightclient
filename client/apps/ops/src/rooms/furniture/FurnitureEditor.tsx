@@ -1,11 +1,12 @@
-import { useId, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, Checkbox, InputNumber, Tooltip } from "antd";
 import { CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined } from "@ant-design/icons";
 import type { PlanElement, RoomDesign } from "../../api/room";
 import { newId } from "../radarSlot";
 import { boundRect, radarInRoom, ZONE_COLOR, zoneRect, zonesOf, type QlConfig } from "../qinglan";
-import { FURNITURE, FURNITURE_GROUPS, furnitureDef, furnitureOf, isDecor, newFurniture, type FurnitureKind } from "./catalog";
+import { FURNITURE, FURNITURE_GROUPS, furnitureDef, furnitureOf, isDecor, isDoor, newFurniture, type FurnitureKind } from "./catalog";
 import { FurnitureIcon, FurnitureShape } from "./icons";
+import RoomBackdrop from "../RoomBackdrop";
 
 /** 拖动、改尺寸按 5 cm 对齐；离墙这么近就贴上去 */
 const GRID = 5;
@@ -90,7 +91,6 @@ export default function FurnitureEditor({
   const [sel, setSel] = useState<string>();
   const [showZones, setShowZones] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
-  const gridId = `fur-grid-${useId().replace(/[^\w-]/g, "")}`;
   const drag = useRef<Drag | null>(null);
 
   const update = (next: PlanElement[]) => {
@@ -172,6 +172,12 @@ export default function FurnitureEditor({
     ev.preventDefault();
   };
 
+  const itemShape = (e: PlanElement) => (
+    <g key={e.id} className={`fur-item${e.id === sel ? " on" : ""}`} onPointerDown={(ev) => onDown(ev, e, "move")}>
+      <FurnitureShape e={e} />
+    </g>
+  );
+
   const vb = `${-PAD} ${-PAD} ${room.width + PAD * 2} ${room.height + PAD * 2}`;
   const fs = Math.max(11, Math.round(Math.max(room.width, room.height) / 40));
   const selDef = selected && furnitureOf(selected);
@@ -220,34 +226,28 @@ export default function FurnitureEditor({
           onPointerUp={onUp}
           onPointerCancel={onUp}
         >
-          <defs>
-            <pattern id={gridId} width="50" height="50" patternUnits="userSpaceOnUse">
-              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#EEF0F5" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect x={0} y={0} width={room.width} height={room.height} fill={`url(#${gridId})`} />
-          {showZones &&
-            radars.map((c, i) => {
-              const b = boundRect(c);
-              const rd = radarInRoom(c);
-              return (
-                <g key={i} className="fur-zones">
-                  <rect x={b.x} y={b.y} width={b.width} height={b.height} className="plan-bound" />
-                  {zonesOf(c).map((z) => {
-                    const r = zoneRect(c, z);
-                    const color = ZONE_COLOR[z.type] ?? "#999";
-                    return <rect key={z.id ?? z.index} x={r.x} y={r.y} width={r.width} height={r.height} fill={color} fillOpacity={0.12} stroke={color} strokeWidth={1} strokeDasharray="4 3" />;
-                  })}
-                  <circle cx={rd.x} cy={rd.y} r={fs * 0.4} className="plan-radar-lens" />
-                </g>
-              );
-            })}
-          {items.map((e) => (
-            <g key={e.id} className={`fur-item${e.id === sel ? " on" : ""}`} onPointerDown={(ev) => onDown(ev, e, "move")}>
-              <FurnitureShape e={e} />
-            </g>
-          ))}
-          <rect x={0} y={0} width={room.width} height={room.height} className="plan-room" />
+          {/* 底图（网格、户型图、文字）和墙用公共组件；家具在这里自己画，才能拖 */}
+          <RoomBackdrop size={room} roomStyle={design?.roomStyle} elements={(design?.elements ?? []).filter((e) => !isDecor(e))}>
+            {showZones &&
+              radars.map((c, i) => {
+                const b = boundRect(c);
+                const rd = radarInRoom(c);
+                return (
+                  <g key={i} className="fur-zones">
+                    <rect x={b.x} y={b.y} width={b.width} height={b.height} className="plan-bound" />
+                    {zonesOf(c).map((z) => {
+                      const r = zoneRect(c, z);
+                      const color = ZONE_COLOR[z.type] ?? "#999";
+                      return <rect key={z.id ?? z.index} x={r.x} y={r.y} width={r.width} height={r.height} fill={color} fillOpacity={0.12} stroke={color} strokeWidth={1} strokeDasharray="4 3" />;
+                    })}
+                    <circle cx={rd.x} cy={rd.y} r={fs * 0.4} className="plan-radar-lens" />
+                  </g>
+                );
+              })}
+            {items.filter((e) => !isDoor(e)).map(itemShape)}
+          </RoomBackdrop>
+          {/* 门画在墙和隔墙之后，门洞才能把墙挖开 */}
+          {items.filter(isDoor).map(itemShape)}
           {selected && (
             <g transform={`translate(${selected.x ?? 0} ${selected.y ?? 0})${selected.rotation ? ` rotate(${selected.rotation})` : ""}`}>
               <rect x={0} y={0} width={selected.width ?? 0} height={selected.height ?? 0} className="fur-sel" />

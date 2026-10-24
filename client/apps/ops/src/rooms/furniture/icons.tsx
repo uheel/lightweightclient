@@ -41,6 +41,13 @@ function bed(w: number, h: number, nursing = false) {
   );
 }
 
+/**
+ * 门洞：沿门框（上边）画一条和底色一样的宽带，把房间外框和隔墙在门口"挖开"，看起来是打通的。
+ * 隔墙 10 cm 厚，门框不管贴在墙的哪一边都能盖住；门在底图里最后画（见 RoomBackdrop），才盖得住墙
+ */
+const SILL = 22;
+const sill = (w: number) => <rect x={0} y={-SILL / 2} width={w} height={SILL} className="fur-sill" />;
+
 function sofa(w: number, h: number) {
   const arm = Math.min(16, w * 0.14);
   const back = Math.min(22, h * 0.26);
@@ -272,22 +279,22 @@ const DRAW: Record<FurnitureKind, Draw> = {
   ),
   door: (w, h) => (
     <>
+      {sill(w)}
       <path d={`M0 ${h} A${w} ${h} 0 0 0 ${w} 0`} className="fur-arc" />
-      {L(0, 0, w, 0, "fur-sill")}
       {L(0, 0, 0, h, "fur-leaf")}
     </>
   ),
   "door-right": (w, h) => (
     <>
+      {sill(w)}
       <path d={`M0 0 A${w} ${h} 0 0 0 ${w} ${h}`} className="fur-arc" />
-      {L(0, 0, w, 0, "fur-sill")}
       {L(w, 0, w, h, "fur-leaf")}
     </>
   ),
   "double-door": (w, h) => (
     <>
+      {sill(w)}
       <path d={`M0 ${h} A${w / 2} ${h} 0 0 0 ${w / 2} 0 A${w / 2} ${h} 0 0 0 ${w} ${h}`} className="fur-arc" />
-      {L(0, 0, w, 0, "fur-sill")}
       {L(0, 0, 0, h, "fur-leaf")}
       {L(w, 0, w, h, "fur-leaf")}
     </>

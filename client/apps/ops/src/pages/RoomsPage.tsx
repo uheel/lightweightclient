@@ -3,8 +3,7 @@ import { App, Button, Empty, Input, Progress, Spin } from "antd";
 import { FileSearchOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
 import { getDeviceTypeMap, getRadars, getStoredProperties, writeDeviceProperties, type Radar, type StoredProperty } from "../api/device";
-import { getRoomDesign, getRooms, radarElements, readFromDevice, saveRoomDesign, type PlanElement, type Room, type RoomDesign } from "../api/room";
-import { mergeFurniture } from "../rooms/furniture/FurnitureEditor";
+import { getRoomDesign, getRooms, radarElements, readFromDevice, saveRoomDesign, type Room, type RoomDesign } from "../api/room";
 import { getDeviceScenes, type Scene } from "../api/scene";
 import { checkRoom, ZONE_TYPES, type Level, type RadarReport, type RoomReport } from "../rooms/check";
 import RoomDetail, { IssueItem, LEVEL_TEXT, type DeviceRead } from "../rooms/RoomDetail";
@@ -261,20 +260,6 @@ export default function RoomsPage() {
     }
   }
 
-  /** 保存装修：重新取最新布置，只换家具，雷达和区域原样保留；不下发设备 */
-  async function saveDecor(roomId: string, items: PlanElement[]) {
-    try {
-      const fresh = await getRoomDesign(roomId);
-      await saveRoomDesign(roomId, { roomStyle: fresh?.roomStyle, elements: mergeFurniture(fresh, items) });
-      const saved = await getRoomDesign(roomId);
-      setDesigns((m) => new Map(m).set(roomId, { design: saved }));
-      message.success(`装修已保存（${items.length} 件家具），平台网页端也能看到`);
-    } catch (e) {
-      message.error(`保存装修失败：${errText(e)}`);
-      throw e;
-    }
-  }
-
   const levelDot = (l: Level) => (l === "error" ? "bad" : l === "warn" ? "warn" : l === "ok" ? "good" : "none");
 
   return (
@@ -345,7 +330,7 @@ export default function RoomsPage() {
           <Report reports={all} loading={loading} progress={progress} onPick={pick} />
         ) : sel ? (
           designs.has(sel.room.id) || sel.radars.length ? (
-            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} onFix={(i, r) => (i.fix === "add-slot" ? r.device && addSlot(sel.room.id, r.device) : renumber(sel.room.id))} fixing={fixing === sel.room.id} onArea={(r, a) => setArea(sel.room.id, r, a)} onDecor={(items) => saveDecor(sel.room.id, items)} />
+            <RoomDetail key={sel.room.id} report={sel} typeName={typeName} reads={reads} onRead={readDevice} onFix={(i, r) => (i.fix === "add-slot" ? r.device && addSlot(sel.room.id, r.device) : renumber(sel.room.id))} fixing={fixing === sel.room.id} onArea={(r, a) => setArea(sel.room.id, r, a)} onDecor={(d) => setDesigns((m) => new Map(m).set(sel.room.id, { design: d }))} />
           ) : (
             <Spin style={{ margin: 80 }} />
           )

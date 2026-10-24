@@ -3,7 +3,7 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Sele
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { createSlave, getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
-import ZoneCanvas, { CUSTOM, limitOf, type DmRect, type ZoneType } from "./ZoneCanvas";
+import ZoneCanvas, { CUSTOM, limitOf, type CanvasRoom, type DmRect, type ZoneType } from "./ZoneCanvas";
 import { SPACE_TYPE } from "../api/scene";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 
@@ -31,8 +31,8 @@ export const PLAN_CTX = "__plan";
 export interface PlanCtx {
   /** 房间布置里这台雷达的朝向（1 上 2 右 3 下 4 左） */
   facing?: number;
-  /** 房间外框（cm）和雷达在房间里的位置 */
-  room?: { width: number; height: number; radar: { x: number; y: number } };
+  /** 房间外框（cm）和雷达在房间里的位置；带上布置元素时区域画布在下面画出家具 */
+  room?: CanvasRoom;
   deviceType?: number;
   /** 这次改了顶装 / 侧装：给用户的提示 */
   mountNotes?: string[];
