@@ -249,9 +249,13 @@ export default function AlarmTab({
       : r.def.duration === undefined
         ? undefined
         : (dur[r.def.label] ?? (r.current && durationOf(r.current)) ?? defaultMinutes(r));
-  const hasMinutes = (r: Row) => r.def.duration !== undefined || !!r.def.leaveDelay;
-  /** 13 型不收超时类型场景，离开多久表达不了（久坐那种"待够"可以用加长记录数） */
-  const noLeaveDelay = !leaveDelayOk(d.deviceType) ? "13 型不收延迟（超时类型）场景，只能一离开就告警" : undefined;
+  /** 13 型不收超时类型场景，离开多久表达不了，不显示这个输入框（久坐那种"待够"可以用加长记录数） */
+  const delayOk = leaveDelayOk(d.deviceType);
+  const showLeaveDelay = (r: Row) => !!r.def.leaveDelay && delayOk;
+  const hasMinutes = (r: Row) => r.def.duration !== undefined || showLeaveDelay(r);
+  const descOf = (r: Row) => (r.def.leaveDelay && !delayOk ? "离开监护床就告警（13 型不支持设离开多久）" : r.def.desc);
+  /** 13 型久坐时长靠加长记录数，最多 10 分钟 */
+  const minutesHint = d.deviceType === 13 ? `13 型最多 ${maxMin} 分钟（设备每人只存 ${maxMin} 分钟的记录）` : undefined;
 
   /**
    * 开启时要不要拨紧急号码：勾选框里改的 > 设备上现在的。
@@ -357,11 +361,11 @@ export default function AlarmTab({
                   {r.current && r.current.sceneName !== (r.tpl?.name ?? r.def.label) && (
                     <Tag bordered={false}>{r.current.sceneName}</Tag>
                   )}
-                  <small>{noTpl && !on ? noTpl : r.def.desc}</small>
+                  <small>{noTpl && !on ? noTpl : descOf(r)}</small>
                 </div>
                 <div className="alarm-area">
-                  {r.def.leaveDelay && (
-                    <Tooltip title={noLeaveDelay ?? "不填 = 一离开就告警；填了 = 离开后这么久还没回到监护床才告警，中途回来就不告警"}>
+                  {showLeaveDelay(r) && (
+                    <Tooltip title="不填 = 一离开就告警；填了 = 离开后这么久还没回到监护床才告警，中途回来就不告警">
                       <InputNumber
                         size="small"
                         style={{ width: 170 }}
@@ -371,7 +375,7 @@ export default function AlarmTab({
                         prefix="离开"
                         suffix="分钟后"
                         placeholder="立即"
-                        disabled={!!blocked || !!busy || !!noLeaveDelay}
+                        disabled={!!blocked || !!busy}
                         value={r.def.label in dur ? dur[r.def.label] : ((r.current && durationOf(r.current)) ?? null)}
                         onChange={(v) => setDur((m) => ({ ...m, [r.def.label]: v }))}
                         onBlur={() => commitDuration(r, a.area)}
@@ -380,22 +384,25 @@ export default function AlarmTab({
                     </Tooltip>
                   )}
                   {r.def.duration !== undefined && (
-                    <InputNumber
-                      size="small"
-                      style={{ width: 150 }}
-                      min={1}
-                      max={maxMin}
-                      precision={0}
-                      prefix="超过"
-                      suffix="分钟"
-                      placeholder={String(defaultMinutes(r))}
-                      disabled={!!blocked || !!busy}
-                      value={dur[r.def.label] !== undefined ? dur[r.def.label] : on ? ((r.current && durationOf(r.current)) ?? null) : defaultMinutes(r)}
-                      onChange={(v) => setDur((m) => ({ ...m, [r.def.label]: v }))}
-                      onBlur={() => commitDuration(r, a.area)}
-                      onPressEnter={() => commitDuration(r, a.area)}
-                    />
+                    <Tooltip title={minutesHint}>
+                      <InputNumber
+                        size="small"
+                        style={{ width: 150 }}
+                        min={1}
+                        max={maxMin}
+                        precision={0}
+                        prefix="超过"
+                        suffix="分钟"
+                        placeholder={String(defaultMinutes(r))}
+                        disabled={!!blocked || !!busy}
+                        value={dur[r.def.label] !== undefined ? dur[r.def.label] : on ? ((r.current && durationOf(r.current)) ?? null) : defaultMinutes(r)}
+                        onChange={(v) => setDur((m) => ({ ...m, [r.def.label]: v }))}
+                        onBlur={() => commitDuration(r, a.area)}
+                        onPressEnter={() => commitDuration(r, a.area)}
+                      />
+                    </Tooltip>
                   )}
+                  {r.def.duration !== undefined && minutesHint && <span className="small muted">最多 {maxMin} 分钟</span>}
                   {r.def.area === "pick" && a.need && areaOptions.length > 0 ? (
                     <Select
                       size="small"
@@ -476,7 +483,11 @@ export default function AlarmTab({
           </p>
         )}
         <p className="muted small" style={{ marginTop: 10 }}>
-          开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒；离床告警填了"离开多久"时，离开监护床这么久还没回来才告警（设备自己计时，不填就一离开就告警）{others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
+          开启时按场景模板的默认设置下发；久坐提醒另按选的区域和时长下发，坐着持续超过这么久才提醒
+          {delayOk
+            ? `；离床告警填了"离开多久"时，离开监护床这么久还没回来才告警（设备自己计时，不填就一离开就告警）`
+            : `（13 型最多 ${maxMin} 分钟）；13 型离床告警一离开监护床就告警，不能设离开多久`}
+          {others > 0 ? `；设备上另有 ${others} 个场景，开关这里的告警不会影响它们` : ""}。需要改条件、批量操作多台设备时用"批量场景"。
         </p>
       </div>
     </div>

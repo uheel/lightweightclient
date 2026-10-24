@@ -128,7 +128,7 @@
 | `GET /api/device/v4/management-statistics` | `{onlineCount, offlineCount, totalCount}` |
 | `GET /api/device/v4/management-catalog` | 设备分组：Radar / Gait / Ring / Watch / Other / Accessories |
 | `GET /api/device/v4/unknown-devices`（`/count`） | 未入库设备：`sn, deviceType, deviceTypeName, protocol, topic, payloadPreview` |
-| `GET /api/device-type/types` | 设备类型字典：`deviceType` 编号 → 名称、`groupCode` |
+| `GET /api/device-type/types` | 设备类型字典：`deviceType` 编号 → 名称、`groupCode`。各型号对照表见 [device-types.md](device-types.md) |
 | `GET /api/device-upgrade/pages` | 升级包：`deviceType, version, fileName, fileMd5, fileSize, upgradeName, upgradeType, createdAt/By` |
 | `POST /api/device/sync-online-status` | 同步在线状态 |
 | `POST /api/device/v3` | 新增设备（雷达设备页"新增"）：`{deviceName（≤32）, sn（≤64，全平台唯一）, deviceType, sortOrder, description（≤200）, properties:{buildingId, floorId, roomId}}`，安装位置可不填。修改是 `PUT /api/device/v3`（多 `id`）。雷达类型 = `/api/device-type/types` 里 `groupCode` 为 `RADAR` 的 |
