@@ -32,6 +32,13 @@ const BUSY_RETRY_MS = 10_000;
 const UNGROUPED = "__ungrouped";
 const GROUP_KEY = "ops:prop-group";
 
+/**
+ * 只存平台、跟着"按房间布置下发"一起写的属性，不单独显示：
+ * QL_radar_design 是平台网页端房间设计的整份画布 JSON（读取区域时用来还原画布，告警配置取区域名字），
+ * QL_radar_working_type 是工作模式的副本（设备实际用 QL_radar_config 最后一位）
+ */
+const LAYOUT_ONLY_PROPS = new Set(["QL_radar_design", "QL_radar_working_type"]);
+
 /** 通话相关的属性：都在"通话"页改（CallTab），设备属性里不显示 */
 const CALL_PROPS = new Set([
   "talk_type_sel",
@@ -250,7 +257,7 @@ export default function PropertyTab({
   const groups = schema ? groupsOf(schema) : [];
   const inGroup = (schema?.properties ?? []).filter((p) => (group === UNGROUPED ? !p.propertyGroupStringCode : p.propertyGroupStringCode === group));
   // 通话相关的属性只在"通话"页改，这里不显示，免得两处都能改
-  const rows = inGroup.filter((p) => !CALL_PROPS.has(p.propertyName)).filter(visible);
+  const rows = inGroup.filter((p) => !CALL_PROPS.has(p.propertyName) && !LAYOUT_ONLY_PROPS.has(p.propertyName)).filter(visible);
   const hasCallProps = inGroup.some((p) => CALL_PROPS.has(p.propertyName));
 
   function setValue(name: string, v: unknown) {
