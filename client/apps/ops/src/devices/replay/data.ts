@@ -1,5 +1,5 @@
 import { api, type PerfTimer } from "@radar/core";
-import { getAllDeviceLogs, type DeviceLog } from "../../api/device";
+import { getAllDeviceLogs, isSlim, type DeviceLog } from "../../api/device";
 import { getRoomView } from "../../api/roomView";
 
 /**
@@ -95,7 +95,7 @@ export interface RoomDetail {
   floorName?: string;
   background?: { width?: number; height?: number; fill?: string; stroke?: string; strokeWidth?: number; src?: string };
   elements?: RoomEl[];
-  devices?: { sn: string; deviceName?: string; isOnline?: boolean }[];
+  devices?: { sn: string; deviceName?: string; deviceType?: number; isOnline?: boolean }[];
 }
 
 export async function getRoomDetail(roomId: string) {
@@ -260,7 +260,55 @@ type Res =
   | { kind: "event"; sn: string; data: { events?: { eventType: number; userId: number; occurredAt: string; rangeName?: string }[] } }
   | { kind: "alert"; data: { alertTypeName?: string; alertTypeColor?: string; sn?: string; createdAt: string }[] };
 
-export async function loadReplayData(
+/**
+ * 平台的姿态 / 事件时间线在多人时不可靠（2026-10-21 距离测试 …6711）：一条上报里有几个目标时只记第一个，坐着的人姿态、进区域事件全都没有；
+ * 而且记在帧的目标编号下，和轨迹点的 userId 对不上。轨迹点倒是都有。所以出现 userId 2 起的轨迹的时段，姿态和进出事件全部改从设备原始帧解，
+ * 每帧按时间 + 位置对到最近的轨迹点所在目标。这里拉这些时段的原始上报
+ */
+async function loadFrameLogs(pts: { timestamp: number; sn: string; userId: number }[], sns: string[]) {
+  const spans: { sn: string; a: number; b: number }[] = [];
+  for (const sn of sns) {
+    const ts = pts.filter((p) => p.sn === sn && p.userId >= FIRST_MISSED_UID).map((p) => p.timestamp).sort((a, b) => a - b);
+    for (const t of ts) {
+      const last = spans[spans.length - 1];
+      if (last && last.sn === sn && t - last.b <= LINK_MS) last.b = t;
+      else spans.push({ sn, a: t, b: t });
+    }
+  }
+  // 每个时段内部已经是并发分页，时段之间再并发 2 个，别把请求槽全占了
+  return runLimited(
+    spans.map(({ sn, a, b }) => () =>
+      getAllDeviceLogs({ sn, command: "Device.postevent", range: [fmt(a - 5000), fmt(b + 5000)], pageSize: 200, max: Math.ceil((b - a) / 1000) * 3 + 200 }).then((r) => ({ sn, list: r.list })),
+    ),
+    2,
+  );
+}
+
+/**
+ * 同一份查询正在加载时直接复用：打开回溯时自动查今天，开发模式下这个 effect 会跑两遍，
+ * 两份一样的查询同时打平台，每个请求都慢一倍（2026-10-27 藕塘 perf 日志里每个请求都成对出现）
+ */
+const inflight = new Map<string, Promise<ReplayData>>();
+
+export function loadReplayData(
+  roomId: string,
+  detail: RoomDetail,
+  start: number,
+  end: number,
+  sns: string[],
+  onProgress?: (done: number, total: number) => void,
+  pt?: PerfTimer,
+): Promise<ReplayData> {
+  const key = JSON.stringify([roomId, Math.floor(start / 1000), Math.floor(end / 1000), sns]);
+  let p = inflight.get(key);
+  if (!p) {
+    p = loadReplayDataOnce(roomId, detail, start, end, sns, onProgress, pt).finally(() => inflight.delete(key));
+    inflight.set(key, p);
+  }
+  return p;
+}
+
+async function loadReplayDataOnce(
   roomId: string,
   detail: RoomDetail,
   start: number,
@@ -274,26 +322,26 @@ export async function loadReplayData(
   // 姿态 / 事件接口单次不能超过 24 小时，按天拆开查
   const chunks = splitRange(start, end);
   const get = async <T,>(path: string, params: Record<string, string>) => (await api.get<T>(path, { params })).data;
+  // 轨迹点按设备、每 6 小时拆开并发查：一次查整个房间一天，藕塘 5 台 24 小时是 32 MB / 43 万个点，
+  // 平台处理 2.8 秒 + 下载 3 秒，比所有时间线都慢（2026-10-27 perf 日志）
+  const trajChunks = splitRange(start, end, 6 * 36e5);
+  const total = trajChunks.length * sns.length + chunks.length * sns.length * 2 + 1;
+  let done = 0;
+  const tick = <T,>(v: T) => (onProgress?.(++done, total), v);
+
   const tasks: (() => Promise<Res>)[] = [];
-  for (const [s, e] of chunks) {
-    tasks.push(() =>
-      get<Extract<Res, { kind: "traj" }>["data"]>("/api/human-exists/trajectory-points", { roomId, startAt: fmt(s), endAt: fmt(e), deviceSns: sns.join(",") }).then(
-        (data) => ({ kind: "traj", data: data ?? [] }),
-      ),
-    );
-  }
   for (const sn of sns) {
     for (const [s, e] of chunks) {
       tasks.push(() =>
-        get<Extract<Res, { kind: "posture" }>["data"]>("/api/device/human-position/posture-timeline", { sn, startAt: fmt(s), endAt: fmt(e) }).then((data) => ({
-          kind: "posture",
+        get<Extract<Res, { kind: "event" }>["data"]>("/api/device/human-position/event-timeline", { sn, startAt: fmt(s), endAt: fmt(e) }).then((data) => ({
+          kind: "event",
           sn,
           data: data ?? {},
         })),
       );
       tasks.push(() =>
-        get<Extract<Res, { kind: "event" }>["data"]>("/api/device/human-position/event-timeline", { sn, startAt: fmt(s), endAt: fmt(e) }).then((data) => ({
-          kind: "event",
+        get<Extract<Res, { kind: "posture" }>["data"]>("/api/device/human-position/posture-timeline", { sn, startAt: fmt(s), endAt: fmt(e) }).then((data) => ({
+          kind: "posture",
           sn,
           data: data ?? {},
         })),
@@ -310,12 +358,32 @@ export async function loadReplayData(
       })
       .then((res) => ({ kind: "alert", data: res.data ?? [] })),
   );
-  const results = await runLimited(tasks, 4, onProgress);
+  // 时间线先发：请求槽（Rust GATE，6 个、先到先得）先给它们，轨迹分片排在后面。反过来的话时间线要在 20 个轨迹分片后面排 2 秒多队
+  // （2026-10-27 藕塘 5 台 24 小时：时间线排队 2.3 秒，本身只要约 1 秒）
+  const timelinesP = runLimited(tasks, tasks.length, () => tick(0));
+
+  // 轨迹点先单独查：一回来就开始拉多人时段的原始帧，和上面的姿态 / 事件时间线同时进行。
+  // 事件时间线是最慢的（2026-10-27 藕塘社区 10 小时一台 2.4～5.8 秒，都是平台处理时间），以前要等它查完才开始拉帧
+  type TrajPt = Extract<Res, { kind: "traj" }>["data"][number];
+  const trajP = Promise.all(
+    sns.flatMap((sn) =>
+      trajChunks.map(([s, e]) => get<TrajPt[]>("/api/human-exists/trajectory-points", { roomId, startAt: fmt(s), endAt: fmt(e), deviceSns: sn }).then((d) => tick(d ?? []))),
+    ),
+  ).then((rs) => rs.flat());
+  // 原始帧只有 6 型这类上报 event_QL_rawdata 的设备能解；13 / 15 型（Ultra）走另一套报文，帧解不出来，
+  // 以前照样下载（藕塘 10 小时一台 7～15 MB、3～6 秒）然后什么都没用上
+  const typeOf = Object.fromEntries(devices.map((d) => [d.sn, d.deviceType]));
+  const frameSns = sns.filter((sn) => !isSlim(typeOf[sn]));
+  const framesP = trajP.then(
+    (pts) => loadFrameLogs(pts, frameSns),
+    () => [],
+  );
+
+  const [traj, results] = await Promise.all([trajP, timelinesP]);
   pt?.lap("fetch");
-  pt?.info("requests", tasks.length);
+  pt?.info("requests", tasks.length + trajChunks.length * sns.length);
   const errors = results.filter((r): r is Error => r instanceof Error);
-  const trajErr = results.slice(0, chunks.length).find((r) => r instanceof Error);
-  if (trajErr) throw trajErr;
+  results.push({ kind: "traj", data: traj });
 
   const trackMap = new Map<string, Omit<Track, "runs" | "color" | "label">>();
   const getTrack = (sn: string, uid: number) => {
@@ -355,25 +423,8 @@ export async function loadReplayData(
   const qcBySn: Record<string, QingLan> = {};
   for (const el of detail.elements ?? []) if (el.sn && el.qingLanConfig?.container) qcBySn[el.sn] = el.qingLanConfig;
 
-  // 平台的姿态 / 事件时间线在多人时不可靠（2026-10-21 距离测试 …6711）：一条上报里有几个目标时只记第一个，坐着的人姿态、进区域事件全都没有；
-  // 而且记在帧的目标编号下，和轨迹点的 userId 对不上。轨迹点倒是都有。所以出现 userId 2 起的轨迹的时段，姿态和进出事件全部改从设备原始帧解，
-  // 每帧按时间 + 位置对到最近的轨迹点所在目标
-  const spans: { sn: string; a: number; b: number }[] = [];
-  for (const sn of sns) {
-    const ts = [...trackMap.values()].filter((tr) => tr.sn === sn && tr.uid >= FIRST_MISSED_UID).flatMap((tr) => tr.points.map((p) => p.t)).sort((a, b) => a - b);
-    for (const t of ts) {
-      const last = spans[spans.length - 1];
-      if (last && last.sn === sn && t - last.b <= LINK_MS) last.b = t;
-      else spans.push({ sn, a: t, b: t });
-    }
-  }
-  if (spans.length) {
-    const logs = await runLimited(
-      spans.map(({ sn, a, b }) => () =>
-        getAllDeviceLogs({ sn, command: "Device.postevent", range: [fmt(a - 5000), fmt(b + 5000)], pageSize: 200, max: Math.ceil((b - a) / 1000) * 3 + 200 }).then((r) => ({ sn, list: r.list })),
-      ),
-      4,
-    );
+  {
+    const logs = await framesP;
     pt?.lap("frames");
     for (const r of logs) {
       if (r instanceof Error) {
