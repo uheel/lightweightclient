@@ -1,6 +1,19 @@
 /* 标题栏里的标签栏 + 工作台 */
 .work-tabs { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: flex-end; gap: 2px; overflow: hidden; padding-top: 6px; }
 .work-tabs-fill { flex: 1; align-self: stretch; }
+/* 模块标签：宽度不压缩，放不下时横向滚动（滚动条隐藏，用两边的箭头或滚轮） */
+.work-tabs-scroll {
+  flex: 0 1 auto; min-width: 0; align-self: stretch; display: flex; align-items: flex-end; gap: 2px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; position: relative;
+}
+.work-tabs-scroll::-webkit-scrollbar { display: none; }
+.work-tabs-scroll .work-tab { flex: none; }
+.work-tabs-arrow {
+  flex: none; align-self: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent;
+  color: #5B6078; font-size: 11px; display: grid; place-items: center; cursor: default;
+}
+.work-tabs-arrow:hover:not(:disabled) { background: rgba(17, 20, 65, 0.06); color: #1B1D2E; }
+.work-tabs-arrow:disabled { color: #C4C7D4; }
 .work-tab {
   flex: 0 1 auto; min-width: 72px; max-width: 168px; height: 34px; display: flex; align-items: center; gap: 6px;
   padding: 0 6px 0 12px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: #5B6078;
