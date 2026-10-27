@@ -8,6 +8,8 @@ export * from "./permission";
 export * from "./realtime";
 export * from "./liveData";
 export * from "./theme";
+export * from "./alertPopup";
+export * from "./ui/AlertPopup";
 export * from "./ui/LoginPage";
 export * from "./ui/SessionGate";
 export * from "./ui/useRealtime";

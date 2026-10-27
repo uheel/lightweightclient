@@ -8,10 +8,15 @@ import SpacesPage from "./pages/SpacesPage";
 import AlertsPage from "./pages/AlertsPage";
 import ProcessTypesPage from "./pages/ProcessTypesPage";
 import SettingsPage from "./pages/SettingsPage";
+import DataWallPage from "./pages/DataWallPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
+import CaregiversPage from "./pages/CaregiversPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 import MonitorMode from "./monitor/MonitorMode";
+import { ProcessDialog } from "./alerts/ProcessDialog";
+import { useAlertCenter } from "./alerts/useAlertCenter";
+import { usePopupSettings } from "./alerts/popupSettings";
 import { GuideProvider } from "./guide/GuideContext";
 import { GuideBanner, GuideDrawer, GuideEntry } from "./guide/GuideDrawer";
 import type { NavKey } from "./guide/steps";
@@ -20,7 +25,7 @@ import { Workbench } from "./workspace/Workbench";
 import type { ModuleKey } from "./workspace/modules";
 import "./workspace/workspace.css";
 
-const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "alerts", "processTypes", "realtime", "settings"];
+const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "dataWall"];
 
 async function logout() {
   await stopRealtime();
@@ -37,6 +42,8 @@ export default function Shell({ s }: { s: Session }) {
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
   const [monitor, setMonitor] = useState(false);
+  // 告警弹窗（系统设置里打开）；监控模式有自己的告警列表，开着时不在应用内弹提醒
+  const alertCenter = useAlertCenter(s.orgId, usePopupSettings(), monitor);
 
   const onEvent = useCallback(
     (e: RealtimeEvent) => {
@@ -123,7 +130,7 @@ export default function Shell({ s }: { s: Session }) {
             {/* 打开的标签都保持挂载、只是隐藏，切回来时筛选、选中、滚动位置都还在 */}
             <div className="guide-page-body">
               <div className="tab-pane" hidden={active !== "home"} style={{ overflow: "auto" }}>
-                <Workbench s={s} opened={tabs} unread={unread} onOpen={go} />
+                <Workbench s={s} unread={unread} onOpen={go} />
               </div>
               {/* 按固定顺序渲染，拖动标签排序时页面的 DOM 不移动（移动会丢滚动位置） */}
               {PANE_ORDER.filter((k) => tabs.includes(k)).map((k) => (
@@ -138,12 +145,16 @@ export default function Shell({ s }: { s: Session }) {
                     <ScenesPage />
                   ) : k === "members" ? (
                     <MembersPage />
+                  ) : k === "caregivers" ? (
+                    <CaregiversPage />
                   ) : k === "alerts" ? (
                     <AlertsPage />
                   ) : k === "processTypes" ? (
                     <ProcessTypesPage />
                   ) : k === "settings" ? (
                     <SettingsPage />
+                  ) : k === "dataWall" ? (
+                    <DataWallPage />
                   ) : (
                     <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
                   )}
@@ -164,6 +175,7 @@ export default function Shell({ s }: { s: Session }) {
             }}
           />
         )}
+        <ProcessDialog alerts={alertCenter.processing && [alertCenter.processing]} onClose={alertCenter.closeProcessing} onDone={alertCenter.done} />
       </AppShell>
     </GuideProvider>
   );

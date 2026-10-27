@@ -1,4 +1,4 @@
-/* 告警弹窗（alert-popup 窗口）。窗口本身透明，四周留 10px 给卡片阴影 */
+/* 告警弹窗（alert-popup 窗口，两端共用）。窗口本身透明，四周留 10px 给卡片阴影 */
 html.popup-root, html.popup-root body, html.popup-root #root, html.popup-root #root > .ant-app {
   background: transparent; height: auto; overflow: hidden;
 }

@@ -31,7 +31,7 @@ const toPopup = (a: CareAlert): PopupAlert => ({
  * 告警中心（应用层，所有页面共用）：
  * - 维护待处理告警（useAlertWatcher）
  * - 新告警：主窗口在前台时，应用内右下角弹出提醒；
- *   不在前台时（最小化、缩到托盘、切到别的程序），在屏幕右下角弹出告警弹窗（src/desktop/AlertPopup.tsx）、响提示音、任务栏闪烁
+ *   不在前台时（最小化、缩到托盘、切到别的程序），在屏幕右下角弹出告警弹窗（packages/core/src/ui/AlertPopup.tsx）、响提示音、任务栏闪烁
  * - 本次运行期间新到、但还没处理的告警，弹窗一直挂着；点了"稍后提醒"的，60 秒后再弹
  * - 托盘图标的提示文字显示待处理数量
  * - processing / setProcessing：当前打开处理弹窗的告警
