@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Dropdown, Empty, InputNumber, Spin } from "antd";
-import { DeleteOutlined, HomeOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, HomeOutlined, MoreOutlined, PictureOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
+import { getClientAssets, setBuildingImage, type ClientAssets } from "../api/clientAssets";
 import { bindBedDevice, getRadars, getRoomDevices, unbindBedKeepRoom, type RoomDevice } from "../api/device";
+import { compressImage, deleteFile, fileUrl, IMAGE_ACCEPT, uploadFile } from "../api/files";
 import type { Room } from "../api/room";
 import {
   createBed,
@@ -58,6 +60,10 @@ export default function SpacesPage() {
   const [checkInBed, setCheckInBed] = useState<BedRow>();
   /** 选中房间里的设备和它们绑的床位（只有床位绑定要单独取） */
   const [roomDevices, setRoomDevices] = useState<{ roomId: string; list: RoomDevice[] }>();
+  /** 楼栋 id → 图片文件 id（客户端自己存的，平台楼栋上没有图片字段） */
+  const [images, setImages] = useState<Record<string, string>>({});
+  /** 正在上传图片的楼栋 */
+  const [uploading, setUploading] = useState<string>();
   const seq = useRef(0);
   const guide = useGuide();
   const guideRefresh = useRef(guide?.refresh);
@@ -69,9 +75,11 @@ export default function SpacesPage() {
       if (!quiet) setLoading(true);
       const pt = perfTimer("楼宇");
       try {
-        const [s, radars] = await Promise.all([getSpaces(), getRadars()]);
+        // 楼栋图取不到不影响页面，退回示意图
+        const [s, radars, assets] = await Promise.all([getSpaces(), getRadars(), getClientAssets().catch((): ClientAssets => ({}))]);
         if (my !== seq.current) return;
         setData({ ...s, radars });
+        setImages(assets.buildings ?? {});
         // 新建之后的静默刷新：快速开始清单跟着重新检查
         if (quiet) guideRefresh.current?.(true);
         pt.info("rooms", s.rooms.length);
@@ -177,8 +185,42 @@ export default function SpacesPage() {
         await deleteBuilding(b);
         pick(undefined);
         setData((d) => without(d, { buildings: [b.id] }));
+        if (images[b.id]) removeImage(b, true);
       },
     });
+  }
+
+  /** 选一张图压缩后上传，改对应关系，再删掉换下来的旧文件 */
+  function pickImage(b: Building) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = IMAGE_ACCEPT;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setUploading(b.id);
+      try {
+        const id = await uploadFile(await compressImage(file), `楼栋-${b.buildingName}.webp`);
+        const { next, old } = await setBuildingImage(b.id, id);
+        setImages(next.buildings ?? {});
+        if (old) deleteFile(old);
+      } catch (e) {
+        message.error(`上传图片失败：${errText(e)}`);
+      } finally {
+        setUploading(undefined);
+      }
+    };
+    input.click();
+  }
+
+  async function removeImage(b: Building, quiet = false) {
+    try {
+      const { next, old } = await setBuildingImage(b.id, undefined);
+      setImages(next.buildings ?? {});
+      if (old) deleteFile(old);
+    } catch (e) {
+      if (!quiet) message.error(`去掉图片失败：${errText(e)}`);
+    }
   }
 
   // ---------- 楼层 ----------
@@ -363,6 +405,10 @@ export default function SpacesPage() {
             onAdd={() => setAddingBuilding(true)}
             onRefresh={() => load()}
             onDelete={askDeleteBuilding}
+            images={images}
+            uploading={uploading}
+            onPickImage={pickImage}
+            onRemoveImage={removeImage}
           />
         )}
       </section>
@@ -466,6 +512,10 @@ function BuildingsView({
   onAdd,
   onRefresh,
   onDelete,
+  images,
+  uploading,
+  onPickImage,
+  onRemoveImage,
 }: {
   buildings: Building[];
   loading: boolean;
@@ -475,7 +525,13 @@ function BuildingsView({
   onAdd: () => void;
   onRefresh: () => void;
   onDelete: (b: Building) => void;
+  images: Record<string, string>;
+  uploading?: string;
+  onPickImage: (b: Building) => void;
+  onRemoveImage: (b: Building) => void;
 }) {
+  // 图片被别人在平台文件管理里删掉了（404）：这一页里退回示意图
+  const [broken, setBroken] = useState<Set<string>>(new Set());
   return (
     <div className="space-view">
       <div className="space-head">
@@ -496,12 +552,29 @@ function BuildingsView({
           <div className="space-cards">
             {buildings.map((b) => {
               const t = tally(b);
+              const img = images[b.id];
+              const shown = img && !broken.has(img) ? img : undefined;
               return (
                 <div key={b.id} className="space-card" role="button" tabIndex={0} onClick={() => onPick(b.id)} onKeyDown={(e) => e.key === "Enter" && onPick(b.id)}>
                   <div className="space-card-art">
-                    <BuildingArt floors={t.floors} />
+                    {shown ? (
+                      <img className="space-card-photo" src={fileUrl(shown, 800)} alt="" draggable={false} onError={() => setBroken((s) => new Set(s).add(shown))} />
+                    ) : (
+                      <BuildingArt floors={t.floors} />
+                    )}
+                    {uploading === b.id && <Spin className="space-card-busy" />}
                     <span onClick={(e) => e.stopPropagation()}>
-                      <Dropdown menu={{ items: [{ key: "del", label: "删除楼栋", danger: true, icon: <DeleteOutlined />, onClick: () => onDelete(b) }] }} trigger={["click"]}>
+                      <Dropdown
+                        menu={{
+                          items: [
+                            { key: "img", label: img ? "更换图片" : "上传图片", icon: <PictureOutlined />, disabled: uploading === b.id, onClick: () => onPickImage(b) },
+                            ...(img ? [{ key: "noimg", label: "去掉图片", onClick: () => onRemoveImage(b) }] : []),
+                            { type: "divider" as const },
+                            { key: "del", label: "删除楼栋", danger: true, icon: <DeleteOutlined />, onClick: () => onDelete(b) },
+                          ],
+                        }}
+                        trigger={["click"]}
+                      >
                         <Button className="space-card-more" size="small" type="text" icon={<MoreOutlined />} />
                       </Dropdown>
                     </span>

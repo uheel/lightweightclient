@@ -142,6 +142,23 @@ pub async fn api_request(
     Ok(pack(f.status, f.timing(), &f.body))
 }
 
+/// 上传文件（multipart）：前端把 FormData 编码成原始字节直接作为 IPC 请求体传过来（不转成 JSON 数组，几百 KB 的图片也只拷一次），
+/// 目标地址和请求头放在 IPC 请求头里：x-url、x-headers（JSON，含 multipart 的 content-type 和 boundary）
+#[tauri::command]
+pub async fn api_upload(request: tauri::ipc::Request<'_>) -> Result<Response, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("上传内容格式不对".into());
+    };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let url = header("x-url").ok_or("缺少上传地址")?;
+    check_url(&url)?;
+    let headers: HashMap<String, String> = serde_json::from_str(&header("x-headers").unwrap_or_default()).map_err(|e| e.to_string())?;
+    let method = reqwest::Method::from_bytes(header("x-method").as_deref().unwrap_or("POST").as_bytes()).map_err(|e| e.to_string())?;
+    let req = with_headers(CLIENT.request(method, &url), &headers).body(body.clone());
+    let f = fetch(req).await?;
+    Ok(pack(f.status, f.timing(), &f.body))
+}
+
 /// 平台分页接口的一页：只解析外层，data 保持原始 JSON 文本，合并时直接拼接，不逐条反序列化
 #[derive(serde::Deserialize)]
 struct Page<'a> {

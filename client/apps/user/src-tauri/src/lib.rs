@@ -35,7 +35,7 @@ pub fn run() {
     builder
         // 平台接口由 Rust 层发出（不受 WebView 的 CORS 限制），共用一个连接池，见 api_http.rs
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![api_http::api_request, api_http::api_request_pages, api_http::api_warm, api_http::perf_log, alert_popup::alert_popup_show, alert_popup::alert_popup_hide, alert_popup::alert_popup_create, alert_popup::alert_popup_destroy])
+        .invoke_handler(tauri::generate_handler![api_http::api_request, api_http::api_request_pages, api_http::api_upload, api_http::api_warm, api_http::perf_log, alert_popup::alert_popup_show, alert_popup::alert_popup_hide, alert_popup::alert_popup_create, alert_popup::alert_popup_destroy])
         .setup(|app| {
             // 告警弹窗启动时就建好（隐藏），有告警时直接显示，不用等页面加载
             alert_popup::create(app.handle())?;

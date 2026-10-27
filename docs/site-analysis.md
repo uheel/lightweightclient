@@ -866,6 +866,54 @@ topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{comm
 - `roomStyle` 也一样过滤，能存 `name`，自定义字段被丢掉
 - 所以要给家具存"这是什么"，只能放在 `name`（或 `text`）这种平台能保留的字符串字段里，或者用 `src` 对照图库反查
 
+## 文件存储与通用设置（2026-10-28 读平台 `vendors.sdb` + 在李虎机构实测，测试文件、文件夹、设置都已删除 / 清空）
+
+客户端想存图片（楼栋图、机构 logo、自定义家具）或自己的配置时可以用这两套接口：文件放文件管理，"哪个东西用哪个文件"放通用设置。
+
+### 文件管理 `/sapi/oss/*`（系统管理 › 文件管理）
+
+- 请求头 `Authorization` + `OrgId`（+ `OrgType`）决定是哪个机构的文件
+- `GET /sapi/oss/upload-options`：`{allowExtensions, uploadFileLimit}`，当前允许 png / jpg / jpeg / gif / webp、doc(x) / xls(x) / pdf、mp3 / wav / m4a / mp4 / webm、zip / gz / bin / apk 等，单个最大 200MB（209715200）
+- `GET /sapi/oss/pages`（有关键字时用 `/sapi/oss/search`）：参数 `filter[folderId]`（不传 = 根目录）、`filter[platform]`（true = 平台公共区）、`filter[contentType]`、`filter[serviceKey]`、`filter[keyword]`、`order`（`osType,osName` / `osType,fileSize` / `osType,createdAt desc`）、`pageSize`、`current`
+  - 每项 `{id, osName, osType（1 文件夹 / 2 文件）, serviceKey?, iconStyleId?, contentType?, extension?, fileSize?, folderCount, createdAt/By, updatedAt/By}`
+  - **按机构隔离**：李虎 `filter[platform]=false` 只有自己的 2 个音频；`filter[platform]=true` 是平台公共区 63 项（户型图、设备类型图片、缺省图片、组织、房间元素、APP 安装包等），各机构都能看到。用别的机构的 `OrgId` 查，看不到李虎建的文件夹
+  - `filter[serviceKey]=xxx` 会把带这个 serviceKey 的文件夹**里面的文件**也查出来（实测文件夹带 serviceKey、文件本身没有，照样查到）
+- `POST /sapi/oss/folder` `{parentFolderId?, osName, serviceKey?}` → `data` 是新文件夹 id。serviceKey 是给程序用的标签（平台"设备类型图片"用 `device-type-image`），名字用户可以随便改，按 serviceKey 找更稳
+- `POST /sapi/oss/upload`：multipart，字段 `file` + `folderId`（可以同时传多个文件）→ `data` 是新文件 id（32 位十六进制）
+- `PUT /sapi/oss/replace`：multipart `file` + `id`，**id 不变**，内容和 fileSize 换掉，文件名还是原来的
+- `PUT /sapi/oss/rename` `{id, osName, serviceKey}`；`POST /sapi/oss/move` `{id, targetFolderId}`；`PUT /sapi/oss/icon-style-id` `{id, iconStyleId}`
+- `DELETE /sapi/oss?id=` 删文件或文件夹（`data: 1`）；`POST /sapi/oss/download` `{keys: [...]}` 打包成 zip
+- **读文件不用登录**：`GET /sapi/oss/<id>` 不带 token、不带 cookie 也是 200，可以直接 `<img src>`
+  - `?w=` / `?h=` 服务器缩图（9MB 的 PNG `?w=64` 只有 7.6KB），`?b64=true` 返回 base64（会转成 JPEG）
+  - 响应头 `Cache-Control: public, max-age=31536000, immutable`，没有 ETag。**replace 之后同一地址会一直拿到旧缓存**；平台前端靠加 `?t=随机数` 刷新。客户端换图最好上传新文件、改指向、删旧文件
+  - **没有 `Access-Control-Allow-Origin`**：客户端 webview 里用 `<img>` 可以，用 `fetch` 跨域读不行，要读内容走 Rust
+  - 删掉之后 `GET` 是 404
+  - 只要知道 id 谁都能读，不能放敏感文件
+- 另有一套老接口 `POST /sapi/file/upload`（字段 `file, fileName, folder, quality, orgId, overwrite, width, height`）、`DELETE /sapi/file/<id>?orgId=`，平台前端读图时 `sapi/file/` 和 `sapi/oss/` 两种路径都认；新功能用 `/sapi/oss`
+- 权限资源：`SYSTEM_FILE_MANAGER`（`:view / :add / :update / :delete`）
+  - 2026-10-28 用李虎机构的非超管账号 `leehu`（这四项权限都有）实测：列"我的" / 平台公共区、建带 serviceKey 的文件夹、上传、不登录读、删文件和文件夹全部成功，通用设置 scope 1 / 2 读写删也都正常
+  - **后端不检查这些权限**：同天用李虎的 `leehu2`（非超管，没有文件管理菜单，权限比 `leehu` 正好少这 5 项）实测，查看"我的" / 平台公共区、建文件夹、上传、替换、改名、删文件和文件夹全部 200 成功。权限只决定网页端菜单显不显示；客户端要限制谁能上传，只能自己按权限隐藏入口
+  - 非超管往平台公共区写没测（会动到所有机构共用的文件，没做）
+
+### 机构设置 `/api/settings/org` 存不下自定义字段
+
+- 整份 POST 时多带 `opsClientProbe: {...}`、`opsFlat: "1"`，返回成功，读回时这两个键都没了（和 `room/v3/design` 一样按固定字段过滤）。客户端自己的配置不能放这里
+
+### 通用设置 `/sapi/setting`（键值存储）
+
+- 平台前端里有一个通用设置类，scope：**1 = 用户、2 = 机构、3 = 全局**
+- `GET /sapi/setting?key=&scope=` → `data` 是字符串（没有时没有 `data` 字段）；`POST /sapi/setting` `{key, value, scope}`，value 是字符串（自己 JSON.stringify），也可以 `{items: [...]}` 批量
+- 实测（李虎，键 `ops-client.probe`）：
+  - scope 2 写 5KB、300KB 的字符串都能原样读回，大小上限没碰到
+  - scope 2 按机构隔离：用平台机构的 `OrgId` 读不到
+  - scope 1 跟着账号走：换 `OrgId` 读到的是同一个值
+  - 不传 scope 读不到 scope 1 / 2 写的值
+  - 覆盖写立刻生效，再读就是新值
+  - **删除要用 `DELETE /sapi/setting?key=&scope=`**（返回 `data: 0` 也确实删掉了）。scope 2 写 `value: null` 或 `""` 都不会清掉，13 秒后读还是旧值；scope 1 写 `null` 后读不到了，但两层都用 DELETE 最稳妥
+- `GET /sapi/setting/keys?keys=&scope=`（批量读）、`GET /sapi/setting/merged?keys=`（合并几层 scope）在这个部署上都是 **404**，只能一个键一个键读
+- 全局（scope 3）和 `/sapi/setting/global` 没有测，写了会影响所有机构
+- 键名不和平台冲突就行，客户端自己的统一用 `ops-client.` 开头
+
 ## 楼栋、楼层、房间、床位的增删改（2026-10-19 读平台前端代码 + 在李虎机构用临时楼栋实测，测完已删除）
 
 都是 SDBPage 的通用接口（见"通用 CRUD 页面"），下面只记和通用规则不一样、或者容易出事的地方。

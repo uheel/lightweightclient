@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { session } from "./session";
 import { formatBytes, perfLog } from "./perf";
 
@@ -59,8 +59,8 @@ const utf8 = new TextDecoder();
  * 调用 Rust 的请求命令（请求由 Rust 层发出，绕开 WebView 的 CORS，共用连接池，开了 gzip，见 rust/api_http.rs）。
  * 返回的是原始字节：第一行是状态码和耗时的 JSON，换行后是响应体。
  */
-async function tauriInvoke(cmd: string, args: Record<string, unknown>): Promise<Fetched> {
-  const buf = await invoke<ArrayBuffer>(cmd, args);
+async function tauriInvoke(cmd: string, args: InvokeArgs, headers?: Record<string, string>): Promise<Fetched> {
+  const buf = await invoke<ArrayBuffer>(cmd, args, headers && { headers });
   const t = performance.now();
   const bytes = new Uint8Array(buf);
   const nl = bytes.indexOf(10);
@@ -69,9 +69,23 @@ async function tauriInvoke(cmd: string, args: Record<string, unknown>): Promise<
   return { status: meta.status, text, timing: meta.timing, decode: performance.now() - t };
 }
 
+/**
+ * 上传：浏览器先把 FormData 编码成 multipart 字节（借 Request 拿到带 boundary 的 content-type），
+ * 原始字节作为 IPC 请求体交给 Rust 的 api_upload，地址和请求头放在 IPC 请求头里
+ */
+async function tauriUpload(method: string, url: string, headers: Record<string, string>, form: FormData): Promise<Fetched> {
+  const encoded = new Request("http://upload.invalid/", { method: "POST", body: form });
+  const body = new Uint8Array(await encoded.arrayBuffer());
+  const all = { ...headers, "content-type": encoded.headers.get("content-type")! };
+  return tauriInvoke("api_upload", body, { "x-url": url, "x-method": method, "x-headers": JSON.stringify(all) });
+}
+
 /** 普通浏览器调试时走 vite 的 /__proxy 代理，目标服务器见 vite.js */
-async function doFetch(url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<Fetched> {
-  if (isTauri) return tauriInvoke("api_request", { method: init.method, url, headers: init.headers, body: init.body ?? null });
+async function doFetch(url: string, init: { method: string; headers: Record<string, string>; body?: string | FormData }): Promise<Fetched> {
+  if (isTauri) {
+    if (init.body instanceof FormData) return tauriUpload(init.method, url, init.headers, init.body);
+    return tauriInvoke("api_request", { method: init.method, url, headers: init.headers, body: init.body ?? null });
+  }
   const res = await window.fetch(url, init);
   return { status: res.status, text: await res.text(), decode: 0 };
 }
@@ -147,7 +161,9 @@ export async function request<T>(method: string, path: string, o: RequestOptions
     headers.orgid = org.orgId;
     headers.orgtype = String(org.orgType);
   }
-  if (o.body !== undefined) headers["content-type"] = "application/json";
+  // FormData 的 content-type（带 boundary）由编码时生成
+  const form = o.body instanceof FormData ? o.body : undefined;
+  if (o.body !== undefined && !form) headers["content-type"] = "application/json";
 
   const t0 = performance.now();
   let res: Fetched;
@@ -155,7 +171,7 @@ export async function request<T>(method: string, path: string, o: RequestOptions
     const url = apiBase(server) + path + buildQuery(o);
     res = pages
       ? await tauriInvoke("api_request_pages", { url, headers, pageSize: pages.pageSize, maxRows: pages.max })
-      : await doFetch(url, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
+      : await doFetch(url, { method, headers, body: form ?? (o.body === undefined ? undefined : JSON.stringify(o.body)) });
   } catch (e) {
     perfLog({ label: `${method} ${path}`, total: performance.now() - t0, stages: {}, info: { error: e instanceof Error ? e.message : String(e) } });
     throw new ApiError(`网络请求失败：${e instanceof Error ? e.message : String(e)}`);
@@ -217,4 +233,6 @@ export const api = {
   post: <T>(path: string, body?: unknown, o?: RequestOptions) => request<T>("POST", path, { ...o, body }),
   put: <T>(path: string, body?: unknown, o?: RequestOptions) => request<T>("PUT", path, { ...o, body }),
   del: <T>(path: string, o?: RequestOptions) => request<T>("DELETE", path, o),
+  /** multipart 上传（平台文件管理 /sapi/oss/upload 等） */
+  upload: <T>(path: string, form: FormData, o?: RequestOptions & { method?: string }) => request<T>(o?.method ?? "POST", path, { ...o, body: form }),
 };

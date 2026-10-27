@@ -22,6 +22,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             api_http::api_request,
             api_http::api_request_pages,
+            api_http::api_upload,
             api_http::api_warm,
             api_http::perf_log,
             alert_popup::alert_popup_show,
