@@ -24,6 +24,10 @@ export interface Target {
   nav: NavKey;
   id?: string;
   action?: "add";
+  /** add 时默认选中的设备类型 */
+  addType?: number;
+  /** add 完不切到新建的那一项（从详情里的选择框跳过来，加完还要回去选） */
+  stay?: boolean;
   spot?: Spot;
 }
 

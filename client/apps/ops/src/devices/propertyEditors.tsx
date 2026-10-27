@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Switch, TimePicker, Tooltip } from "antd";
+import { Button, Checkbox, InputNumber, Segmented, Select, Switch, TimePicker, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { createSlave, getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
+import { getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
 import ZoneCanvas, { CUSTOM, limitOf, surroundsRadar, type CanvasRoom, type DmRect, type ZoneType } from "./ZoneCanvas";
 import { SPACE_TYPE } from "../api/scene";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
+import { useGuide } from "../guide/GuideContext";
 
 /**
  * 数组 / JSON 类属性的结构化编辑器：把 [24,90,8,50] 这类数组拆成运维看得懂的一项项设置。
@@ -791,6 +792,11 @@ interface Linked {
 let typeNames: Promise<Map<number, string>> | undefined;
 let orgDevices: Promise<AnyDevice[]> | undefined;
 
+/** 设备管理里添加了设备后调用，下次点开选择框重新取机构设备列表 */
+export function forgetLinkable() {
+  orgDevices = undefined;
+}
+
 function useTypeNames() {
   const [m, setM] = useState<Map<number, string>>(new Map());
   useEffect(() => {
@@ -809,8 +815,8 @@ function linkedDevices(o: {
   types?: Set<number>;
   /** 暂停添加（比如停售），给出原因；已绑的仍能移除 */
   paused?: string;
-  /** 平台上还没有这个设备时，能在这里直接新建（类型限于 types 里字典有的） */
-  creatable?: boolean;
+  /** 平台上还没有可选的设备时，给个按钮去设备管理添加（打开添加设备并默认选这个类型） */
+  addType?: number;
 }): Structured {
   return {
     wide: true,
@@ -863,11 +869,7 @@ function linkedDevices(o: {
         [devices, list, names, sn],
       );
       const typeName = (t?: number) => (t ? (names.get(t) ?? `类型 ${t}`) : o.noun);
-      const [creating, setCreating] = useState(false);
-      const typeOptions = useMemo(
-        () => [...names].filter(([t]) => o.types?.has(t)).sort(([a], [b]) => a - b).map(([value, label]) => ({ value, label })),
-        [names],
-      );
+      const guide = useGuide();
       const add = (d: AnyDevice) => onChange([...list.map((q) => q.raw), o.make(d)]);
       return (
         <div className="st">
@@ -887,100 +889,39 @@ function linkedDevices(o: {
             {!list.length && <small className="muted">没有绑定{o.noun}。</small>}
           </div>
           {list.length < o.max && (
-            <div style={{ display: "flex", gap: 8, maxWidth: 620 }}>
-              <Select
-                size="small"
-                showSearch
-                disabled={disabled || !!o.paused}
-                value={null}
-                placeholder={o.paused ?? `添加${o.noun}（还可添加 ${o.max - list.length} 个），按名称或 SN 搜索`}
-                onFocus={load}
-                loading={loading}
-                options={options}
-                optionFilterProp="label"
-                notFoundContent={o.creatable ? `平台上没有可选的${o.noun}，点右边"新建"` : undefined}
-                onChange={(v: string) => {
-                  const d = devices?.find((x) => x.sn === v);
-                  if (d) add(d);
-                }}
-                style={{ flex: 1, minWidth: 0 }}
-              />
-              {o.creatable && !o.paused && (
-                <Button size="small" icon={<PlusOutlined />} disabled={disabled} onClick={() => setCreating(true)}>
-                  新建
-                </Button>
-              )}
-            </div>
-          )}
-          {creating && (
-            <NewLinkedDialog
-              noun={o.noun}
-              typeOptions={typeOptions}
-              onClose={() => setCreating(false)}
-              onCreated={(d) => {
-                // 机构设备列表缓存里没有新建的这台，重新取（名称也从这里来）
-                orgDevices = undefined;
-                load();
-                setCreating(false);
-                add(d);
+            <Select
+              size="small"
+              showSearch
+              disabled={disabled || !!o.paused}
+              value={null}
+              placeholder={o.paused ?? `添加${o.noun}（还可添加 ${o.max - list.length} 个），按名称或 SN 搜索`}
+              onFocus={load}
+              loading={loading}
+              options={options}
+              optionFilterProp="label"
+              notFoundContent={
+                o.addType !== undefined && !loading ? (
+                  <div className="muted" style={{ padding: "6px 4px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>没有可选的{o.noun}，先在设备管理里添加</span>
+                    {guide && (
+                      <Button size="small" type="link" icon={<PlusOutlined />} onMouseDown={(e) => e.preventDefault()} onClick={() => guide.go({ nav: "devices", action: "add", addType: o.addType, stay: true })}>
+                        去添加
+                      </Button>
+                    )}
+                  </div>
+                ) : undefined
+              }
+              onChange={(v: string) => {
+                const d = devices?.find((x) => x.sn === v);
+                if (d) add(d);
               }}
+              style={{ width: "100%", maxWidth: 620 }}
             />
           )}
         </div>
       );
     },
   };
-}
-
-/** 在平台新建一台子设备（目前只有蓝牙外设），建好后由调用方加进绑定列表 */
-function NewLinkedDialog({
-  noun,
-  typeOptions,
-  onClose,
-  onCreated,
-}: {
-  noun: string;
-  typeOptions: { value: number; label: string }[];
-  onClose: () => void;
-  onCreated: (d: AnyDevice) => void;
-}) {
-  const { message } = App.useApp();
-  const [form] = Form.useForm<{ deviceName: string; deviceType: number; sn: string; description?: string }>();
-  const [saving, setSaving] = useState(false);
-  const submit = async () => {
-    const v = await form.validateFields();
-    setSaving(true);
-    try {
-      const d = { deviceName: v.deviceName.trim(), sn: v.sn.trim(), deviceType: v.deviceType, description: v.description?.trim() || undefined };
-      let id = await createSlave(d);
-      // 新增接口应返回设备 id；没返回时按外设 ID 查一下
-      if (typeof id !== "string" || !id) id = (await getAllDevices()).find((x) => x.sn === d.sn)?.id ?? "";
-      message.success(`已新建${noun} ${d.deviceName}，已加进列表，下发后绑定到这台雷达`);
-      onCreated({ id, sn: d.sn, deviceName: d.deviceName, deviceType: d.deviceType });
-    } catch (e) {
-      message.error(`新建失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <Modal open title={`新建${noun}`} okText="新建并添加" onOk={submit} confirmLoading={saving} onCancel={onClose} destroyOnHidden>
-      <Form form={form} layout="vertical" initialValues={{ deviceType: typeOptions.length === 1 ? typeOptions[0].value : undefined }}>
-        <Form.Item name="deviceType" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
-          <Select options={typeOptions} placeholder="选择类型" />
-        </Form.Item>
-        <Form.Item name="sn" label="外设 ID" tooltip="外设上标的 ID，例如 FHKS_00019939848；全平台唯一" rules={[{ required: true, whitespace: true, message: "请填写外设 ID" }, { max: 32, message: "最多 32 个字符" }]}>
-          <Input placeholder="外设上标的 ID" />
-        </Form.Item>
-        <Form.Item name="deviceName" label="名称" rules={[{ required: true, whitespace: true, message: "请填写名称" }, { max: 64, message: "最多 64 个字符" }]}>
-          <Input placeholder="例如 201 床头拉绳" />
-        </Form.Item>
-        <Form.Item name="description" label="备注" rules={[{ max: 200, message: "最多 200 个字符" }]}>
-          <Input.TextArea rows={2} />
-        </Form.Item>
-      </Form>
-    </Modal>
-  );
 }
 
 const objects = (v: unknown) => (toArray(v) ?? []).filter((x): x is Record<string, unknown> => !!x && typeof x === "object");
@@ -995,7 +936,8 @@ const SLAVE_CONFIG = linkedDevices({
   noun: "蓝牙外设",
   max: 19,
   types: new Set([1001, 1002, 1003, 1004, 1005]),
-  creatable: true,
+  // 平台上没有可选的外设时去设备管理添加，默认选拉绳按钮
+  addType: 1001,
   read: (v) =>
     objects(v)
       .filter((x) => x.slave_ID)

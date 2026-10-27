@@ -82,13 +82,19 @@ export async function getDeviceTypeGroups() {
 
 // ---------- 添加设备 ----------
 
-/** 雷达类的设备类型（groupCode = RADAR），用于添加设备时选择 */
-export async function getRadarTypes() {
+/** 字典里某个分组的设备类型，用于添加设备时选择 */
+async function getTypesOf(groupCode: string) {
   const list = (await api.get<DeviceType[]>("/api/device-type/types")).data ?? [];
   return list
-    .filter((t) => t.groupCode === "RADAR" && t.deviceType !== undefined)
+    .filter((t) => t.groupCode === groupCode && t.deviceType !== undefined)
     .map((t) => ({ value: t.deviceType!, label: t.deviceTypeName ?? t.name ?? String(t.deviceType) }));
 }
+
+/** 雷达类的设备类型（groupCode = RADAR） */
+export const getRadarTypes = () => getTypesOf("RADAR");
+
+/** 蓝牙外设的设备类型（groupCode = SLAVE，2026-10-21 是 1001～1005：拉绳按钮、语音、门磁、烟感、体温贴） */
+export const getSlaveTypes = () => getTypesOf("SLAVE");
 
 export interface NewRadar {
   deviceName: string;

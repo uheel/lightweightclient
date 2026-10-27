@@ -4,12 +4,14 @@ import {
   CAREGIVER_WATCH_TYPE,
   createCaregiverWatch,
   createRadar,
+  createSlave,
   getFreeSip,
   getBuildingOptions,
   getFloorOptions,
   getRadars,
   getRadarTypes,
   getRoomOptions,
+  getSlaveTypes,
   type Option,
   type Radar,
 } from "../api/device";
@@ -37,7 +39,10 @@ interface Values {
 /** 护工手表云对讲用的 SIP 账号（平台账号池里取的，保存时才占用） */
 type Sip = { sipAccount?: string; sipPassword?: string; sipServer?: string };
 
-/** 添加设备：雷达（字段同平台雷达设备页的"新增"）、管理主机（同平台管理主机页的"新增"：只有名称和序列号）或护工手表（同平台护工手表管理的"新增"） */
+/**
+ * 添加设备：雷达（字段同平台雷达设备页的"新增"）、管理主机（同平台管理主机页的"新增"：只有名称和序列号）、
+ * 护工手表（同平台护工手表管理的"新增"）或蓝牙外设（同平台"蓝牙外设"的"新增"；绑到哪台雷达在雷达的设备属性 › 雷达外设里选）
+ */
 export default function AddDeviceDialog({ open, existing, defaultType, onClose, onCreated }: {
   open: boolean;
   /** 打开时默认选中的设备类型（例如列表正按管理主机筛选时） */
@@ -50,6 +55,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
   const { message } = App.useApp();
   const [form] = Form.useForm<Values>();
   const [radarTypes, setRadarTypes] = useState<{ value: number; label: string }[]>([]);
+  const [slaveTypes, setSlaveTypes] = useState<{ value: number; label: string }[]>([]);
   const [buildings, setBuildings] = useState<Option[]>([]);
   const [floors, setFloors] = useState<Option[]>([]);
   const [rooms, setRooms] = useState<Option[]>([]);
@@ -77,6 +83,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
     setMount(1);
     setSip(undefined);
     getRadarTypes().then(setRadarTypes, () => setRadarTypes([]));
+    getSlaveTypes().then(setSlaveTypes, () => setSlaveTypes([]));
     getBuildingOptions().then(setBuildings, () => {});
   }, [open, form, defaultType]);
 
@@ -89,20 +96,22 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
     if (floorId) getRoomOptions(floorId).then(setRooms, () => {});
   }, [floorId]);
 
-  /** 设备类型分栏：大类 → 型号。雷达型号来自平台字典，管理主机、护工手表目前各一个型号 */
+  /** 设备类型分栏：大类 → 型号。雷达、蓝牙外设型号来自平台字典，管理主机、护工手表目前各一个型号 */
   const groups = useMemo<TypeGroup[]>(
     () => [
       { value: "radar", label: "毫米波雷达", types: radarTypes },
       { value: "master", label: "管理主机", types: [{ value: MASTER_TYPE, label: "管理主机" }] },
       { value: "watch", label: "手表", types: [{ value: CAREGIVER_WATCH_TYPE, label: "护工手表" }] },
+      { value: "slave", label: "蓝牙外设", types: slaveTypes },
     ],
-    [radarTypes],
+    [radarTypes, slaveTypes],
   );
 
   const isMaster = deviceType === MASTER_TYPE;
   const isWatch = deviceType === CAREGIVER_WATCH_TYPE;
-  /** 不装在房间里的设备 */
-  const noRoom = isMaster || isWatch;
+  const isSlave = slaveTypes.some((t) => t.value === deviceType);
+  /** 不装在房间里的设备（蓝牙外设跟着它绑的雷达走） */
+  const noRoom = isMaster || isWatch || isSlave;
 
   async function pickSip() {
     setSipLoading(true);
@@ -154,6 +163,12 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
         // 管理主机不装在房间里；它管哪些房间在主机详情的"覆盖房间"里勾
         await createMaster({ sn, deviceName, description: v.description?.trim() || undefined });
         message.success(`已添加管理主机 ${deviceName}，接着在它的"覆盖房间"里勾上要管的房间`);
+        onCreated(sn);
+        return;
+      }
+      if (slaveTypes.some((t) => t.value === v.deviceType)) {
+        await createSlave({ sn, deviceName, deviceType: v.deviceType, description: v.description?.trim() || undefined });
+        message.success(`已添加蓝牙外设 ${deviceName}，到雷达的"设备属性 › 雷达外设"里把它绑到雷达上`);
         onCreated(sn);
         return;
       }
@@ -211,10 +226,12 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
         </Form.Item>
         <Form.Item
           name="sn"
-          label={isWatch ? "序列号 / IMEI" : "序列号（SN）"}
-          extra="全平台唯一"
+          label={isWatch ? "序列号 / IMEI" : isSlave ? "外设 ID" : "序列号（SN）"}
+          extra={isSlave ? "外设上标的 ID，例如 FHKS_00019939848；全平台唯一" : "全平台唯一"}
           rules={[
-            { required: true, whitespace: true, message: "请输入序列号" },
+            { required: true, whitespace: true, message: isSlave ? "请输入外设 ID" : "请输入序列号" },
+            // 平台限制：蓝牙外设 ID 最多 32 个字符
+            ...(isSlave ? [{ max: 32, message: "最多 32 个字符" }] : []),
             {
               validator: (_, val?: string) => {
                 const hit = val && existing.find((d) => d.sn.toLowerCase() === val.trim().toLowerCase());
@@ -234,7 +251,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
             { max: noRoom ? 64 : 32, message: `最多 ${noRoom ? 64 : 32} 个字` },
           ]}
         >
-          <Input maxLength={noRoom ? 64 : 32} placeholder={isMaster ? "例如 1 楼护士站" : isWatch ? "例如 2 楼护工 1 号" : "例如 101 房间"} />
+          <Input maxLength={noRoom ? 64 : 32} placeholder={isMaster ? "例如 1 楼护士站" : isWatch ? "例如 2 楼护工 1 号" : isSlave ? "例如 201 床头拉绳" : "例如 101 房间"} />
         </Form.Item>
         {isWatch ? (
           <>
@@ -282,6 +299,10 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
             </p>
             <WatchSetupQr open={watchQr} onClose={() => setWatchQr(false)} />
           </>
+        ) : isSlave ? (
+          <p className="muted small" style={{ marginTop: -8 }}>
+            蓝牙外设不装在房间里。添加后到要绑的雷达的"设备属性 › 雷达外设"里选它，下发后外设就连到这台雷达。
+          </p>
         ) : isMaster ? (
           <p className="muted small" style={{ marginTop: -8 }}>
             管理主机不装在房间里。添加后在它的"覆盖房间"里勾上要管的房间，主机上才有这些房间的雷达；云对讲还要给主机启用 SIP 账号。

@@ -15,6 +15,7 @@ import { useLiveMap } from "../devices/useLiveMap";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import type { Spot } from "../rooms/qinglan";
 import { GuideEmpty } from "../guide/GuideEmpty";
+import { forgetLinkable } from "../devices/propertyEditors";
 import { ModuleName } from "../workspace/ModuleName";
 
 type Filter = "all" | "online" | "offline" | "disabled";
@@ -105,6 +106,8 @@ export default function DevicesPage() {
   /** 收起左侧列表，给详情（尤其是姿态回放）更多空间 */
   const [listHidden, setListHidden] = useState(false);
   const [adding, setAdding] = useState(false);
+  /** 从雷达的蓝牙外设选择框跳来添加时：默认类型、加完留在原来那台雷达 */
+  const [addFrom, setAddFrom] = useState<{ type?: number; stay?: boolean }>();
   const [watchQr, setWatchQr] = useState(false);
   /** 从快速开始跳过来时详情里要打开、闪一下的那一项 */
   const [spot, setSpot] = useState<{ id: string; spot: Spot; seq: number }>();
@@ -211,9 +214,13 @@ export default function DevicesPage() {
   /** 添加成功后刷新列表并选中新设备 */
   async function onCreated(sn: string) {
     setAdding(false);
+    const stay = addFrom?.stay;
+    setAddFrom(undefined);
+    // 绑定外设的选择框缓存了机构设备列表，作废后下次点开重新取
+    forgetLinkable();
     const l = await load();
     const d = l?.find((x) => x.sn === sn);
-    if (d) focusDevice(d.id);
+    if (d && !stay) focusDevice(d.id);
     guide?.refresh(true);
   }
 
@@ -231,7 +238,10 @@ export default function DevicesPage() {
   useGuideFocus("devices", (f) => {
     if (f.id) focusDevice(f.id);
     if (f.id && f.spot && f.spot !== "beds") setSpot({ id: f.id, spot: f.spot, seq: f.seq });
-    if (f.action === "add") setAdding(true);
+    if (f.action === "add") {
+      setAddFrom(f.addType !== undefined || f.stay ? { type: f.addType, stay: f.stay } : undefined);
+      setAdding(true);
+    }
   });
 
   function saveListW(w: number) {
@@ -404,7 +414,7 @@ export default function DevicesPage() {
         )}
       </section>
       <WatchSetupQr open={watchQr} onClose={() => setWatchQr(false)} />
-      <AddDeviceDialog open={adding} existing={list} defaultType={cat === "master" ? MASTER_TYPE : cat === "watch" ? CAREGIVER_WATCH_TYPE : undefined} onClose={() => setAdding(false)} onCreated={onCreated} />
+      <AddDeviceDialog open={adding} existing={list} defaultType={addFrom?.type ?? (cat === "master" ? MASTER_TYPE : cat === "watch" ? CAREGIVER_WATCH_TYPE : undefined)} onClose={() => { setAdding(false); setAddFrom(undefined); }} onCreated={onCreated} />
     </div>
   );
 }
