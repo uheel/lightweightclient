@@ -1,12 +1,13 @@
-import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, Checkbox, InputNumber, Tooltip } from "antd";
-import { CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined } from "@ant-design/icons";
+import { CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
 import type { PlanElement, RoomDesign } from "../../api/room";
 import { newId } from "../radarSlot";
 import { boundRect, radarInRoom, ZONE_COLOR, zoneRect, zonesOf, type QlConfig } from "../qinglan";
 import { FURNITURE, FURNITURE_GROUPS, furnitureDef, furnitureOf, isDecor, isDoor, newFurniture, type FurnitureKind } from "./catalog";
 import { FurnitureIcon, FurnitureShape } from "./icons";
 import RoomBackdrop from "../RoomBackdrop";
+import "./furniture.css";
 
 /** 拖动、改尺寸按 5 cm 对齐；离墙这么近就贴上去 */
 const GRID = 5;
@@ -66,6 +67,32 @@ function rotateTo(e: PlanElement, deg: number): PlanElement {
   return { ...e, rotation: r, x: Math.round(c.x - ox), y: Math.round(c.y - oy) };
 }
 type Drag = { id: string; mode: "move" | "resize"; start: Pt; orig: PlanElement };
+type Box = { x: number; y: number; w: number; h: number };
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+/** 最多放大到 10 倍，最多缩小到 1.5 倍大小 */
+const MAX_IN = 10;
+const MAX_OUT = 1.5;
+
+/**
+ * 选中家具四个方向的标注：到最近的墙或家具（这个方向上、和它有重叠那段的另一件）的距离，cm。
+ * 已经贴上（距离不到 1 cm）的方向不标
+ */
+function dimensionsOf(b: Rect, others: Rect[], room: { width: number; height: number }) {
+  const overlapY = (o: Rect) => o.y0 < b.y1 && o.y1 > b.y0;
+  const overlapX = (o: Rect) => o.x0 < b.x1 && o.x1 > b.x0;
+  const cx = (b.x0 + b.x1) / 2;
+  const cy = (b.y0 + b.y1) / 2;
+  const left = Math.max(0, ...others.filter((o) => overlapY(o) && o.x1 <= b.x0).map((o) => o.x1));
+  const right = Math.min(room.width, ...others.filter((o) => overlapY(o) && o.x0 >= b.x1).map((o) => o.x0));
+  const top = Math.max(0, ...others.filter((o) => overlapX(o) && o.y1 <= b.y0).map((o) => o.y1));
+  const bottom = Math.min(room.height, ...others.filter((o) => overlapX(o) && o.y0 >= b.y1).map((o) => o.y0));
+  return [
+    { x1: left, y1: cy, x2: b.x0, y2: cy },
+    { x1: b.x1, y1: cy, x2: right, y2: cy },
+    { x1: cx, y1: top, x2: cx, y2: b.y0 },
+    { x1: cx, y1: b.y1, x2: cx, y2: bottom },
+  ].filter((d) => Math.hypot(d.x2 - d.x1, d.y2 - d.y1) >= 1);
+}
 
 /**
  * 装修编辑器：在房间平面图上摆家具。只改布置里顶层的图片 / 矩形（家具），雷达、区域、文字不动。
@@ -92,6 +119,52 @@ export default function FurnitureEditor({
   const [showZones, setShowZones] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
+  // 缩放 / 平移：改 viewBox；null 时是整间房（适应）
+  const base: Box = { x: -PAD, y: -PAD, w: room.width + PAD * 2, h: room.height + PAD * 2 };
+  const [zoom, setZoom] = useState<Box | null>(null);
+  const v = zoom ?? base;
+  const baseRef = useRef(base);
+  baseRef.current = base;
+  /** 拖空白处平移：按下时的视图和指针；没挪动就松手算点空白（取消选中） */
+  const pan = useRef<{ x: number; y: number; v: Box; scale: number; moved: boolean } | null>(null);
+  const [panning, setPanning] = useState(false);
+  /** 以 at（屏幕坐标，不给就是画布中心）为中心缩放：k < 1 放大 */
+  const zoomBy = (k: number, at?: { x: number; y: number }) => {
+    const el = svgRef.current;
+    const ctm = el?.getScreenCTM();
+    if (!el || !ctm) return;
+    const r = el.getBoundingClientRect();
+    const p = new DOMPoint(at?.x ?? r.x + r.width / 2, at?.y ?? r.y + r.height / 2).matrixTransform(ctm.inverse());
+    setZoom((cur) => {
+      const b = baseRef.current;
+      const c = cur ?? b;
+      const w = Math.min(b.w * MAX_OUT, Math.max(b.w / MAX_IN, c.w * k));
+      const f = w / c.w;
+      return { x: p.x - (p.x - c.x) * f, y: p.y - (p.y - c.y) * f, w, h: c.h * f };
+    });
+  };
+  const zoomRef = useRef(zoomBy);
+  zoomRef.current = zoomBy;
+  // 画布在屏幕上的大小：标注文字、手柄按屏幕像素定大小，窗口多大、放大多少倍都一样清楚
+  const [px, setPx] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setPx({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // 滚轮要 preventDefault（不然弹窗跟着滚），React 的 onWheel 是 passive 的，只能自己挂
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomRef.current(Math.exp(e.deltaY * 0.0015), { x: e.clientX, y: e.clientY });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const update = (next: PlanElement[]) => {
     setItems(next);
@@ -133,7 +206,23 @@ export default function FurnitureEditor({
     setSel(e.id);
     drag.current = { id: e.id!, mode, start: pointOf(ev.clientX, ev.clientY), orig: e };
   };
+  const onBgDown = (ev: PointerEvent<SVGSVGElement>) => {
+    if (ev.button !== 0) return;
+    const ctm = ev.currentTarget.getScreenCTM();
+    if (!ctm) return;
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    pan.current = { x: ev.clientX, y: ev.clientY, v, scale: ctm.a, moved: false };
+  };
   const onMove = (ev: PointerEvent) => {
+    const pn = pan.current;
+    if (pn) {
+      // 挪动不到 3 像素算点击，不平移
+      if (!pn.moved && Math.hypot(ev.clientX - pn.x, ev.clientY - pn.y) < 3) return;
+      if (!pn.moved) setPanning(true);
+      pn.moved = true;
+      setZoom({ ...pn.v, x: pn.v.x - (ev.clientX - pn.x) / pn.scale, y: pn.v.y - (ev.clientY - pn.y) / pn.scale });
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const p = pointOf(ev.clientX, ev.clientY);
@@ -146,6 +235,9 @@ export default function FurnitureEditor({
   };
   const onUp = () => {
     drag.current = null;
+    if (pan.current && !pan.current.moved) setSel(undefined);
+    pan.current = null;
+    setPanning(false);
   };
 
   const onDrop = (ev: DragEvent) => {
@@ -178,9 +270,20 @@ export default function FurnitureEditor({
     </g>
   );
 
-  const vb = `${-PAD} ${-PAD} ${room.width + PAD * 2} ${room.height + PAD * 2}`;
-  const fs = Math.max(11, Math.round(Math.max(room.width, room.height) / 40));
+  const vb = `${v.x} ${v.y} ${v.w} ${v.h}`;
+  // 文字、手柄按房间大小定，放大后跟着缩小，屏幕上保持一样大
+  const fs = Math.max(11, Math.round(Math.max(room.width, room.height) / 40)) * (v.w / base.w);
+  /** 一个屏幕像素是多少房间单位（cm） */
+  const upp = px.w && px.h ? 1 / Math.min(px.w / v.w, px.h / v.h) : fs / 12;
   const selDef = selected && furnitureOf(selected);
+  const selBox = selected && aabb(selected);
+  const dims = selBox ? dimensionsOf(selBox, items.filter((e) => e.id !== sel && !isDoor(e)).map(aabb), room) : [];
+  /** 选中家具的外接框移到离左墙 / 上墙 to cm */
+  const moveBoxTo = (axis: "x" | "y", to: number) => {
+    if (!selected || !selBox) return;
+    const from = axis === "x" ? selBox.x0 : selBox.y0;
+    patch(selected.id!, (e) => ({ ...e, [axis]: Math.round((e[axis] ?? 0) + to - from) }));
+  };
 
   return (
     <div className="fur-editor" tabIndex={0} onKeyDown={onKey}>
@@ -220,8 +323,9 @@ export default function FurnitureEditor({
           ref={svgRef}
           viewBox={vb}
           preserveAspectRatio="xMidYMid meet"
-          className="fur-svg"
-          onPointerDown={() => setSel(undefined)}
+          className={`fur-svg${panning ? " panning" : ""}`}
+          onPointerDown={onBgDown}
+          onDoubleClick={(ev) => !(ev.target as Element).closest(".fur-item, .fur-handle") && setZoom(null)}
           onPointerMove={onMove}
           onPointerUp={onUp}
           onPointerCancel={onUp}
@@ -252,22 +356,60 @@ export default function FurnitureEditor({
             <g transform={`translate(${selected.x ?? 0} ${selected.y ?? 0})${selected.rotation ? ` rotate(${selected.rotation})` : ""}`}>
               <rect x={0} y={0} width={selected.width ?? 0} height={selected.height ?? 0} className="fur-sel" />
               <rect
-                x={(selected.width ?? 0) - fs * 0.45}
-                y={(selected.height ?? 0) - fs * 0.45}
-                width={fs * 0.9}
-                height={fs * 0.9}
+                x={(selected.width ?? 0) - upp * 5}
+                y={(selected.height ?? 0) - upp * 5}
+                width={upp * 10}
+                height={upp * 10}
                 className="fur-handle"
                 onPointerDown={(ev) => onDown(ev, selected, "resize")}
               />
             </g>
           )}
+          {/* 位置标注：到四边最近的墙或家具的距离 */}
+          {dims.map((d, i) => {
+            const horiz = d.y1 === d.y2;
+            const t = upp * 4;
+            return (
+              <g key={i} className="fur-dim">
+                <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} />
+                {horiz ? (
+                  <>
+                    <line x1={d.x1} y1={d.y1 - t} x2={d.x1} y2={d.y1 + t} />
+                    <line x1={d.x2} y1={d.y2 - t} x2={d.x2} y2={d.y2 + t} />
+                  </>
+                ) : (
+                  <>
+                    <line x1={d.x1 - t} y1={d.y1} x2={d.x1 + t} y2={d.y1} />
+                    <line x1={d.x2 - t} y1={d.y2} x2={d.x2 + t} y2={d.y2} />
+                  </>
+                )}
+                <text
+                  x={(d.x1 + d.x2) / 2 + (horiz ? 0 : upp * 5)}
+                  y={(d.y1 + d.y2) / 2 + (horiz ? -upp * 5 : upp * 4)}
+                  fontSize={upp * 12}
+                  strokeWidth={upp * 3}
+                  textAnchor={horiz ? "middle" : "start"}
+                >
+                  {Math.round(Math.hypot(d.x2 - d.x1, d.y2 - d.y1))}
+                </text>
+              </g>
+            );
+          })}
         </svg>
         <div className="fur-canvas-foot muted small">
+          <span className="fur-zoom">
+            <Button size="small" type="text" icon={<ZoomOutOutlined />} title="缩小" onClick={() => zoomBy(1.25)} />
+            <span className="fur-zoom-pct">{Math.round((base.w / v.w) * 100)}%</span>
+            <Button size="small" type="text" icon={<ZoomInOutlined />} title="放大" onClick={() => zoomBy(0.8)} />
+            <Button size="small" type="text" onClick={() => setZoom(null)} disabled={!zoom} title="看整间房（双击空白处也行）">
+              适应
+            </Button>
+          </span>
           <Checkbox checked={showZones} onChange={(e) => setShowZones(e.target.checked)}>
             显示雷达区域
           </Checkbox>
           <span>
-            {room.width / 100} × {room.height / 100} m · {items.length} 件 · 拖动按 5 cm 对齐、靠墙自动贴上 · 方向键微调（Shift 10 cm）· R 旋转 · Ctrl+D 复制 · Delete 删除
+            {room.width / 100} × {room.height / 100} m · {items.length} 件 · 滚轮缩放、拖空白处平移 · 选中后标出到墙 / 家具的距离（cm）· 拖动按 5 cm 对齐、靠墙自动贴上 · 方向键微调（Shift 10 cm）· R 旋转 · Ctrl+D 复制 · Delete 删除
           </span>
         </div>
       </div>
@@ -285,6 +427,21 @@ export default function FurnitureEditor({
               长（上下）
               <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.height} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => ({ ...e, height: Math.round(v) }))} />
             </label>
+            {selBox && (
+              <div className="fur-pos">
+                <label>
+                  离左墙
+                  <InputNumber size="small" min={0} max={room.width} step={GRID} value={Math.round(selBox.x0)} suffix="cm" onChange={(n) => n !== null && moveBoxTo("x", n)} />
+                </label>
+                <label>
+                  离上墙
+                  <InputNumber size="small" min={0} max={room.height} step={GRID} value={Math.round(selBox.y0)} suffix="cm" onChange={(n) => n !== null && moveBoxTo("y", n)} />
+                </label>
+                <span className="muted small">
+                  离右墙 {Math.round(room.width - selBox.x1)} · 离下墙 {Math.round(room.height - selBox.y1)} cm
+                </span>
+              </div>
+            )}
             <label>
               角度
               <span className="fur-rot">

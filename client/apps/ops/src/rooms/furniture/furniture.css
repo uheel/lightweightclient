@@ -1,0 +1,9 @@
+/* 装修编辑器：缩放、位置标注（其余样式在 styles.css 的 .fur-* 一段） */
+.fur-svg.panning { cursor: grabbing; }
+.fur-dim { pointer-events: none; }
+.fur-dim line { stroke: #E5484D; stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* 字号、描边宽度在代码里按屏幕像素换算 */
+.fur-dim text { fill: #E5484D; font-weight: 600; paint-order: stroke; stroke: #FAFBFD; }
+.fur-zoom { display: inline-flex; align-items: center; gap: 2px; }
+.fur-zoom-pct { min-width: 40px; text-align: center; color: #4A4F66; }
+.fur-pos { display: flex; flex-direction: column; gap: 6px; }
