@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Select, Spin } from "antd";
-import { HddOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { HddOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
 import { CAREGIVER_WATCH_TYPE, getAllDevices, getDeviceTypeGroups, getDeviceTypeMap, getRadars } from "../api/device";
 import { getMasters, MASTER_TYPE } from "../api/master";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
+import WatchSetupQr from "../devices/WatchSetupQr";
 import DeviceDetail from "../devices/DeviceDetail";
 import BasicDetail from "../devices/BasicDetail";
 import MasterDetail from "../devices/master/MasterDetail";
@@ -103,6 +104,7 @@ export default function DevicesPage() {
   /** 收起左侧列表，给详情（尤其是姿态回放）更多空间 */
   const [listHidden, setListHidden] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [watchQr, setWatchQr] = useState(false);
   /** 从快速开始跳过来时详情里要打开、闪一下的那一项 */
   const [spot, setSpot] = useState<{ id: string; spot: Spot; seq: number }>();
   // 换到别的设备就作废，回来时不再闪
@@ -293,6 +295,7 @@ export default function DevicesPage() {
               {ofCat.length} 台 · {counts.online} 在线
             </span>
             <Button type="text" icon={<PlusOutlined />} onClick={() => setAdding(true)} title="添加设备" style={{ marginLeft: "auto" }} />
+            {cat === "watch" && <Button type="text" icon={<QrcodeOutlined />} onClick={() => setWatchQr(true)} title="护工手表配置码" />}
             <Button type="text" icon={<ReloadOutlined />} onClick={load} title="刷新" />
           </div>
           <div className="dev-list-search">
@@ -399,6 +402,7 @@ export default function DevicesPage() {
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
       </section>
+      <WatchSetupQr open={watchQr} onClose={() => setWatchQr(false)} />
       <AddDeviceDialog open={adding} existing={list} defaultType={cat === "master" ? MASTER_TYPE : cat === "watch" ? CAREGIVER_WATCH_TYPE : undefined} onClose={() => setAdding(false)} onCreated={onCreated} />
     </div>
   );

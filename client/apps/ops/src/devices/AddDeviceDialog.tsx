@@ -17,6 +17,7 @@ import { createMaster, MASTER_TYPE } from "../api/master";
 import { placeInLayout, SLOT_TEXT, slotSource, type SlotSource } from "../rooms/radarSlot";
 import { SlotAreaLine } from "../rooms/AreaSelect";
 import TypeCascader, { type TypeGroup } from "./TypeCascader";
+import WatchSetupQr from "./WatchSetupQr";
 import type { InstallArea } from "../rooms/installArea";
 
 interface Values {
@@ -65,6 +66,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
   /** 新建空白位置时的装法：1 侧装，0 顶装 */
   const [mount, setMount] = useState<0 | 1>(1);
   const callType = Form.useWatch("callType", form);
+  const [watchQr, setWatchQr] = useState(false);
   const [sip, setSip] = useState<Sip>();
   const [sipLoading, setSipLoading] = useState(false);
 
@@ -167,7 +169,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
           mac: v.mac?.trim() || undefined,
           description: v.description?.trim() || undefined,
         });
-        message.success(`已添加护工手表 ${deviceName}${cloud ? `，SIP 号码 ${sip?.sipAccount}` : ""}`);
+        message.success(`已添加护工手表 ${deviceName}${cloud ? `，SIP 号码 ${sip?.sipAccount}` : ""}。在手表上扫配置码（设备列表选"手表"后右上角）连上平台`);
         onCreated(sn);
         return;
       }
@@ -272,8 +274,13 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
               <Input className="mono" maxLength={64} placeholder="例如 AA:BB:CC:DD:EE:FF" />
             </Form.Item>
             <p className="muted small" style={{ marginTop: -8 }}>
-              护工手表不装在房间里，也不绑长者；护工在手表上用自己的编号登录后就能用。
+              护工手表不装在房间里，也不绑长者。添加后在手表上扫
+              <Button type="link" size="small" style={{ padding: "0 2px", height: "auto" }} onClick={() => setWatchQr(true)}>
+                配置码
+              </Button>
+              连上平台，护工再用自己的编号登录。
             </p>
+            <WatchSetupQr open={watchQr} onClose={() => setWatchQr(false)} />
           </>
         ) : isMaster ? (
           <p className="muted small" style={{ marginTop: -8 }}>
