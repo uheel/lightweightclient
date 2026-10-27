@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertOutlined, DashboardOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, HomeOutlined, MedicineBoxOutlined, SolutionOutlined, NotificationOutlined, SettingOutlined, TagsOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, DashboardOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, HomeOutlined, MedicineBoxOutlined, MenuOutlined, SolutionOutlined, NotificationOutlined, SettingOutlined, TagsOutlined, TeamOutlined } from "@ant-design/icons";
 import type { NavKey } from "../guide/steps";
 
 /** 工作台上的模块。"monitor" 不开标签，而是打开全屏的监控模式 */
@@ -26,7 +26,8 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   members: { key: "members", label: "长者档案", icon: <TeamOutlined />, desc: "长者信息、入住与床位", tint: "#FFF4E0", color: "#9A5B00" },
   caregivers: { key: "caregivers", label: "护理班组", icon: <SolutionOutlined />, desc: "护理员、护理组与负责的设备", tint: "#FFF4E0", color: "#9A5B00" },
   rooms: { key: "rooms", label: "房间诊断", icon: <MedicineBoxOutlined />, desc: "逐间检查布置与设备", tint: "#E6F3F7", color: "#1E83A3" },
-  settings: { key: "settings", label: "系统设置", icon: <SettingOutlined />, desc: "类别和模块名称", tint: "#F1F2F7", color: "#5B6078" },
+  settings: { key: "settings", label: "系统设置", icon: <SettingOutlined />, desc: "告警弹窗、推送到护工手表", tint: "#F1F2F7", color: "#5B6078" },
+  menus: { key: "menus", label: "菜单设置", icon: <MenuOutlined />, desc: "工作台类别和模块的名字、顺序、隐藏", tint: "#F1F2F7", color: "#5B6078" },
   dataWall: { key: "dataWall", label: "数据魔墙", icon: <DashboardOutlined />, desc: "开发中", tint: "#E7F6F3", color: "#0F8A72" },
   realtime: { key: "realtime", label: "实时推送", icon: <NotificationOutlined />, desc: "平台推送消息（调试用）", tint: "#F1F2F7", color: "#5B6078" },
 };
@@ -40,5 +41,5 @@ export const GROUPS: { key: GroupKey; title: string; keys: ModuleKey[] }[] = [
   { key: "alarm", title: "告警管理", keys: ["scenes", "alerts", "processTypes"] },
   { key: "dashboard", title: "数据看板", keys: ["dataWall"] },
   { key: "debug", title: "排查与诊断", keys: ["rooms", "realtime"] },
-  { key: "system", title: "系统管理", keys: ["settings"] },
+  { key: "system", title: "系统管理", keys: ["settings", "menus"] },
 ];

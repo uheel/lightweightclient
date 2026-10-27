@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Checkbox, Input, InputNumber, Modal, Select, Spin, Switch, Tag, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { awaitDeviceResponse, getStoredProperties, readDeviceProperties, writeDeviceProperties, type Radar, type StoredProperty } from "../api/device";
-import { alertTypeOf, getAlertTypeConfig, setTtsVoiceMessage, TTS_MAX_LENGTH, TTS_PHONE, TTS_VARIABLES, type AlertTypeConfig } from "../api/alertType";
-import { getMasterOptions, getRadarCallConfig, type MasterOption } from "../api/master";
+import { alertTypeOf, getAlertTypeConfig, setTtsVoiceMessage, setWatchPush, watchPushOn, TTS_MAX_LENGTH, TTS_PHONE, TTS_VARIABLES, type AlertTypeConfig } from "../api/alertType";
+import { getMasterOptions, getRadarCallConfig, orgOf, type MasterOption } from "../api/master";
+import { getOrgSettings, onWatchPushChanged } from "../api/orgSettings";
 import { isMobileNumber, toShownNumber } from "./dialNumber";
 import {
   fillVoiceIds,
@@ -128,10 +129,14 @@ export default function AlarmTab({
   const [pendingCall, setPendingCall] = useState<Record<string, boolean>>({});
   /** 语音留言电话（平台属性 tts-phone）；editing = 正在改的输入 */
   const [ttsPhone, setTtsPhone] = useState<{ value: string; editing?: string; saving?: boolean }>({ value: "" });
-  /** 告警类型 → 所属机构的配置（语音留言开关和内容） */
+  /** 告警类型 → 所属机构的配置（语音留言开关和内容、单独推送到护工手表） */
   const [ttsCfg, setTtsCfg] = useState<Map<string, AlertTypeConfig>>(new Map());
+  const ttsCfgRef = useRef(ttsCfg);
+  ttsCfgRef.current = ttsCfg;
   /** 正在填留言内容的告警 */
   const [ttsDraft, setTtsDraft] = useState<{ label: string; alertTypeId: string; content: string }>();
+  /** 所属机构开了"全部告警推送到护工手表"：每类都推，不用单独勾 */
+  const [watchAll, setWatchAll] = useState(false);
   const [busy, setBusy] = useState<string>();
   const [result, setResult] = useState<{ label: string; ok: boolean; text?: string }>();
   /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
@@ -167,12 +172,15 @@ export default function AlarmTab({
           if (s) sc.set(label, s);
         }),
       );
-      if (tts) {
-        setTtsPhone({ value: String(props[TTS_PHONE]?.value ?? "") });
-        const ids = new Set([...sc.values(), ...current].map(alertTypeOf).filter((x): x is string => !!x));
-        const cfgs = await Promise.all([...ids].map((id) => getAlertTypeConfig(id, d).catch(() => undefined)));
-        setTtsCfg(new Map(cfgs.filter((c): c is AlertTypeConfig => !!c).map((c) => [c.alertTypeId, c])));
-      }
+      if (tts) setTtsPhone({ value: String(props[TTS_PHONE]?.value ?? "") });
+      // 告警类型的机构配置：语音留言（13 型）和推送到护工手表都看它
+      const ids = new Set([...sc.values(), ...current].map(alertTypeOf).filter((x): x is string => !!x));
+      const [cfgs, orgSettings] = await Promise.all([
+        Promise.all([...ids].map((id) => getAlertTypeConfig(id, d).catch(() => undefined))),
+        orgOf(d).then(getOrgSettings).catch(() => undefined),
+      ]);
+      setTtsCfg(new Map(cfgs.filter((c): c is AlertTypeConfig => !!c).map((c) => [c.alertTypeId, c])));
+      setWatchAll(!!orgSettings?.alertSettings?.enableNotifyWatch);
       setTpls(m);
       setDefs(sc);
       setScenes(current);
@@ -217,6 +225,24 @@ export default function AlarmTab({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.id, callable]);
+
+  /** 系统设置里改了推送到护工手表：重新读机构总开关和这几类告警的配置 */
+  useEffect(() => {
+    // 只用最后一次重读的结果
+    let seq = 0;
+    return onWatchPushChanged(async () => {
+      const my = ++seq;
+      const ids = [...ttsCfgRef.current.keys()];
+      const [cfgs, orgSettings] = await Promise.all([
+        Promise.all(ids.map((id) => getAlertTypeConfig(id, d).catch(() => undefined))),
+        orgOf(d).then(getOrgSettings).catch(() => undefined),
+      ]);
+      if (my !== seq) return;
+      setTtsCfg(new Map(cfgs.filter((c): c is AlertTypeConfig => !!c).map((c) => [c.alertTypeId, c])));
+      setWatchAll(!!orgSettings?.alertSettings?.enableNotifyWatch);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.id]);
 
   const active = useMemo(() => scenes.filter((s) => !s.isDisabled), [scenes]);
   const rows: Row[] = ALARMS.map((def) => ({
@@ -325,6 +351,20 @@ export default function AlarmTab({
     });
   }
 
+  /** 单独给这类告警开 / 关推送到护工手表：按告警类型对整个机构生效 */
+  async function toggleWatch(label: string, alertTypeId: string, on: boolean) {
+    setBusy(label);
+    try {
+      const cfg = await setWatchPush(alertTypeId, on, d);
+      setTtsCfg((m) => new Map(m).set(alertTypeId, cfg));
+      message.success(`${label}${on ? "会推送到护工手表" : "不再推送到护工手表"}（机构里所有设备）`);
+    } catch (e) {
+      message.error(`保存失败：${errText(e)}`);
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
   async function saveTtsPhone() {
     const v = (ttsPhone.editing ?? "").trim().replace(/[\s-]/g, "");
     if (v && !isMobileNumber(v)) return message.error("请填 11 位手机号");
@@ -421,7 +461,8 @@ export default function AlarmTab({
             const noTpl = !r.tpl ? `平台上还没有这个型号的"${r.def.label}"模板` : !defs.get(r.def.label) ? "读取模板失败" : undefined;
             const why = blocked ?? (on ? undefined : noTpl ?? a.why);
             const isBusy = busy === r.def.label;
-            const ttsAlert = tts ? alertTypeFor(r) : undefined;
+            const alertType = alertTypeFor(r);
+            const ttsAlert = tts ? alertType : undefined;
             return (
               <li key={r.def.label} className={[noTpl && !on && "muted", hasMinutes(r) && "wide"].filter(Boolean).join(" ") || undefined}>
                 <div className="alarm-name">
@@ -526,6 +567,25 @@ export default function AlarmTab({
                         onChange={(e) => toggleTts(r, ttsAlert, e.target.checked)}
                       >
                         <span className="small">语音留言</span>
+                      </Checkbox>
+                    </Tooltip>
+                  )}
+                  {alertType && (
+                    <Tooltip
+                      title={
+                        watchAll
+                          ? "系统设置里选了全部告警都推送到护工手表"
+                          : !ttsCfg.has(alertType)
+                            ? "没读到这个告警类型的配置"
+                            : "按告警类型对整个机构生效，系统设置里也能勾"
+                      }
+                    >
+                      <Checkbox
+                        checked={watchAll || watchPushOn(ttsCfg.get(alertType))}
+                        disabled={watchAll || !!busy || !ttsCfg.has(alertType)}
+                        onChange={(e) => toggleWatch(r.def.label, alertType, e.target.checked)}
+                      >
+                        <span className="small">推到手表</span>
                       </Checkbox>
                     </Tooltip>
                   )}

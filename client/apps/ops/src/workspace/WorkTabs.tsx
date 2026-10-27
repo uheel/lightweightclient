@@ -2,10 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Badge, Dropdown } from "antd";
 import { AppstoreOutlined, CloseOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { NavKey } from "../guide/steps";
-import { MODULES } from "./modules";
+import { isLink, type LinkKey } from "./names";
+import { ItemIcon } from "./icons";
+import { linkAction } from "../pages/LinkPage";
 import { useNames } from "./names";
 
-export type TabKey = NavKey | "home";
+/** 标签里能开的：内置模块或链接模块 */
+export type OpenKey = NavKey | LinkKey;
+export type TabKey = OpenKey | "home";
 
 /**
  * 标题栏里的标签：第一个固定是工作台（关不掉），后面是打开的模块。
@@ -19,15 +23,15 @@ export function WorkTabs({
   onClose,
   onReorder,
 }: {
-  tabs: NavKey[];
+  tabs: OpenKey[];
   active: TabKey;
   badges?: Partial<Record<NavKey, number>>;
   onSelect: (k: TabKey) => void;
   /** 一次关掉一个或多个 */
-  onClose: (keys: NavKey[]) => void;
-  onReorder: (tabs: NavKey[]) => void;
+  onClose: (keys: OpenKey[]) => void;
+  onReorder: (tabs: OpenKey[]) => void;
 }) {
-  const dragging = useRef<NavKey | undefined>(undefined);
+  const dragging = useRef<OpenKey | undefined>(undefined);
   const names = useNames();
 
   // 标签多了不挤压：宽度不变，放不下时出现左右箭头滚动（工作台不参与滚动）
@@ -78,7 +82,7 @@ export function WorkTabs({
       });
   };
 
-  function menu(k: NavKey) {
+  function menu(k: OpenKey) {
     const i = tabs.indexOf(k);
     return {
       items: [
@@ -91,9 +95,15 @@ export function WorkTabs({
         },
         { type: "divider" as const },
         { key: "all", label: "全部关闭" },
+        // 链接模块的页面上没有工具栏，重新加载和新窗口打开放在这里
+        ...(isLink(k)
+          ? [{ type: "divider" as const }, { key: "reload", label: "重新加载" }, { key: "window", label: "新窗口打开" }]
+          : []),
       ],
-      onClick: ({ key }: { key: string }) =>
-        onClose(key === "close" ? [k] : key === "others" ? tabs.filter((t) => t !== k) : key === "right" ? tabs.slice(i + 1) : tabs),
+      onClick: ({ key }: { key: string }) => {
+        if (isLink(k) && (key === "reload" || key === "window")) return linkAction(k, key);
+        onClose(key === "close" ? [k] : key === "others" ? tabs.filter((t) => t !== k) : key === "right" ? tabs.slice(i + 1) : tabs);
+      },
     };
   }
 
@@ -110,13 +120,13 @@ export function WorkTabs({
       )}
       <div className="work-tabs-scroll" ref={scroller} onScroll={measure} onWheel={(e) => e.deltaY && scroller.current?.scrollBy({ left: e.deltaY })}>
         {tabs.map((k) => {
-          const m = MODULES[k];
+          const badge = isLink(k) ? 0 : badges?.[k];
           return (
             <Dropdown key={k} trigger={["contextMenu"]} menu={menu(k)}>
               <div
                 className={`work-tab${active === k ? " active" : ""}`}
                 role="button"
-                title={names.module(k)}
+                title={isLink(k) ? `${names.module(k)}\n${names.link(k)?.url ?? ""}\n右键可重新加载、新窗口打开` : names.module(k)}
                 draggable
                 onClick={() => onSelect(k)}
                 onAuxClick={(e) => e.button === 1 && onClose([k])}
@@ -134,9 +144,9 @@ export function WorkTabs({
                   onReorder(next);
                 }}
               >
-                {m.icon}
+                <ItemIcon k={k} />
                 <span className="work-tab-name">{names.module(k)}</span>
-                {!!badges?.[k] && active !== k && <Badge count={badges[k]} size="small" />}
+                {!!badge && active !== k && <Badge count={badge} size="small" />}
                 <span
                   className="work-tab-close"
                   title="关闭（Ctrl+W）"

@@ -1,98 +1,25 @@
-import type { ReactNode } from "react";
-import { Button, Checkbox, Input, Popconfirm, Select, Switch } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
-import { GROUPS, MODULES } from "../workspace/modules";
-import { addGroup, moveGroup, NAME_MAX, removeGroup, resetNames, setGroup, setName, toggleHidden, useNames, type GroupId } from "../workspace/names";
+import { useEffect, useState } from "react";
+import { App, Button, Checkbox, Radio, Spin, Switch } from "antd";
+import { MenuOutlined } from "@ant-design/icons";
 import { ModuleName } from "../workspace/ModuleName";
 import { ALERT_GROUPS } from "../api/device";
 import { setPopupSettings, usePopupSettings } from "../alerts/popupSettings";
+import { getOrgSettings, onWatchPushChanged, setNotifyWatch } from "../api/orgSettings";
+import { getAlertTypeConfig, getAlertTypes, isOurAlertType, setWatchPush, watchPushOn, type AlertType, type AlertTypeConfig } from "../api/alertType";
 
-/** 系统设置：告警弹窗开关；工作台的类别和模块：改名字、换类别、调顺序、新增空类别、隐藏（存在本机，工作台和标题栏标签立即生效） */
-export default function SettingsPage() {
-  const names = useNames();
-  const changed = [names.raw.groups, names.raw.modules, names.raw.moves, names.raw.order, names.raw.added, names.raw.hiddenGroups, names.raw.hiddenModules, names.raw.shownGroups].some((m) => Object.keys(m ?? {}).length);
-  const groupOptions = names.layout.map((g) => ({ value: g.key, label: names.group(g.key) }));
-
+/** 系统设置：告警弹窗开关；推送告警到护工手表（机构设置，存在平台）。工作台的类别和模块在"菜单设置"里改 */
+export default function SettingsPage({ onOpen }: { onOpen: (k: "menus") => void }) {
   return (
     <div className="page">
       <div className="page-head">
         <h1><ModuleName k="settings" /></h1>
+        {/* 菜单设置在工作台上隐藏后从这里进 */}
+        <Button size="small" icon={<MenuOutlined />} onClick={() => onOpen("menus")} style={{ marginLeft: "auto" }}>
+          <ModuleName k="menus" />
+        </Button>
       </div>
       <AlertPopupCard />
-      <div className="ops-card settings-names">
-        <h2>
-          类别和模块
-          <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-            改工作台上类别和模块方块、标题栏标签显示的名字，调整类别顺序，新增类别，把模块换到别的类别，或在工作台上隐藏（系统设置隐藏后从右上角用户菜单进），只存在这台电脑上；名字清空恢复默认
-          </span>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => addGroup()} style={{ marginLeft: "auto" }}>
-            新增类别
-          </Button>
-          <Popconfirm title="名字、类别和隐藏都恢复默认？新增的类别会删掉" onConfirm={resetNames} disabled={!changed}>
-            <Button size="small" icon={<UndoOutlined />} disabled={!changed}>
-              全部恢复默认
-            </Button>
-          </Popconfirm>
-        </h2>
-        {/* 类别按工作台上的顺序列，模块列在它现在所在的类别下 */}
-        {names.layout.map((grp, i) => (
-          <section key={grp.key} className="settings-group">
-            <NameField
-              label="类别"
-              // 新增的类别没有默认名：框里就是它的名字，空着时提示起名
-              def={names.isAdded(grp.key) ? "" : GROUPS.find((g) => g.key === grp.key)!.title}
-              placeholder={names.isAdded(grp.key) ? "输入类别名称" : undefined}
-              value={names.isAdded(grp.key) ? names.raw.added?.find((g) => g.key === grp.key)?.title : names.raw.groups?.[grp.key]}
-              onChange={(v) => setName("groups", grp.key, v)}
-              hidden={names.groupHidden(grp.key)}
-            >
-              <HideButton
-                hidden={names.groupHidden(grp.key)}
-                onClick={() => toggleHidden("hiddenGroups", grp.key)}
-              />
-              <Button size="small" type="text" icon={<ArrowUpOutlined />} title="上移" disabled={i === 0} onClick={() => moveGroup(grp.key, -1)} />
-              <Button size="small" type="text" icon={<ArrowDownOutlined />} title="下移" disabled={i === names.layout.length - 1} onClick={() => moveGroup(grp.key, 1)} />
-              {names.isAdded(grp.key) &&
-                (grp.keys.length ? (
-                  <Popconfirm title={`删除类别？里面的 ${grp.keys.length} 个模块回到原来的类别`} onConfirm={() => removeGroup(grp.key)}>
-                    <Button size="small" type="text" danger icon={<DeleteOutlined />} title="删除类别" />
-                  </Popconfirm>
-                ) : (
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} title="删除类别" onClick={() => removeGroup(grp.key)} />
-                ))}
-            </NameField>
-            <div className="settings-modules">
-              {grp.keys.length ? (
-                grp.keys.map((k) => (
-                  <NameField
-                    key={k}
-                    icon={MODULES[k].icon}
-                    color={MODULES[k].color}
-                    def={MODULES[k].label}
-                    value={names.raw.modules?.[k]}
-                    onChange={(v) => setName("modules", k, v)}
-                    // 类别隐藏了，里面的模块也看不到
-                    hidden={names.moduleHidden(k) || names.groupHidden(grp.key)}
-                  >
-                    <HideButton hidden={names.moduleHidden(k)} onClick={() => toggleHidden("hiddenModules", k)} />
-                    <Select
-                      size="small"
-                      className="settings-name-group"
-                      title="所在类别"
-                      value={grp.key}
-                      options={groupOptions}
-                      onChange={(g: GroupId) => setGroup(k, g)}
-                      popupMatchSelectWidth={false}
-                    />
-                  </NameField>
-                ))
-              ) : (
-                <span className="muted settings-empty">没有模块，工作台上不显示这个类别；在模块后面选类别可以把模块换过来</span>
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
+      <WatchPushCard />
     </div>
   );
 }
@@ -126,61 +53,136 @@ function AlertPopupCard() {
   );
 }
 
-function NameField({
-  label,
-  icon,
-  color,
-  def,
-  placeholder,
-  value,
-  onChange,
-  hidden,
-  children,
-}: {
-  label?: string;
-  icon?: ReactNode;
-  color?: string;
-  def: string;
-  /** 不填就用默认名 */
-  placeholder?: string;
-  value?: string;
-  onChange: (v: string) => void;
-  /** 工作台上不显示：整行变淡 */
-  hidden?: boolean;
-  /** 名字框后面的其他控件（类别的上移下移、模块的所在类别） */
-  children?: ReactNode;
-}) {
-  return (
-    <div className={`settings-name${hidden ? " is-hidden" : ""}`}>
-      <span className="settings-name-tag" style={{ color }}>
-        {icon ?? label}
-      </span>
-      <Input
-        size="small"
-        // 没改过就显示空框 + 默认名占位，一眼看出哪些改过
-        value={value ?? ""}
-        placeholder={placeholder ?? def}
-        maxLength={NAME_MAX}
-        allowClear
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {children}
-      {value && def && <span className="muted settings-name-def">默认：{def}</span>}
-    </div>
-  );
-}
+type WatchMode = "off" | "all" | "some";
 
-/** 显示 / 隐藏开关；locked 是不能隐藏的原因 */
-function HideButton({ hidden, locked, onClick }: { hidden: boolean; locked?: string; onClick: () => void }) {
+/**
+ * 推送告警到护工手表，三选一：不推送 / 全部告警（机构总开关）/ 指定告警（总开关关，在下面直接勾告警类型，
+ * 写到各告警类型的配置里，不用再去平台的告警事件类型一个个开）。只列备注带 goodlife 的告警类型。
+ * 存在平台、按机构；切换机构时页面重新挂载、重新读
+ */
+function WatchPushCard() {
+  const { message, modal } = App.useApp();
+  const [all, setAll] = useState<boolean>();
+  const [types, setTypes] = useState<AlertType[]>([]);
+  const [cfg, setCfg] = useState<Map<string, AlertTypeConfig>>(new Map());
+  /** 选了"指定告警"但还没勾任何一种：只是界面状态 */
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState<string>();
+
+  useEffect(() => {
+    // 连着改几次会连着重读，只用最后一次的结果，免得先发的读取后回来盖掉新的勾选
+    let seq = 0;
+    const load = () =>
+      (async () => {
+        const my = ++seq;
+        const [s, list] = await Promise.all([getOrgSettings(), getAlertTypes()]);
+        const ours = list.filter(isOurAlertType);
+        const cfgs = await Promise.all(ours.map((t) => getAlertTypeConfig(t.id).catch(() => undefined)));
+        if (my !== seq) return;
+        setTypes(ours);
+        setCfg(new Map(cfgs.filter((c): c is AlertTypeConfig => !!c).map((c) => [c.alertTypeId, c])));
+        setAll(!!s.alertSettings?.enableNotifyWatch);
+      })().catch((e) => message.error(`读取推送设置失败：${e.message}`));
+    load();
+    // 设备的告警配置里也能勾，那边改了这里重新读
+    return onWatchPushChanged(load);
+  }, []);
+
+  const picked = types.filter((t) => watchPushOn(cfg.get(t.id)));
+  const mode: WatchMode | undefined = all === undefined ? undefined : all ? "all" : picked.length || picking ? "some" : "off";
+
+  /** 关掉所有单独开的告警类型 */
+  async function clearPicked() {
+    for (const t of picked) {
+      const c = await setWatchPush(t.id, false);
+      setCfg((m) => new Map(m).set(t.id, c));
+    }
+  }
+
+  async function changeMode(m: WatchMode) {
+    if (m === mode) return;
+    const run = async () => {
+      setBusy("mode");
+      try {
+        if (m === "all") await setNotifyWatch(true);
+        else {
+          if (all) await setNotifyWatch(false);
+          if (m === "off") await clearPicked();
+        }
+        setAll(m === "all");
+        setPicking(m === "some");
+        message.success(m === "off" ? "已关闭推送告警到护工手表" : m === "all" ? "所有告警都会推送到护工手表" : "在下面勾选要推送到护工手表的告警");
+      } catch (e) {
+        message.error(`保存失败：${(e as Error).message}`);
+      } finally {
+        setBusy(undefined);
+      }
+    };
+    if (m === "off" && picked.length)
+      modal.confirm({ title: "不推送告警到护工手表？", content: `已勾选的 ${picked.length} 种告警会一起取消。`, okText: "不推送", onOk: run });
+    else run();
+  }
+
+  async function toggle(t: AlertType, on: boolean) {
+    setBusy(t.id);
+    try {
+      const c = await setWatchPush(t.id, on);
+      setCfg((m) => new Map(m).set(t.id, c));
+      setPicking(true);
+    } catch (e) {
+      message.error(`保存失败：${(e as Error).message}`);
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
   return (
-    <Button
-      size="small"
-      type="text"
-      className="settings-hide"
-      icon={hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-      title={locked ?? (hidden ? "工作台上已隐藏，点击显示" : "在工作台上隐藏")}
-      disabled={!!locked}
-      onClick={onClick}
-    />
+    <div className="ops-card settings-popup">
+      <h2>
+        推送告警到护工手表
+        <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+          推送到的告警会在护工手表上弹窗。存在平台上，按机构设置，和网页端系统设置、告警事件类型里的是同一份
+        </span>
+      </h2>
+      <div className="settings-popup-row">
+        <Radio.Group
+          optionType="button"
+          value={mode}
+          disabled={mode === undefined || !!busy}
+          onChange={(e) => changeMode(e.target.value)}
+          options={[
+            { value: "off", label: "不推送" },
+            { value: "all", label: "全部告警" },
+            { value: "some", label: "指定告警" },
+          ]}
+        />
+        {(mode === undefined || busy === "mode") && <Spin size="small" />}
+        {mode === "some" && <span className="muted">已选 {picked.length} 种{picked.length ? "" : "，勾选前不会推送"}</span>}
+      </div>
+      {mode === "some" && (
+        <>
+          {ALERT_GROUPS.map((g) => {
+            const list = types.filter((t) => t.alertTypeGroup === g.value);
+            if (!list.length) return null;
+            return (
+              <div key={g.value} className="settings-popup-row" style={{ alignItems: "flex-start" }}>
+                <span className="muted" style={{ width: 64, flex: "none" }}>{g.label}</span>
+                <span style={{ flex: 1, display: "flex", flexWrap: "wrap", rowGap: 6 }}>
+                  {list.map((t) => (
+                    <Checkbox key={t.id} checked={watchPushOn(cfg.get(t.id))} disabled={!!busy || !cfg.has(t.id)} onChange={(e) => toggle(t, e.target.checked)}>
+                      {t.alertTypeName}
+                      {busy === t.id && <Spin size="small" style={{ marginLeft: 4 }} />}
+                    </Checkbox>
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+          <p className="muted small" style={{ margin: "4px 0 0" }}>
+            勾选后这类告警的微信、App、Web 弹窗推送改成按它自己的设置（勾选时照机构设置抄一份，所以现在没变化）；之后在平台改机构的这几项，勾选的告警不会跟着变，取消勾选后恢复跟机构走。
+          </p>
+        </>
+      )}
+    </div>
   );
 }

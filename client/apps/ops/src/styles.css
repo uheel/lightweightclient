@@ -767,3 +767,21 @@
 .settings-popup h2 { flex-wrap: wrap; }
 .settings-popup-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .settings-popup-row > .muted { font-size: 12px; }
+
+/* 菜单设置：模块图标（点开换图标）、链接模块的网址 */
+.settings-icon-btn { width: 26px; height: 26px; border: 0; border-radius: 6px; display: grid; place-items: center; font-size: 14px; cursor: pointer; padding: 0; }
+.settings-icon-btn:hover { box-shadow: 0 0 0 2px rgba(59, 79, 216, 0.25); }
+.settings-modules .settings-name.is-wide { grid-column: 1 / -1; }
+.settings-name .settings-link-url { flex: 0 1 420px; min-width: 160px; }
+.icon-picker { width: 296px; }
+.icon-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.icon-picker-grid button { height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 16px; color: #3A3F58; cursor: pointer; }
+.icon-picker-grid button:hover { background: #F1F2F7; }
+.icon-picker-grid button.active { border-color: #3B4FD8; color: #3B4FD8; background: #EEF1FF; }
+.icon-picker-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #F0F1F5; }
+/* 上传的图标图片：和内置图标一样大 */
+.item-icon-img { width: 1em; height: 1em; object-fit: contain; display: block; }
+
+/* 链接模块：标签里显示第三方网址，网页占满整个标签 */
+.link-page { height: 100%; display: flex; flex-direction: column; }
+.link-frame { flex: 1; width: 100%; border: 0; background: #fff; }

@@ -13,7 +13,7 @@ import { pool } from "../scenes/plan";
  * 安装、布置、场景、体检这几步要逐台取心跳、场景、逐间取布置，和诊断页同一套数据，用 rooms/check.ts 的规则判断。
  */
 
-export type NavKey = "devices" | "spaces" | "rooms" | "scenes" | "members" | "caregivers" | "alerts" | "processTypes" | "realtime" | "settings" | "dataWall";
+export type NavKey = "devices" | "spaces" | "rooms" | "scenes" | "members" | "caregivers" | "alerts" | "processTypes" | "realtime" | "settings" | "menus" | "dataWall";
 export type StepKey = "spaces" | "radars" | "install" | "layout" | "scenes" | "members" | "diagnose";
 
 /** 跳过去后要打开、闪一下的那一项：设备详情里的位置（见 rooms/qinglan.ts 的 Spot），beds 是楼宇页房间面板的床位 */

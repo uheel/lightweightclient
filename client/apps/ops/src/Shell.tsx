@@ -8,6 +8,7 @@ import SpacesPage from "./pages/SpacesPage";
 import AlertsPage from "./pages/AlertsPage";
 import ProcessTypesPage from "./pages/ProcessTypesPage";
 import SettingsPage from "./pages/SettingsPage";
+import MenuSettingsPage from "./pages/MenuSettingsPage";
 import DataWallPage from "./pages/DataWallPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
@@ -20,13 +21,13 @@ import { usePopupSettings } from "./alerts/popupSettings";
 import { GuideProvider } from "./guide/GuideContext";
 import { GuideBanner, GuideDrawer, GuideEntry } from "./guide/GuideDrawer";
 import type { NavKey } from "./guide/steps";
-import { WorkTabs, type TabKey } from "./workspace/WorkTabs";
+import { WorkTabs, type OpenKey, type TabKey } from "./workspace/WorkTabs";
 import { Workbench } from "./workspace/Workbench";
-import type { ModuleKey } from "./workspace/modules";
-import { useNames } from "./workspace/names";
+import { isLink, useNames, type ItemKey } from "./workspace/names";
+import LinkPage from "./pages/LinkPage";
 import "./workspace/workspace.css";
 
-const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "dataWall"];
+const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall"];
 
 async function logout() {
   await stopRealtime();
@@ -38,7 +39,7 @@ async function logout() {
 export default function Shell({ s }: { s: Session }) {
   const { notification } = App.useApp();
   /** 打开的模块标签（顺序即标签顺序）；每次登录都从工作台开始 */
-  const [tabs, setTabs] = useState<NavKey[]>([]);
+  const [tabs, setTabs] = useState<OpenKey[]>([]);
   const [active, setActive] = useState<TabKey>("home");
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
@@ -62,7 +63,7 @@ export default function Shell({ s }: { s: Session }) {
   const names = useNames();
 
   /** 打开模块：已经开着就切过去；监控不开标签，打开全屏监控模式 */
-  const go = useCallback((k: ModuleKey | "home") => {
+  const go = useCallback((k: ItemKey | "home") => {
     if (k === "monitor") return setMonitor(true);
     if (k !== "home") setTabs((t) => (t.includes(k) ? t : [...t, k]));
     setActive(k);
@@ -75,7 +76,7 @@ export default function Shell({ s }: { s: Session }) {
 
   /** 关掉的是当前标签时，切到它左边的那个（没有就回工作台） */
   const close = useCallback(
-    (keys: NavKey[]) => {
+    (keys: OpenKey[]) => {
       const i = active === "home" ? -1 : tabs.indexOf(active);
       const rest = tabs.filter((t) => !keys.includes(t));
       setTabs(rest);
@@ -108,7 +109,7 @@ export default function Shell({ s }: { s: Session }) {
 
   return (
     // 以 orgId 作为 key：切换机构时快速开始的检查结果和本机记录都换成新机构的
-    <GuideProvider key={s.orgId} orgId={s.orgId} nav={active} onNav={go}>
+    <GuideProvider key={s.orgId} orgId={s.orgId} nav={isLink(active) ? "home" : active} onNav={go}>
       <AppShell
         appName="Radar Config"
         org={<OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
@@ -156,12 +157,20 @@ export default function Shell({ s }: { s: Session }) {
                   ) : k === "processTypes" ? (
                     <ProcessTypesPage />
                   ) : k === "settings" ? (
-                    <SettingsPage />
+                    <SettingsPage onOpen={go} />
+                  ) : k === "menus" ? (
+                    <MenuSettingsPage />
                   ) : k === "dataWall" ? (
                     <DataWallPage />
                   ) : (
                     <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
                   )}
+                </div>
+              ))}
+              {/* 菜单设置里新增的链接模块，按打开先后 */}
+              {tabs.filter(isLink).map((k) => (
+                <div key={k} className="tab-pane" hidden={active !== k}>
+                  <LinkPage k={k} active={active === k && !monitor} />
                 </div>
               ))}
             </div>

@@ -3,6 +3,21 @@ import { GROUPS, MODULES, type GroupKey, type ModuleKey } from "./modules";
 
 /** 类别：内置的（GroupKey）或系统设置里新增的（"c" 开头） */
 export type GroupId = GroupKey | `c${string}`;
+/** 菜单设置里新增的链接模块（"l" 开头）：点开在标签里显示第三方网址 */
+export type LinkKey = `l${string}`;
+/** 工作台上的一个方块：内置模块或链接模块 */
+export type ItemKey = ModuleKey | LinkKey;
+
+export interface LinkDef {
+  key: LinkKey;
+  /** 名字存原样 */
+  title: string;
+  url: string;
+  group: GroupId;
+}
+
+/** 模块的图标：内置图标库里的一个（按名字），或上传的图片（缩成小图的 data URL） */
+export type IconChoice = { builtin: string } | { image: string };
 
 /** 工作台类别、模块的自定义名字、模块所在类别和新增的类别（系统设置里改），存在本机，所有机构共用；没改的用默认 */
 export interface CustomNames {
@@ -16,14 +31,18 @@ export interface CustomNames {
   added?: { key: `c${string}`; title: string }[];
   /** 工作台上不显示的类别、模块 */
   hiddenGroups?: GroupId[];
-  hiddenModules?: ModuleKey[];
-  /** 默认隐藏的类别里，系统设置中打开显示的 */
-  shownGroups?: GroupKey[];
+  hiddenModules?: ItemKey[];
+  /** 默认隐藏的模块里，系统设置中打开显示的 */
+  shownModules?: ModuleKey[];
+  /** 换了图标的模块（内置和链接模块都行） */
+  icons?: Partial<Record<ItemKey, IconChoice>>;
+  /** 新增的链接模块，按新增先后 */
+  links?: LinkDef[];
 }
 
-/** 默认不在工作台上显示的类别（系统管理：从右上角用户菜单进系统设置） */
-const DEFAULT_HIDDEN: GroupKey[] = ["system"];
-const defaultHidden = (k: string): k is GroupKey => (DEFAULT_HIDDEN as string[]).includes(k);
+/** 默认不在工作台上显示的模块（系统设置：从右上角用户菜单进） */
+const DEFAULT_HIDDEN: ModuleKey[] = ["settings"];
+const defaultHidden = (k: string): k is ModuleKey => (DEFAULT_HIDDEN as string[]).includes(k);
 
 /** 模块的默认类别；模块按这个顺序排，换到别的类别后也按它排在新类别里 */
 const HOME = new Map<ModuleKey, GroupKey>(GROUPS.flatMap((g) => g.keys.map((k) => [k, g.key] as const)));
@@ -34,6 +53,11 @@ const KEY = "ops.customNames";
 export const NAME_MAX = 12;
 /** 新增类别没起名字时显示的名字 */
 const UNTITLED = "未命名类别";
+const UNTITLED_LINK = "未命名链接";
+/** 链接模块所在的类别被删了就放到这里 */
+const LINK_FALLBACK: GroupKey = "system";
+
+export const isLink = (k: string): k is LinkKey => /^l[0-9a-z]+$/.test(k);
 
 const isAdded = (k: string): k is `c${string}` => !GROUPS.some((g) => g.key === k);
 /** 所有类别的默认顺序：内置的在前，新增的按新增先后排在后面 */
@@ -75,7 +99,8 @@ export function setName(kind: "groups" | "modules", key: string, name: string) {
 }
 
 /** 把模块换到另一个类别；换回默认类别就去掉记录 */
-export function setGroup(k: ModuleKey, g: GroupId) {
+export function setGroup(k: ItemKey, g: GroupId) {
+  if (isLink(k)) return updateLink(k, { group: g });
   const moves = { ...current.moves };
   if (HOME.get(k) === g) delete moves[k];
   else moves[k] = g;
@@ -89,7 +114,35 @@ export function addGroup(title = "") {
   return key;
 }
 
-/** 删掉新增的类别：换到这个类别里的模块回到各自原来的类别 */
+/** 新增一个链接模块，放在指定类别的最后；返回它的 key */
+export function addLink(group: GroupId) {
+  const key = `l${Date.now().toString(36)}` as const;
+  save({ ...current, links: [...(current.links ?? []), { key, title: "", url: "", group }] });
+  return key;
+}
+
+export function updateLink(key: LinkKey, patch: Partial<Omit<LinkDef, "key">>) {
+  save({ ...current, links: current.links?.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
+}
+
+/** 删掉链接模块，连同它的图标和隐藏记录 */
+export function removeLink(key: LinkKey) {
+  const links = current.links?.filter((l) => l.key !== key);
+  const icons = { ...current.icons };
+  delete icons[key];
+  const hiddenModules = current.hiddenModules?.filter((k) => k !== key);
+  save({ ...current, links: links?.length ? links : undefined, icons, hiddenModules: hiddenModules?.length ? hiddenModules : undefined });
+}
+
+/** 换图标；undefined = 恢复默认 */
+export function setIcon(k: ItemKey, icon: IconChoice | undefined) {
+  const icons = { ...current.icons };
+  if (icon) icons[k] = icon;
+  else delete icons[k];
+  save({ ...current, icons });
+}
+
+/** 删掉新增的类别：换到这个类别里的模块回到各自原来的类别（链接模块放到系统管理） */
 export function removeGroup(key: GroupId) {
   if (!isAdded(key)) return;
   const moves = Object.fromEntries(Object.entries(current.moves ?? {}).filter(([, g]) => g !== key));
@@ -122,19 +175,20 @@ export function moveGroup(g: GroupId, by: -1 | 1) {
 
 /** 隐藏 / 取消隐藏一个类别或模块（系统设置也能隐藏，右上角用户菜单里总能进） */
 export function toggleHidden(kind: "hiddenGroups" | "hiddenModules", key: string) {
-  // 默认隐藏的类别反过来记"打开显示"
-  if (kind === "hiddenGroups" && defaultHidden(key)) {
-    const shown = current.shownGroups ?? [];
+  // 默认隐藏的模块反过来记"打开显示"
+  if (kind === "hiddenModules" && defaultHidden(key)) {
+    const shown = current.shownModules ?? [];
     const next = shown.includes(key) ? shown.filter((k) => k !== key) : [...shown, key];
-    return save({ ...current, shownGroups: next.length ? next : undefined });
+    return save({ ...current, shownModules: next.length ? next : undefined });
   }
   const list: string[] = current[kind] ?? [];
   const next = list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
   save({ ...current, [kind]: next.length ? next : undefined });
 }
 
+/** 名字、类别、隐藏和图标恢复默认；链接模块留着（只把它们的图标去掉，所在类别被删了的放到系统管理） */
 export function resetNames() {
-  save({});
+  save({ links: current.links });
 }
 
 function subscribe(f: () => void) {
@@ -154,12 +208,24 @@ export function useNames() {
     const g = n.moves?.[k];
     return g && all.includes(g) ? g : HOME.get(k)!;
   };
-  const layout = groupOrder(n).map((g) => ({ key: g, keys: ORDER.filter((k) => groupOf(k) === g) }));
-  const groupHidden = (g: GroupId) => (defaultHidden(g) ? !n.shownGroups?.includes(g) : !!n.hiddenGroups?.includes(g));
-  const moduleHidden = (k: ModuleKey) => !!n.hiddenModules?.includes(k);
+  const link = (k: LinkKey) => n.links?.find((l) => l.key === k);
+  const groupOfItem = (k: ItemKey): GroupId => {
+    if (!isLink(k)) return groupOf(k);
+    const g = link(k)?.group;
+    return g && all.includes(g) ? g : LINK_FALLBACK;
+  };
+  // 每个类别里内置模块在前，链接模块按新增先后排在后面
+  const layout = groupOrder(n).map((g) => ({
+    key: g,
+    keys: [...ORDER.filter((k) => groupOf(k) === g), ...(n.links ?? []).map((l) => l.key).filter((k) => groupOfItem(k) === g)] as ItemKey[],
+  }));
+  const groupHidden = (g: GroupId) => !!n.hiddenGroups?.includes(g);
+  const moduleHidden = (k: ItemKey) => (defaultHidden(k) ? !n.shownModules?.includes(k) : !!n.hiddenModules?.includes(k));
   return {
     raw: n,
-    groupOf,
+    groupOf: groupOfItem,
+    link,
+    icon: (k: ItemKey) => n.icons?.[k],
     layout,
     desk: layout
       .filter((g) => !groupHidden(g.key))
@@ -170,6 +236,19 @@ export function useNames() {
     group: (k: GroupId) =>
       isAdded(k) ? n.added?.find((g) => g.key === k)?.title.trim() || UNTITLED : n.groups?.[k]?.trim() || GROUPS.find((g) => g.key === k)!.title,
     isAdded,
-    module: (k: ModuleKey) => n.modules?.[k]?.trim() || MODULES[k].label,
+    module: (k: ItemKey) => (isLink(k) ? link(k)?.title.trim() || UNTITLED_LINK : n.modules?.[k]?.trim() || MODULES[k].label),
   };
+}
+
+/** 链接模块填的网址：没写 http(s):// 的补 https://；填得不像网址返回 undefined */
+export function linkUrl(raw: string | undefined): string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  const full = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  try {
+    const u = new URL(full);
+    return u.hostname.includes(".") || u.hostname === "localhost" ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -5,13 +5,13 @@ import dayjs from "dayjs";
 import type { Session } from "@radar/core";
 import { useGuide } from "../guide/GuideContext";
 import { MODULES, type ModuleKey } from "./modules";
-import { useNames } from "./names";
-
+import { isLink, linkUrl, useNames, type ItemKey } from "./names";
+import { ItemIcon, itemStyle } from "./icons";
 /**
  * 登录后的工作台：按工作类型分组的模块方块，右侧是快速开始里还没完成的事。
  * 数字都来自快速开始的检查结果（楼栋、房间、雷达），工作台自己不请求平台。
  */
-export function Workbench({ s, unread, onOpen }: { s: Session; unread: number; onOpen: (k: ModuleKey) => void }) {
+export function Workbench({ s, unread, onOpen }: { s: Session; unread: number; onOpen: (k: ItemKey) => void }) {
   const g = useGuide();
   const d = g?.data;
   const names = useNames();
@@ -54,15 +54,17 @@ export function Workbench({ s, unread, onOpen }: { s: Session; unread: number; o
             <h2>{names.group(grp.key)}</h2>
             <div className="desk-tiles">
               {grp.keys.map((k) => {
-                const m = MODULES[k];
+                const m = itemStyle(k);
+                // 链接模块不写说明（网址也不显示），只在没填好网址时提醒
+                const desc = isLink(k) ? (linkUrl(names.link(k)?.url) ? undefined : "还没填网址") : (stats[k] ?? MODULES[k].desc);
                 return (
                   <button key={k} className={`desk-tile${k === "monitor" ? " dark wide" : ""}`} onClick={() => onOpen(k)}>
                     <span className="desk-tile-icon" style={{ background: m.tint, color: m.color }}>
-                      {m.icon}
+                      <ItemIcon k={k} />
                     </span>
                     <b>{names.module(k)}</b>
-                    <small>{stats[k] ?? m.desc}</small>
-                    {flags[k] && <span className="desk-flag">{flags[k]}</span>}
+                    {desc && <small>{desc}</small>}
+                    {!isLink(k) && flags[k] && <span className="desk-flag">{flags[k]}</span>}
                   </button>
                 );
               })}
