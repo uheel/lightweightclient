@@ -544,14 +544,19 @@ function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<Ret
   }
 
   // 坐标系：AIO 等设备的历史点已是房间坐标；FallSense 等设备是相对雷达的坐标，需要按安装配置换算。
-  // 每台设备分别试两种解释，落在房间内的点多的那种即为正确的坐标系。
+  // 每台设备分别试两种解释，落在这台雷达探测范围（布置里的 container，房间坐标）内的点多的那种即为正确的坐标系。
+  // 不能按整个房间算：户型图是整套公寓时，换算后以雷达为轴翻过去的点也还在房间里，会选错
+  // （2026-10-27 SWASTIK ENTERPRISES 的 Bathroom：直接画 1335 个点里 1332 个在房间内、3 个略出左墙，换算后翻到雷达下方的卧室里却 1335 个都在，结果方向反了）。
+  // 布置里没有探测范围尺寸时退回按房间算
   const bg = detail.background ?? {};
-  const inRoom = (x: number, y: number) => x >= -30 && y >= -30 && x <= (bg.width ?? 0) + 30 && y <= (bg.height ?? 0) + 30;
   const converted: string[] = [];
   for (const sn of sns) {
     const qc = qcBySn[sn];
     const pts = [...trackMap.values()].filter((tr) => tr.sn === sn).flatMap((tr) => tr.points);
     if (!qc || !pts.length) continue;
+    const c = qc.container;
+    const area = c.width && c.height ? { x0: c.x, y0: c.y, x1: c.x + c.width, y1: c.y + c.height } : { x0: 0, y0: 0, x1: bg.width ?? 0, y1: bg.height ?? 0 };
+    const inRoom = (x: number, y: number) => x >= area.x0 - 30 && y >= area.y0 - 30 && x <= area.x1 + 30 && y <= area.y1 + 30;
     let rawIn = 0;
     let xfIn = 0;
     for (let i = 0; i < pts.length; i += Math.max(1, Math.floor(pts.length / 2000))) {
