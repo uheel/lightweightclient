@@ -231,6 +231,11 @@ export default function AlarmTab({
   const bed = ranges.find((r) => r.type === 5);
   // 能选的区域：干扰区不算
   const areaOptions = ranges.filter((r) => r.type !== 3).map((r) => ({ value: r.index, label: rangeText(r) }));
+  /** 区域编号显示成"区域 1 · 监护床"，区域划分里没有的只写编号 */
+  const areaLabel = (i: number) => {
+    const r = ranges.find((x) => x.index === i);
+    return r ? rangeText(r) : `区域 ${i}`;
+  };
 
   /** 已开启场景里的区域编号 */
   const areaOf = (s?: Scene) => {
@@ -481,12 +486,12 @@ export default function AlarmTab({
                       }}
                     />
                   ) : on && curArea !== undefined ? (
-                    <span className="small muted">
-                      {layout?.ranges.find((x) => x.index === curArea) ? rangeText(layout.ranges.find((x) => x.index === curArea)!) : `区域 ${curArea}`}
-                    </span>
+                    <span className="small muted">{areaLabel(curArea)}</span>
                   ) : a.need && a.area !== undefined ? (
-                    <span className="small muted">{bed && a.area === bed.index ? `监护床 = 区域 ${bed.index}` : `区域 ${a.area}`}</span>
+                    <span className="small muted">{areaLabel(a.area)}</span>
                   ) : null}
+                </div>
+                <div className="alarm-call">
                   {callable && (
                     <Tooltip title={callFor(r) ? undefined : callBlock(r)}>
                       <Checkbox

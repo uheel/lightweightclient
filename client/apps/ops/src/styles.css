@@ -430,6 +430,9 @@
 .alarm-name b { font-weight: 600; }
 .alarm-name small { flex-basis: 100%; color: #8A8FA8; font-size: 12px; }
 .alarm-area { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 拨紧急号码 / 语音留言固定在开关左边，各行右对齐成一列 */
+.alarm-call { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.alarm-area:empty, .alarm-call:empty { display: none; }
 /* 控件多的（久坐：时长 + 区域）放到第二行 */
 .alarm-list li.wide .alarm-area { order: 1; flex: 1 1 100%; }
 
