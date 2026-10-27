@@ -3,7 +3,7 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Sele
 import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { createSlave, getAllDevices, getDeviceTypeMap, getRadarTypes, type AnyDevice, type PropertyDef } from "../api/device";
-import ZoneCanvas, { CUSTOM, limitOf, type CanvasRoom, type DmRect, type ZoneType } from "./ZoneCanvas";
+import ZoneCanvas, { CUSTOM, limitOf, surroundsRadar, type CanvasRoom, type DmRect, type ZoneType } from "./ZoneCanvas";
 import { SPACE_TYPE } from "../api/scene";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 
@@ -610,7 +610,12 @@ const QL_RADAR_AREA: Structured = {
     }
     if (!cfg) dragWhy.push('平台上没有这台雷达的安装配置：在"安装设置"分组点"读取本组"从设备读回；设备上也没有的话，先填好安装方式、高度和监测范围下发');
     const outside = bound ? list.filter((a) => a.type !== 3 && !inside(a, bound)) : [];
-    const err = check(list) ?? (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
+    const err =
+      check(list) ??
+      (bound && !surroundsRadar(installType, bound)
+        ? "监测范围没有把雷达围在里面：每条边都要在雷达那一侧、离雷达至少 10 厘米，拖一下虚线框的边就会自动纠正"
+        : undefined) ??
+      (outside.length ? `${outside.map((a) => `${a.id} ${areaName(a.type)}`).join("、")} 超出了监测范围，设备会忽略超出的部分` : undefined);
     return (
       <div className="st st-area">
         <div className="zc-facing">

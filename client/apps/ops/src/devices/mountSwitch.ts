@@ -1,4 +1,4 @@
-import { fromPlan, limitOf, toPlan, type DmRect } from "./ZoneCanvas";
+import { aroundRadar, fromPlan, limitOf, toPlan, type DmRect } from "./ZoneCanvas";
 
 /**
  * 顶装 / 侧装互换：区域在房间里的位置不变（床、门都没动），只是雷达换了地方、换了坐标系。
@@ -124,7 +124,7 @@ export function switchMount(opts: {
   let bound = limit;
   if (room && radar) {
     const walls = toDevice(to, nf, -radar.x / 10, -radar.y / 10, (room.width - radar.x) / 10, (room.height - radar.y) / 10);
-    bound = intersect(limit, walls) ?? limit;
+    bound = aroundRadar(to, intersect(limit, walls) ?? limit);
   }
   return { config: [to, height, ...corners(bound), mode], area: newArea, facing: nf, radar, notes };
 }
@@ -150,31 +150,24 @@ export function clampRadar(installType: number, facing: number, room: MountRoom,
 
 /**
  * 挪雷达（装法、朝向不变）：雷达装的地方不一定是墙的中间 / 房间正中，卧室、卫生间各一台时要放到实际位置。
- * 区域在房间里不动，相对雷达反着挪；监测范围原来是"最大范围裁到墙内"的，按新位置重新裁，用户自己缩过的保持在房间里的位置不变。
+ * 区域跟着雷达一起挪（设备坐标不变）：区域是相对雷达画的，雷达只往前方等固定方向探测，区域留在房间里不动的话，
+ * 挪远了相对雷达的坐标会变成负值（跑到雷达背后）、超出探测范围。
+ * 监测范围原来是"最大范围裁到墙内"的，按新位置重新裁；用户自己调过的也跟着雷达一起挪。
  */
 export function moveRadarTo(opts: { config: number[]; area: number[][]; facing: number; room: MountRoom; to: { x: number; y: number } }): { config: number[]; area: number[][]; radar: { x: number; y: number } } {
   const { config, area, facing, room } = opts;
   const it = config[0] === SIDE ? SIDE : TOP;
   const mode = config[10] ?? 15;
   const radar = clampRadar(it, facing, room, opts.to);
-  // 区域相对雷达的位移（平面图，分米）
-  const dx = (room.radar.x - radar.x) / 10;
-  const dy = (room.radar.y - radar.y) / 10;
-  const shift = (x0: number, y0: number, x1: number, y1: number) => {
-    const [ax, ay] = toPlan(it, facing, x0, y0);
-    const [bx, by] = toPlan(it, facing, x1, y1);
-    return toDevice(it, facing, Math.min(ax, bx) + dx, Math.min(ay, by) + dy, Math.max(ax, bx) + dx, Math.max(ay, by) + dy);
-  };
-  const newArea = area.map((row) => [row[0]!, row[1]!, ...corners(shift(row[2]!, row[3]!, row[8]!, row[9]!))]);
 
   const limit = limitOf(it, mode);
   const wallsAt = (r: { x: number; y: number }) => toDevice(it, facing, -r.x / 10, -r.y / 10, (room.width - r.x) / 10, (room.height - r.y) / 10);
   const xs = [config[2]!, config[4]!, config[6]!, config[8]!];
   const ys = [config[3]!, config[5]!, config[7]!, config[9]!];
   const cur: DmRect = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
-  const dflt = intersect(limit, wallsAt(room.radar)) ?? limit;
+  const dflt = aroundRadar(it, intersect(limit, wallsAt(room.radar)) ?? limit);
   const isDefault = cur.x0 === dflt.x0 && cur.x1 === dflt.x1 && cur.y0 === dflt.y0 && cur.y1 === dflt.y1;
-  const fresh = intersect(limit, wallsAt(radar)) ?? limit;
-  const bound = isDefault ? fresh : (intersect(limit, shift(cur.x0, cur.y0, cur.x1, cur.y1)) ?? fresh);
-  return { config: [config[0]!, config[1]!, ...corners(bound), mode, ...config.slice(11)], area: newArea, radar };
+  // 雷达挪到墙角时裁到墙内的范围可能在雷达一侧没有宽度，至少留 10 cm；之前存的范围没把雷达围住的也顺手纠正
+  const bound = aroundRadar(it, isDefault ? (intersect(limit, wallsAt(radar)) ?? limit) : cur);
+  return { config: [config[0]!, config[1]!, ...corners(bound), mode, ...config.slice(11)], area, radar };
 }

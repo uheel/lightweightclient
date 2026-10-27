@@ -1,6 +1,6 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button, Input, Select } from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
 import type { PlanElement, RoomDesign } from "../api/room";
 import RoomBackdrop from "../rooms/RoomBackdrop";
 
@@ -67,6 +67,17 @@ export function limitOf(installType: number, mode: number): DmRect {
   return { x0: -30, x1: 30, y0: 0, y1: 40 };
 }
 
+/**
+ * 监测范围要把雷达围在里面：雷达往两边（顶装是四周）探测，每条边都在雷达的那一侧、离雷达至少 1 分米（10 cm），
+ * 不能整个跑到雷达一边去（右边界变成负值）。侧装的近边就是雷达所在的墙（y0 = 0），不用管
+ */
+export function aroundRadar(installType: number, b: DmRect): DmRect {
+  return { x0: Math.min(b.x0, -1), x1: Math.max(b.x1, 1), y0: installType === 1 ? b.y0 : Math.min(b.y0, -1), y1: Math.max(b.y1, 1) };
+}
+
+/** 监测范围有没有把雷达围在里面（见 aroundRadar） */
+export const surroundsRadar = (installType: number, b: DmRect) => JSON.stringify(aroundRadar(installType, b)) === JSON.stringify(b);
+
 type EdgeX = "x0" | "x1";
 type EdgeY = "y0" | "y1";
 /** 拖的是哪条边 / 哪个角（用设备坐标的边表示） */
@@ -85,6 +96,23 @@ interface Drag {
   /** 按下时的矩形 */
   rect: DmRect;
 }
+
+/** 平移：按下时的指针位置、视图（中心按房间坐标，分米）和每个屏幕像素是多少分米 */
+interface Pan {
+  x: number;
+  y: number;
+  c: [number, number];
+  w: number;
+  h: number;
+  u: number;
+  moved: boolean;
+  /** 在空白处点一下（没拖）时取消选中；空格 / 中键平移不取消 */
+  deselect: boolean;
+}
+
+/** 缩放比例范围（相对"适应"） */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 20;
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const fmtM = (dm: number) => (dm / 10).toFixed(1).replace(/\.0$/, "");
@@ -213,6 +241,18 @@ export default function ZoneCanvas({
   /** 拖雷达时：按下时的视图范围和雷达位置（cm）。拖动中视图跟着雷达平移，房间在屏幕上不动 */
   const [radarView, setRadarView] = useState<{ view: [number, number, number, number]; radar0: { x: number; y: number } }>();
   const canMoveRadar = !!room && !!onRadar && !disabled;
+  const stageRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<Pan>(undefined);
+  const [panning, setPanning] = useState(false);
+  /** 按住空格时拖哪里都是平移 */
+  const [space, setSpace] = useState(false);
+  /**
+   * 缩放 / 平移后的视图：中心按房间坐标（分米，房间左上角为原点）存，拖雷达后房间在屏幕上不动；没有房间时就是平面图坐标。
+   * 换装法、换墙、房间尺寸变了就回到"适应"
+   */
+  const [viewState, setViewState] = useState<{ key: string; cx: number; cy: number; w: number; h: number }>();
+  const viewKey = `${installType}-${facing}-${room?.width}-${room?.height}`;
+  const view = viewState?.key === viewKey ? viewState : undefined;
   const P = (x: number, y: number) => toPlan(installType, facing, x, y);
   const planRect = (r: DmRect) => {
     const [ax, ay] = P(r.x0, r.y0);
@@ -244,12 +284,58 @@ export default function ZoneCanvas({
   const fitY = Math.min(...all.map((r) => r.y)) - pad;
   const fitW = Math.max(...all.map((r) => r.x + r.w)) + pad - fitX;
   const fitH = Math.max(...all.map((r) => r.y + r.h)) + pad - fitY;
-  // 拖雷达时画面以雷达为原点，雷达挪了多少视图就反着平移多少，房间看起来不动；松手后再按新位置重新取景
+  // 平面图坐标以雷达为原点，房间坐标 = 平面图坐标 + off
+  const off: [number, number] = room ? [room.radar.x / 10, room.radar.y / 10] : [0, 0];
+  const cur = view ?? { cx: fitX + fitW / 2 + off[0], cy: fitY + fitH / 2 + off[1], w: fitW, h: fitH };
+  // 拖雷达时画面以雷达为原点，雷达挪了多少视图就反着平移多少，房间看起来不动；松手后再按新位置重新取景（缩放过的话保持缩放后的视图）
   const [vx, vy, vw, vh] =
     radarView && room
       ? [radarView.view[0] - (room.radar.x - radarView.radar0.x) / 10, radarView.view[1] - (room.radar.y - radarView.radar0.y) / 10, radarView.view[2], radarView.view[3]]
-      : [fitX, fitY, fitW, fitH];
+      : [cur.cx - off[0] - cur.w / 2, cur.cy - off[1] - cur.h / 2, cur.w, cur.h];
+  const zoom = fitW / vw;
+  // 文字、拖柄、雷达都按视图大小算，缩放后在屏幕上大小不变
   const fs = Math.max(vw, vh) / 42;
+
+  /** 以平面图上的点 p（默认视图中心）为中心缩放 k 倍，p 在屏幕上不动 */
+  function zoomBy(k: number, p?: [number, number]) {
+    const z0 = fitW / cur.w;
+    const z = clamp(z0 * k, ZOOM_MIN, ZOOM_MAX);
+    k = z / z0;
+    if (Math.abs(k - 1) < 1e-6) return;
+    const px = p ? p[0] + off[0] : cur.cx;
+    const py = p ? p[1] + off[1] : cur.cy;
+    setViewState({ key: viewKey, cx: px + (cur.cx - px) / k, cy: py + (cur.cy - py) / k, w: cur.w / k, h: cur.h / k });
+  }
+
+  // 滚轮缩放：按住 Ctrl（触控板双指捏合也是）随时可以；点过画布（焦点在画布上）后直接滚轮。没点过时滚轮照常滚动页面。
+  // React 的 onWheel 是 passive 的，不能 preventDefault，所以自己挂原生监听；处理函数每次渲染更新，读到最新的视图
+  const wheelRef = useRef<(e: WheelEvent) => void>(undefined);
+  wheelRef.current = (e: WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey && document.activeElement !== stageRef.current) return;
+    e.preventDefault();
+    const m = svgRef.current?.getScreenCTM();
+    if (!m) return;
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    zoomBy(Math.exp(-dy * 0.0015), [p.x, p.y]);
+  };
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const h = (e: WheelEvent) => wheelRef.current?.(e);
+    stage.addEventListener("wheel", h, { passive: false });
+    return () => stage.removeEventListener("wheel", h);
+  }, []);
+
+  /** 开始平移（拖空白处、监测范围框里，或空格 / 中键拖任何地方） */
+  function beginPan(e: React.PointerEvent, deselect: boolean) {
+    const svg = svgRef.current;
+    const m = svg?.getScreenCTM();
+    if (!svg || !m) return;
+    e.preventDefault();
+    svg.setPointerCapture?.(e.pointerId);
+    panRef.current = { x: e.clientX, y: e.clientY, c: [cur.cx, cur.cy], w: cur.w, h: cur.h, u: 1 / m.a, moved: false, deselect };
+  }
 
   /** 指针位置 → 平面图坐标（分米） */
   function planPoint(e: React.PointerEvent): [number, number] {
@@ -279,6 +365,16 @@ export default function ZoneCanvas({
   }
 
   function move(e: React.PointerEvent) {
+    const pan = panRef.current;
+    if (pan) {
+      const dx = e.clientX - pan.x;
+      const dy = e.clientY - pan.y;
+      if (!pan.moved && Math.hypot(dx, dy) < 3) return;
+      if (!pan.moved) setPanning(true);
+      pan.moved = true;
+      setViewState({ key: viewKey, cx: pan.c[0] - dx * pan.u, cy: pan.c[1] - dy * pan.u, w: pan.w, h: pan.h });
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     const [px, py] = planPoint(e);
@@ -294,7 +390,7 @@ export default function ZoneCanvas({
     if (drag.target.kind === "bound") {
       if (!drag.grip || !onBound) return;
       const [dx, dy] = fromPlan(installType, facing, px, py);
-      const b = resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), limit);
+      const b = aroundRadar(installType, resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), limit));
       if (JSON.stringify(b) !== JSON.stringify(bound)) onBound(b);
       return;
     }
@@ -314,6 +410,13 @@ export default function ZoneCanvas({
   }
 
   function end() {
+    const pan = panRef.current;
+    if (pan) {
+      if (!pan.moved && pan.deselect) setSel(undefined);
+      panRef.current = undefined;
+      setPanning(false);
+      return;
+    }
     dragRef.current = undefined;
     setDragging(false);
     setRadarView(undefined);
@@ -367,6 +470,11 @@ export default function ZoneCanvas({
   }
 
   function onKey(e: React.KeyboardEvent) {
+    if (e.key === " ") {
+      e.preventDefault();
+      if (!space) setSpace(true);
+      return;
+    }
     if (sel?.kind === "radar" && canMoveRadar) {
       const step = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[e.key];
       if (!step) return;
@@ -416,22 +524,40 @@ export default function ZoneCanvas({
           </Button>
         ))}
       </div>
-      <div className="zc-stage" tabIndex={0} onKeyDown={onKey}>
+      <div
+        ref={stageRef}
+        className="zc-stage"
+        tabIndex={0}
+        onKeyDown={onKey}
+        onKeyUp={(e) => e.key === " " && setSpace(false)}
+        onBlur={() => setSpace(false)}
+        // 区域、拖柄的 pointerdown 里 preventDefault 了，浏览器不会再把焦点给画布，这里手动给，方向键和滚轮缩放才能用
+        onPointerDownCapture={() => stageRef.current?.focus({ preventScroll: true })}
+        // 中键按下默认会进入自动滚动
+        onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+      >
         <svg
           ref={svgRef}
           viewBox={`${vx} ${vy} ${vw} ${vh}`}
           preserveAspectRatio="xMidYMid meet"
-          className={dragging ? "dragging" : ""}
+          className={dragging || panning ? "dragging" : space ? "pan-ready" : ""}
+          style={{ "--zc-z": zoom } as React.CSSProperties}
           onPointerMove={move}
           onPointerUp={end}
           onPointerCancel={end}
-          onPointerDown={() => setSel(undefined)}
+          // 空格 / 中键：在捕获阶段先拦下来平移，不让区域、雷达收到
+          onPointerDownCapture={(e) => {
+            if (e.button !== 1 && !(space && e.button === 0)) return;
+            e.stopPropagation();
+            beginPan(e, false);
+          }}
+          onPointerDown={(e) => e.button === 0 && beginPan(e, true)}
           role="application"
           aria-label="区域画布"
         >
           <defs>
             <pattern id={gridId} x={0} y={0} width={10} height={10} patternUnits="userSpaceOnUse">
-              <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#E6E8F0" strokeWidth={0.15} />
+              <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#E6E8F0" strokeWidth={0.15 / zoom} />
             </pattern>
           </defs>
           <rect x={vx} y={vy} width={vw} height={vh} fill={`url(#${gridId})`} />
@@ -473,9 +599,11 @@ export default function ZoneCanvas({
                 width={pb.w}
                 height={pb.h}
                 className={`zc-bound${sel?.kind === "bound" ? " on" : ""}`}
+                // 监测范围框里本身不能拖（只能拖边），按住拖就是平移
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   setSel({ kind: "bound" });
+                  if (e.button === 0) beginPan(e, false);
                 }}
               />
               {onBound && !disabled && sel?.kind === "bound" && grips(bound!, { kind: "bound" }, boundGrip)}
@@ -530,6 +658,14 @@ export default function ZoneCanvas({
             );
           })()}
         </svg>
+        <div className="zc-zoom" onPointerDown={(e) => e.stopPropagation()}>
+          <Button size="small" type="text" icon={<ZoomOutOutlined />} title="缩小" disabled={zoom <= ZOOM_MIN + 1e-6} onClick={() => zoomBy(1 / 1.4)} />
+          <span className="zc-zoom-pct">{Math.round(zoom * 100)}%</span>
+          <Button size="small" type="text" icon={<ZoomInOutlined />} title="放大" disabled={zoom >= ZOOM_MAX - 1e-6} onClick={() => zoomBy(1.4)} />
+          <Button size="small" type="text" title="缩放到能看到整个房间和所有区域" disabled={!view} onClick={() => setViewState(undefined)}>
+            适应
+          </Button>
+        </div>
       </div>
       <div className="zc-info">
         {selZone ? (
@@ -582,7 +718,7 @@ export default function ZoneCanvas({
         ) : sel?.kind === "radar" && room ? (
           <span>
             雷达离左墙 {fmtM(room.radar.x / 10)} 米、离上墙 {fmtM(room.radar.y / 10)} 米
-            {canMoveRadar ? (installType === 1 ? "，沿墙拖动或按方向键（10 厘米）挪到实际安装的位置" : "，拖动或按方向键（10 厘米）挪到实际安装的位置") : ""}。区域在房间里的位置不变
+            {canMoveRadar ? (installType === 1 ? "，沿墙拖动或按方向键（10 厘米）挪到实际安装的位置" : "，拖动或按方向键（10 厘米）挪到实际安装的位置") : ""}。区域和监测范围跟着雷达一起挪
           </span>
         ) : sel?.kind === "bound" && pb ? (
           <span>
@@ -592,6 +728,7 @@ export default function ZoneCanvas({
         ) : (
           <span className="muted">
             拖动区域移动，选中后拖边角调大小，方向键微调 10 厘米；点虚线框可以调监测范围{canMoveRadar ? "；雷达也能拖，放到实际安装的位置" : ""}。
+            {"Ctrl + 滚轮缩放（点过画布后直接滚轮），拖空白处、按住空格或中键拖动平移。"}
           </span>
         )}
       </div>

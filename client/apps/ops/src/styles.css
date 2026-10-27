@@ -552,27 +552,31 @@
 .zc { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .zc-tools { display: flex; flex-wrap: wrap; gap: 6px; }
 .zc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 1px; }
-.zc-stage { width: 100%; height: 460px; background: #FAFBFD; border: 1px solid #E8EAF2; border-radius: 6px; outline: none; }
+.zc-stage { position: relative; width: 100%; height: 460px; background: #FAFBFD; border: 1px solid #E8EAF2; border-radius: 6px; outline: none; }
 .zc-stage:focus-visible { border-color: #3B4FD8; }
 .zc-stage svg { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; }
 .zc-stage svg.dragging { cursor: grabbing; }
+.zc-stage svg.pan-ready, .zc-stage svg.pan-ready * { cursor: grab !important; }
+.zc-zoom { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; gap: 2px; padding: 2px; background: rgba(255, 255, 255, 0.92); border: 1px solid #E8EAF2; border-radius: 6px; }
+.zc-zoom-pct { min-width: 44px; text-align: center; font-size: 12px; color: #5B6078; font-variant-numeric: tabular-nums; }
 /* 区域画布下面的家具：淡一些，不挡区域，也不接鼠标 */
 .zc-backdrop { opacity: 0.75; pointer-events: none; }
 /* 门不透明：门洞要完全盖住墙 */
 .zc-doors { pointer-events: none; }
 .zc-doors .fur-arc, .zc-doors .fur-leaf { opacity: 0.75; }
-.zc-limit { fill: none; stroke: #C9CCDA; stroke-width: 0.15; stroke-dasharray: 0.6 0.6; }
-.zc-room { fill: none; stroke: #1B1D2E; stroke-width: 0.45; pointer-events: none; }
-.zc-bound { fill: #3B4FD8; fill-opacity: 0.04; stroke: #3B4FD8; stroke-width: 0.2; stroke-dasharray: 1 0.6; cursor: pointer; }
-.zc-bound.on { stroke-width: 0.35; fill-opacity: 0.07; }
+/* 线宽按缩放比例（svg 上的 --zc-z）缩小，放大后在屏幕上粗细不变 */
+.zc-limit { fill: none; stroke: #C9CCDA; stroke-width: calc(0.15px / var(--zc-z, 1)); stroke-dasharray: calc(0.6px / var(--zc-z, 1)); }
+.zc-room { fill: none; stroke: #1B1D2E; stroke-width: calc(0.45px / var(--zc-z, 1)); pointer-events: none; }
+.zc-bound { fill: #3B4FD8; fill-opacity: 0.04; stroke: #3B4FD8; stroke-width: calc(0.2px / var(--zc-z, 1)); stroke-dasharray: calc(1px / var(--zc-z, 1)) calc(0.6px / var(--zc-z, 1)); cursor: pointer; }
+.zc-bound.on { stroke-width: calc(0.35px / var(--zc-z, 1)); fill-opacity: 0.07; }
 /* 床位监护模式下监护床的可画范围（红色虚线，和监护床同色系），不接收鼠标 */
 .zc-bedrange { pointer-events: none; }
 .zc-bedrange rect { fill: #E5484D; fill-opacity: 0.04; stroke: #E5484D; }
 .zc-bedrange text { fill: #B4232A; opacity: 0.8; }
 .zc-zone { cursor: grab; }
-.zc-grip { fill: #fff; stroke: #3B4FD8; stroke-width: 0.15; cursor: pointer; }
-.zc-label { font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 0.35px; pointer-events: none; }
-.zc-radar { fill: #111441; stroke: #fff; stroke-width: 0.2; pointer-events: none; }
+.zc-grip { fill: #fff; stroke: #3B4FD8; stroke-width: calc(0.15px / var(--zc-z, 1)); cursor: pointer; }
+.zc-label { font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: calc(0.35px / var(--zc-z, 1)); pointer-events: none; }
+.zc-radar { fill: #111441; stroke: #fff; stroke-width: calc(0.2px / var(--zc-z, 1)); pointer-events: none; }
 .zc-radar.movable { pointer-events: auto; cursor: grab; }
 .zc-radar.movable:hover, .zc-radar.on { fill: #3B4FD8; }
 .zc svg.dragging .zc-radar.movable { cursor: grabbing; }
@@ -581,7 +585,7 @@
 .zc-id { font-size: 12px; color: #5B6078; background: #F1F2F7; border-radius: 4px; padding: 1px 6px; }
 
 .zc-facing { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
-.zc-look { stroke: #111441; stroke-width: 0.35; stroke-linecap: round; pointer-events: none; }
+.zc-look { stroke: #111441; stroke-width: calc(0.35px / var(--zc-z, 1)); stroke-linecap: round; pointer-events: none; }
 
 /* 更改安装位置：连带处理的选项 */
 .move-plan { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
