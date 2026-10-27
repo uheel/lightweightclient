@@ -17,7 +17,13 @@ export interface CustomNames {
   /** 工作台上不显示的类别、模块 */
   hiddenGroups?: GroupId[];
   hiddenModules?: ModuleKey[];
+  /** 默认隐藏的类别里，系统设置中打开显示的 */
+  shownGroups?: GroupKey[];
 }
+
+/** 默认不在工作台上显示的类别（系统管理：从右上角用户菜单进系统设置） */
+const DEFAULT_HIDDEN: GroupKey[] = ["system"];
+const defaultHidden = (k: string): k is GroupKey => (DEFAULT_HIDDEN as string[]).includes(k);
 
 /** 模块的默认类别；模块按这个顺序排，换到别的类别后也按它排在新类别里 */
 const HOME = new Map<ModuleKey, GroupKey>(GROUPS.flatMap((g) => g.keys.map((k) => [k, g.key] as const)));
@@ -114,12 +120,14 @@ export function moveGroup(g: GroupId, by: -1 | 1) {
   save({ ...current, order: isDefault ? undefined : order });
 }
 
-/** 系统设置不能隐藏（藏了就没处改回来），所在的类别也不能隐藏 */
-export const UNHIDEABLE: ModuleKey = "settings";
-
-/** 隐藏 / 取消隐藏一个类别或模块 */
+/** 隐藏 / 取消隐藏一个类别或模块（系统设置也能隐藏，右上角用户菜单里总能进） */
 export function toggleHidden(kind: "hiddenGroups" | "hiddenModules", key: string) {
-  if (key === UNHIDEABLE) return;
+  // 默认隐藏的类别反过来记"打开显示"
+  if (kind === "hiddenGroups" && defaultHidden(key)) {
+    const shown = current.shownGroups ?? [];
+    const next = shown.includes(key) ? shown.filter((k) => k !== key) : [...shown, key];
+    return save({ ...current, shownGroups: next.length ? next : undefined });
+  }
   const list: string[] = current[kind] ?? [];
   const next = list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
   save({ ...current, [kind]: next.length ? next : undefined });
@@ -147,7 +155,7 @@ export function useNames() {
     return g && all.includes(g) ? g : HOME.get(k)!;
   };
   const layout = groupOrder(n).map((g) => ({ key: g, keys: ORDER.filter((k) => groupOf(k) === g) }));
-  const groupHidden = (g: GroupId) => !!n.hiddenGroups?.includes(g);
+  const groupHidden = (g: GroupId) => (defaultHidden(g) ? !n.shownGroups?.includes(g) : !!n.hiddenGroups?.includes(g));
   const moduleHidden = (k: ModuleKey) => !!n.hiddenModules?.includes(k);
   return {
     raw: n,

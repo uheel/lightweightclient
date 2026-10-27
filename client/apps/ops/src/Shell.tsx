@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { App } from "antd";
-import { LogoutOutlined } from "@ant-design/icons";
+import { LogoutOutlined, SettingOutlined } from "@ant-design/icons";
 import { AppShell, OrgPicker, session, signOut, stopRealtime, useRealtime, type RealtimeEvent, type Session } from "@radar/core";
 import DevicesPage from "./pages/DevicesPage";
 import RoomsPage from "./pages/RoomsPage";
@@ -23,6 +23,7 @@ import type { NavKey } from "./guide/steps";
 import { WorkTabs, type TabKey } from "./workspace/WorkTabs";
 import { Workbench } from "./workspace/Workbench";
 import type { ModuleKey } from "./workspace/modules";
+import { useNames } from "./workspace/names";
 import "./workspace/workspace.css";
 
 const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "dataWall"];
@@ -58,6 +59,7 @@ export default function Shell({ s }: { s: Session }) {
     [notification],
   );
   const rt = useRealtime(s.orgId, onEvent);
+  const names = useNames();
 
   /** 打开模块：已经开着就切过去；监控不开标签，打开全屏监控模式 */
   const go = useCallback((k: ModuleKey | "home") => {
@@ -117,6 +119,8 @@ export default function Shell({ s }: { s: Session }) {
           menu: [
             { key: "info", label: s.userName, disabled: true },
             { type: "divider" },
+            // 工作台上可以把系统设置隐藏，这里总能进
+            { key: "settings", label: names.module("settings"), icon: <SettingOutlined />, onClick: () => go("settings") },
             { key: "logout", label: "退出登录", icon: <LogoutOutlined />, danger: true, onClick: logout },
           ],
         }}

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Button, Checkbox, Input, Popconfirm, Select, Switch } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
 import { GROUPS, MODULES } from "../workspace/modules";
-import { addGroup, moveGroup, NAME_MAX, removeGroup, resetNames, setGroup, setName, toggleHidden, UNHIDEABLE, useNames, type GroupId } from "../workspace/names";
+import { addGroup, moveGroup, NAME_MAX, removeGroup, resetNames, setGroup, setName, toggleHidden, useNames, type GroupId } from "../workspace/names";
 import { ModuleName } from "../workspace/ModuleName";
 import { ALERT_GROUPS } from "../api/device";
 import { setPopupSettings, usePopupSettings } from "../alerts/popupSettings";
@@ -10,7 +10,7 @@ import { setPopupSettings, usePopupSettings } from "../alerts/popupSettings";
 /** 系统设置：告警弹窗开关；工作台的类别和模块：改名字、换类别、调顺序、新增空类别、隐藏（存在本机，工作台和标题栏标签立即生效） */
 export default function SettingsPage() {
   const names = useNames();
-  const changed = [names.raw.groups, names.raw.modules, names.raw.moves, names.raw.order, names.raw.added, names.raw.hiddenGroups, names.raw.hiddenModules].some((m) => Object.keys(m ?? {}).length);
+  const changed = [names.raw.groups, names.raw.modules, names.raw.moves, names.raw.order, names.raw.added, names.raw.hiddenGroups, names.raw.hiddenModules, names.raw.shownGroups].some((m) => Object.keys(m ?? {}).length);
   const groupOptions = names.layout.map((g) => ({ value: g.key, label: names.group(g.key) }));
 
   return (
@@ -23,7 +23,7 @@ export default function SettingsPage() {
         <h2>
           类别和模块
           <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-            改工作台上类别和模块方块、标题栏标签显示的名字，调整类别顺序，新增类别，把模块换到别的类别，或在工作台上隐藏，只存在这台电脑上；名字清空恢复默认
+            改工作台上类别和模块方块、标题栏标签显示的名字，调整类别顺序，新增类别，把模块换到别的类别，或在工作台上隐藏（系统设置隐藏后从右上角用户菜单进），只存在这台电脑上；名字清空恢复默认
           </span>
           <Button size="small" icon={<PlusOutlined />} onClick={() => addGroup()} style={{ marginLeft: "auto" }}>
             新增类别
@@ -48,7 +48,6 @@ export default function SettingsPage() {
             >
               <HideButton
                 hidden={names.groupHidden(grp.key)}
-                locked={grp.keys.includes(UNHIDEABLE) ? "系统设置所在的类别不能隐藏" : undefined}
                 onClick={() => toggleHidden("hiddenGroups", grp.key)}
               />
               <Button size="small" type="text" icon={<ArrowUpOutlined />} title="上移" disabled={i === 0} onClick={() => moveGroup(grp.key, -1)} />
@@ -75,7 +74,7 @@ export default function SettingsPage() {
                     // 类别隐藏了，里面的模块也看不到
                     hidden={names.moduleHidden(k) || names.groupHidden(grp.key)}
                   >
-                    <HideButton hidden={names.moduleHidden(k)} locked={k === UNHIDEABLE ? "系统设置不能隐藏" : undefined} onClick={() => toggleHidden("hiddenModules", k)} />
+                    <HideButton hidden={names.moduleHidden(k)} onClick={() => toggleHidden("hiddenModules", k)} />
                     <Select
                       size="small"
                       className="settings-name-group"
