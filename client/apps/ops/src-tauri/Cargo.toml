@@ -1,6 +1,6 @@
 [package]
 name = "radar-ops"
-version = "0.1.17"
+version = "0.1.18"
 description = "雷达平台运维端"
 authors = ["lihu"]
 edition = "2024"
