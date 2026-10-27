@@ -3,7 +3,7 @@ import { computeSteps, isSmallOrg, loadGuideData, type GuideData, type NavKey, t
 
 /**
  * 快速开始的状态：检查结果、抽屉开关、"下一步"提示条，以及从清单跳到页面时要选中的东西（focus）。
- * 按机构记在本机：不再自动弹出、上次完成了哪几步、是否全部完成（全部完成后侧栏入口收成帮助图标，进来也不再检查）。
+ * 按机构记在本机：不再自动弹出、上次完成了哪几步、是否全部完成（全部完成后标题栏入口收成帮助，进来也不再检查）。
  */
 
 interface Saved {
@@ -41,6 +41,8 @@ export interface Banner {
 }
 
 interface GuideState {
+  /** 最近一次检查取到的楼栋、房间、雷达等（工作台的数字也用它，不另外请求） */
+  data?: GuideData;
   steps: Step[];
   /** 已完成几步（没检查过的步骤用上次记下的结果） */
   doneCount: number;
@@ -85,7 +87,7 @@ export function useGuideFocus(nav: NavKey, handle: (f: Focus) => void) {
   }, [f, handled, nav]);
 }
 
-export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; nav: NavKey; onNav: (k: NavKey) => void; children: ReactNode }) {
+export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; nav: NavKey | "home"; onNav: (k: NavKey) => void; children: ReactNode }) {
   const [saved, setSaved] = useState<Saved>(() => readSaved(orgId));
   const [data, setData] = useState<GuideData>();
   const [loading, setLoading] = useState(false);
@@ -206,6 +208,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
   }, [steps, saved.done]);
 
   const value: GuideState = {
+    data,
     steps,
     doneCount,
     complete: !!saved.complete,

@@ -718,3 +718,15 @@
 .sip-actions { margin-left: auto; display: flex; gap: 6px; font-weight: 400; }
 .sip-kv { grid-template-columns: 88px 1fr; row-gap: 10px; padding: 12px 14px; border: 1px solid #EEF0F5; border-radius: 8px; background: #FAFBFD; }
 .sip-kv dd { display: flex; align-items: center; gap: 4px; }
+
+/* 系统设置：类别和模块名称 */
+.settings-names h2 { flex-wrap: wrap; }
+.settings-group { padding: 10px 0; border-top: 1px solid #F0F1F6; }
+.settings-group:first-of-type { border-top: 0; }
+.settings-modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 8px 16px; margin: 8px 0 0 28px; }
+.settings-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-name-tag { flex: none; width: 28px; text-align: center; font-size: 12px; color: #5B6078; }
+.settings-name .ant-input-affix-wrapper { width: 180px; flex: none; }
+.settings-name-def { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-name-group { width: 104px; flex: none; }
+.settings-empty { font-size: 12px; }

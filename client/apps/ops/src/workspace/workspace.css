@@ -1,0 +1,66 @@
+/* 标题栏里的标签栏 + 工作台 */
+.work-tabs { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: flex-end; gap: 2px; overflow: hidden; padding-top: 6px; }
+.work-tabs-fill { flex: 1; align-self: stretch; }
+.work-tab {
+  flex: 0 1 auto; min-width: 72px; max-width: 168px; height: 34px; display: flex; align-items: center; gap: 6px;
+  padding: 0 6px 0 12px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: #5B6078;
+  font: inherit; font-size: 13px; cursor: default; position: relative; margin-bottom: -1px;
+}
+.work-tab.home { flex: none; min-width: 0; padding: 0 12px; }
+.work-tab:hover { background: rgba(17, 20, 65, 0.05); color: #1B1D2E; }
+/* 选中的标签和内容区同色，下边盖住标题栏的分隔线，看起来连在一起 */
+.work-tab { border: 1px solid transparent; border-bottom: 0; }
+.work-tab.active { background: #F6F7FB; color: #1B1D2E; font-weight: 500; border-color: #E8EAF2; height: 35px; }
+.work-tab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-tab-close {
+  width: 18px; height: 18px; flex: none; margin-left: auto; border-radius: 4px; display: grid; place-items: center;
+  font-size: 10px; color: #8A8FA8; opacity: 0;
+}
+.work-tab:hover .work-tab-close, .work-tab.active .work-tab-close { opacity: 1; }
+.work-tab-close:hover { background: rgba(17, 20, 65, 0.1); color: #1B1D2E; }
+.has-mica .work-tab.active { border-color: rgba(17, 20, 65, 0.07); }
+
+.tab-pane { height: 100%; }
+.tab-pane[hidden] { display: none; }
+
+/* 工作台 */
+.desk { max-width: 1240px; margin: 0 auto; padding: 24px 28px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; }
+.desk-hello h1 { margin: 0 0 2px; font-size: 20px; font-weight: 600; }
+.desk-group { margin-top: 22px; }
+.desk-group h2, .desk-side h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: #8A8FA8; letter-spacing: 0.5px; }
+.desk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.desk-tile {
+  position: relative; min-height: 116px; padding: 14px 14px 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  background: #fff; border: 1px solid #E8EAF2; border-radius: 10px; font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.desk-tile:hover { border-color: #C3CBF5; box-shadow: 0 4px 14px rgba(17, 20, 65, 0.08); transform: translateY(-1px); }
+.desk-tile b { font-size: 14px; font-weight: 600; }
+.desk-tile small { margin-top: auto; font-size: 12px; color: #8A8FA8; }
+.desk-tile-icon { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 18px; }
+.desk-tile.wide { grid-column: span 2; }
+.desk-tile.dark { background: linear-gradient(135deg, #1A1F5C, #111441); border-color: #111441; color: #fff; }
+.desk-tile.dark small { color: #A8AEDB; }
+.desk-tile.dark .desk-tile-icon { background: rgba(255, 255, 255, 0.12) !important; color: #B7C3FF !important; }
+.desk-flag { position: absolute; top: 12px; right: 12px; font-size: 11px; padding: 0 7px; line-height: 18px; border-radius: 9px; background: #FDECEC; color: #B4232A; }
+.desk-opened { position: absolute; right: 12px; bottom: 12px; font-size: 11px; color: #3B4FD8; }
+
+.desk-side { padding-top: 64px; }
+.desk-todo { background: #fff; border: 1px solid #E8EAF2; border-radius: 10px; overflow: hidden; margin-bottom: 6px; }
+.desk-todo button {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 0; border-bottom: 1px solid #EEF0F5;
+  background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.desk-todo button:last-child { border-bottom: 0; }
+.desk-todo button:hover { background: #F6F7FC; }
+.desk-todo .dot.todo { background: #E0A100; }
+.desk-todo .dot.doing { background: #3B4FD8; }
+.desk-todo-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.desk-todo-text b { font-weight: 500; }
+.desk-todo-text small { font-size: 12px; color: #8A8FA8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-todo-empty { padding: 18px 12px; text-align: center; color: #8A8FA8; display: flex; gap: 6px; justify-content: center; align-items: center; }
+
+@media (max-width: 960px) {
+  .desk { grid-template-columns: minmax(0, 1fr); }
+  .desk-side { padding-top: 0; }
+}

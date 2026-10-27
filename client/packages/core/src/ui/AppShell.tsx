@@ -25,6 +25,8 @@ export function AppShell<K extends string>({
   active,
   onNav,
   railFooter,
+  tabs,
+  actions,
   children,
 }: {
   appName: string;
@@ -39,6 +41,10 @@ export function AppShell<K extends string>({
   onNav?: (key: K) => void;
   /** 模块栏底部的额外入口（自己带 margin-top: auto 贴底） */
   railFooter?: ReactNode;
+  /** 标题栏里机构选择后面的标签栏（占满中间的空白，空白处仍可拖动窗口） */
+  tabs?: ReactNode;
+  /** 标题栏右侧、实时状态前面的额外按钮 */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   // 版本号和检查更新统一加在用户菜单里（放在"退出登录"之前），两个客户端不用各自处理
@@ -56,7 +62,8 @@ export function AppShell<K extends string>({
           {appName}
         </div>
         {org}
-        <span style={{ flex: 1, alignSelf: "stretch" }} data-tauri-drag-region />
+        {tabs ?? <span style={{ flex: 1, alignSelf: "stretch" }} data-tauri-drag-region />}
+        {actions}
         <span className="shell-live" title={live.title}>
           <i style={{ background: live.color }} />
           {live.text}

@@ -24,7 +24,7 @@ function readPos(): Pos {
 
 /**
  * 快速开始清单：浮在页面右上角的小窗，按住标题栏可以拖到别处。
- * 收起后只剩一条进度和下一步，点一下展开；关掉后点侧栏入口再打开。跳到页面操作时清单还开着。
+ * 收起后只剩一条进度和下一步，点一下展开；关掉后点标题栏的入口再打开。跳到页面操作时清单还开着。
  */
 export function GuideDrawer({ orgName }: { orgName: string }) {
   const g = useGuide();
@@ -112,7 +112,7 @@ export function GuideDrawer({ orgName }: { orgName: string }) {
   const total = steps.length || 7;
   const checked = g.checkedAt ? `${dayjs(g.checkedAt).fromNow()}检查` : "";
   const style = { right: shown.right, top: shown.top };
-  const closeTitle = "关闭（点侧栏的快速开始再打开）";
+  const closeTitle = "关闭（点标题栏的快速开始再打开）";
 
   if (g.mini)
     return (
@@ -236,33 +236,35 @@ function StepRow({ step: s, n, open, showAll, onToggle, onShowAll }: { step: Ste
 }
 
 /** 进度环：中间是已完成几步 */
-function ProgressRing({ done, total }: { done: number; total: number }) {
+function ProgressRing({ done, total, size = 30 }: { done: number; total: number; size?: number }) {
   const r = 13;
   const c = 2 * Math.PI * r;
   return (
-    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <circle cx="16" cy="16" r={r} fill="none" stroke="#E4E6EF" strokeWidth="3" />
       <circle cx="16" cy="16" r={r} fill="none" stroke="#3B4FD8" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(done / total) * c} ${c}`} transform="rotate(-90 16 16)" />
-      <text x="16" y="20" textAnchor="middle" fontSize="11" fill="currentColor">
-        {done}
-      </text>
+      {size >= 24 && (
+        <text x="16" y="20" textAnchor="middle" fontSize="11" fill="currentColor">
+          {done}
+        </text>
+      )}
     </svg>
   );
 }
 
-/** 侧栏底部的入口：进度环 + "快速开始"；全部完成后收成"帮助"。清单收成一条时点它是展开 */
-export function GuideRailEntry() {
+/** 标题栏右侧的入口：小进度环 + "快速开始 n/7"；全部完成后收成"帮助"。清单收成一条时点它是展开 */
+export function GuideEntry() {
   const g = useGuide();
   if (!g) return null;
   const total = g.steps.length || 7;
   return (
     <button
-      className={`rail-item guide-rail${g.open ? " active" : ""}`}
+      className={`guide-entry${g.open ? " active" : ""}`}
       onClick={() => (g.open && g.mini ? g.setMini(false) : g.setOpen(!g.open))}
       title={g.complete ? "快速开始（已全部完成）" : `快速开始：${g.doneCount} / ${total} 已完成`}
     >
-      {g.complete ? <QuestionCircleOutlined /> : <ProgressRing done={g.doneCount} total={total} />}
-      {g.complete ? "帮助" : "快速开始"}
+      {g.complete ? <QuestionCircleOutlined /> : <ProgressRing done={g.doneCount} total={total} size={18} />}
+      {g.complete ? "帮助" : `快速开始 ${g.doneCount}/${total}`}
     </button>
   );
 }
