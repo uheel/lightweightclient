@@ -583,7 +583,7 @@ const QL_RADAR_AREA: Structured = {
       onChange(writeAreas(next));
       if (named && setPlan) setPlan({ zones: metaOf(next) });
     };
-    // 拖雷达到实际安装的位置（不一定是墙的中间 / 房间正中）：区域在房间里不动，监测范围按新位置裁到墙内，下发成功后连雷达位置一起写回房间布置
+    // 拖雷达到实际安装的位置（不一定是墙的中间 / 房间正中）：区域跟着雷达一起挪，默认的监测范围按新位置裁到墙内，下发成功后连雷达位置一起写回房间布置
     const room = plan.room;
     const moveRadar = (to: { x: number; y: number }) => {
       if (!cfg || !setOther || !setPlan || !room) return;

@@ -95,6 +95,8 @@ interface Drag {
   start: [number, number];
   /** 按下时的矩形 */
   rect: DmRect;
+  /** 拖监测范围时：按下时的区域（那时已经重叠的区域之间推的时候不算重叠） */
+  zones?: CanvasZone[];
 }
 
 /** 平移：按下时的指针位置、视图（中心按房间坐标，分米）和每个屏幕像素是多少分米 */
@@ -261,8 +263,8 @@ export default function ZoneCanvas({
   };
   const typeOf = (t: number) => types.find((x) => x.value === t);
   const bedRange = bedRangeOf(installType, mode ?? 0);
-  const zoneLimit = (z: { type: number }) => {
-    const base = z.type === 3 ? limit : bound ?? limit;
+  const zoneLimit = (z: { type: number }, b = bound) => {
+    const base = z.type === 3 ? limit : (b ?? limit);
     // 监护床再限制在可画范围里；和监测范围没有交集时（监测范围被拖得很小）就只按可画范围
     return z.type === 5 && bedRange ? (intersect(base, bedRange) ?? bedRange) : base;
   };
@@ -273,6 +275,26 @@ export default function ZoneCanvas({
   const blockerOf = (i: number, start: DmRect) => {
     const others = zones.filter((q, j) => j !== i && !overlaps(q, start));
     return (r: DmRect) => others.some((q) => overlaps(q, r));
+  };
+  /**
+   * 监测范围从 prev 改成 b 后，原来在范围里的区域被边推着走（大小不变；干扰区不受监测范围限制，原来就在范围外的旧配置也不动）。
+   * 区域比范围还大、或推完和别的区域重叠（按下时就重叠的不算）时推不动，返回 undefined，范围停在推得动的位置
+   */
+  const pushInto = (prev: DmRect, b: DmRect, list: CanvasZone[], start: CanvasZone[]) => {
+    const out: CanvasZone[] = [];
+    for (const z of list) {
+      const was = zoneLimit(z, prev);
+      if (z.x0 < was.x0 || z.x1 > was.x1 || z.y0 < was.y0 || z.y1 > was.y1) {
+        out.push(z);
+        continue;
+      }
+      const lim = zoneLimit(z, b);
+      if (z.x1 - z.x0 > lim.x1 - lim.x0 || z.y1 - z.y0 > lim.y1 - lim.y0) return undefined;
+      out.push({ ...z, ...moveInside(z, 0, 0, lim) });
+    }
+    for (let i = 0; i < out.length; i++)
+      for (let j = i + 1; j < out.length; j++) if (overlaps(out[i]!, out[j]!) && !(start[i] && start[j] && overlaps(start[i]!, start[j]!))) return undefined;
+    return out;
   };
   const overlapPairs = zones.flatMap((a, i) => zones.slice(i + 1).flatMap((b) => (overlaps(a, b) ? [`${a.id} 和 ${b.id}`] : [])));
 
@@ -360,7 +382,7 @@ export default function ZoneCanvas({
       return;
     }
     const rect = target.kind === "zone" ? zones[target.index]! : bound!;
-    dragRef.current = { target, grip, start: planPoint(e), rect };
+    dragRef.current = { target, grip, start: planPoint(e), rect, zones: target.kind === "bound" ? zones : undefined };
     setDragging(true);
   }
 
@@ -390,8 +412,23 @@ export default function ZoneCanvas({
     if (drag.target.kind === "bound") {
       if (!drag.grip || !onBound) return;
       const [dx, dy] = fromPlan(installType, facing, px, py);
-      const b = aroundRadar(installType, resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), limit));
+      const target = aroundRadar(installType, resizeInside(drag.rect, drag.grip, Math.round(dx), Math.round(dy), limit));
+      // 被拖的边一格（10 cm）一格地挪，每一格都把区域推进新范围里；推不动就停在上一格
+      let b = aroundRadar(installType, bound ?? drag.rect);
+      let zs = zones;
+      for (const e of [drag.grip.x, drag.grip.y]) {
+        if (!e) continue;
+        const step = Math.sign(target[e] - b[e]);
+        while (b[e] !== target[e]) {
+          const n = { ...b, [e]: b[e] + step };
+          const pushed = pushInto(b, n, zs, drag.zones ?? zones);
+          if (!pushed) break;
+          b = n;
+          zs = pushed;
+        }
+      }
       if (JSON.stringify(b) !== JSON.stringify(bound)) onBound(b);
+      if (JSON.stringify(zs) !== JSON.stringify(zones)) onZones(zs);
       return;
     }
     const i = drag.target.index;
