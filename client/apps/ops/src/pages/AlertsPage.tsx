@@ -4,10 +4,11 @@ import type { TableColumnsType } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import { ALERT_GROUPS, getAlertPage, type OpsAlert } from "../api/device";
+import { ProcessDialog } from "../alerts/ProcessDialog";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
 
-/** 告警查询（只读）。运维默认看设备离线、安装姿态两类 */
+/** 告警记录：查询和处理（单条或勾选后批量）。运维默认看设备离线、安装姿态两类 */
 export default function AlertsPage() {
   const { message } = App.useApp();
   const [group, setGroup] = useState(3);
@@ -16,9 +17,13 @@ export default function AlertsPage() {
   const [page, setPage] = useState({ current: 1, pageSize: 50 });
   const [data, setData] = useState<{ list: OpsAlert[]; total: number }>({ list: [], total: 0 });
   const [loading, setLoading] = useState(false);
+  /** 勾选的未处理告警；翻页、换筛选后清空 */
+  const [selected, setSelected] = useState<OpsAlert[]>([]);
+  const [processing, setProcessing] = useState<OpsAlert[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setSelected([]);
     try {
       setData(
         await getAlertPage({
@@ -42,7 +47,7 @@ export default function AlertsPage() {
   const reset = () => setPage((p) => ({ ...p, current: 1 }));
 
   const columns: TableColumnsType<OpsAlert> = [
-    { title: "时间", dataIndex: "createdAt", width: 160, render: (v) => <span className="mono">{v}</span> },
+    { title: "告警时间", dataIndex: "createdAt", width: 160, render: (v) => <span className="mono">{v}</span> },
     { title: "告警", dataIndex: "alertTypeName", width: 160, ellipsis: true },
     { title: "设备", width: 220, ellipsis: true, render: (_, r) => [r.deviceName, r.sn].filter(Boolean).join(" · ") || "—" },
     { title: "位置", ellipsis: true, render: (_, r) => [r.buildingName, r.floorName, r.roomName].filter(Boolean).join(" / ") || "—" },
@@ -51,19 +56,27 @@ export default function AlertsPage() {
       width: 80,
       render: (_, r) => (r.alertStatus === 1 ? <Tag color="error">未处理</Tag> : <Tag>已处理</Tag>),
     },
+    // 处理时间由平台在提交处理时记下（processAt）
+    { title: "处理时间", dataIndex: "processAt", width: 160, render: (v, r) => (r.alertStatus === 2 && v ? <span className="mono">{v}</span> : "—") },
     {
       title: "处理",
       width: 220,
       ellipsis: true,
       render: (_, r) =>
-        r.alertStatus === 2 ? [r.alertProcessTypeName, r.processingResults, r.processByUserName].filter(Boolean).join(" · ") : "—",
+        r.alertStatus === 2 ? (
+          [r.alertProcessTypeName, r.processingResults, r.processByUserName].filter(Boolean).join(" · ")
+        ) : (
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setProcessing([r])}>
+            处理
+          </Button>
+        ),
     },
   ];
 
   return (
     <div className="page">
       <div className="page-head">
-        <h1>告警</h1>
+        <h1>告警记录</h1>
         <Segmented
           options={ALERT_GROUPS}
           value={group}
@@ -97,7 +110,11 @@ export default function AlertsPage() {
             }}
           />
           <Button icon={<ReloadOutlined />} onClick={load} title="刷新" />
-          <span className="muted small">告警处理请在网页端进行，这里只查看</span>
+          {selected.length > 0 && (
+            <Button type="primary" onClick={() => setProcessing(selected)}>
+              批量处理 {selected.length} 条
+            </Button>
+          )}
         </div>
         <Table<OpsAlert>
           rowKey="id"
@@ -106,6 +123,11 @@ export default function AlertsPage() {
           columns={columns}
           dataSource={data.list}
           tableLayout="fixed"
+          rowSelection={{
+            selectedRowKeys: selected.map((r) => r.id),
+            onChange: (_, rows) => setSelected(rows),
+            getCheckboxProps: (r) => ({ disabled: r.alertStatus !== 1 }),
+          }}
           pagination={{
             ...page,
             total: data.total,
@@ -115,6 +137,7 @@ export default function AlertsPage() {
           }}
         />
       </div>
+      <ProcessDialog alerts={processing} onClose={() => setProcessing(null)} onDone={load} />
     </div>
   );
 }

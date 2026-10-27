@@ -134,8 +134,6 @@
 .mon-alert.mid .mon-alert-top b { color: var(--m-warn-text); }
 .mon-alert.done { opacity: 0.75; }
 .mon-alert.done .mon-alert-where { color: var(--m-muted); }
-.mon-process-what { margin: 0 0 12px; color: var(--m-text-2); }
-
 /* 窄窗口：告警流挪到下面 */
 @media (max-width: 1180px) {
   .mon-body { flex-wrap: wrap; overflow-y: auto; }

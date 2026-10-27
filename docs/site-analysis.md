@@ -344,7 +344,8 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `GET /api/alert/pages?filter[alertTypeGroup]=&filter[alertStatus]=1` | 未处理告警（`alertStatus` 1 = 未处理，2 = 已处理），两个筛选都实测可用 |
 | `GET /api/alert?id=` | 告警详情 |
 | `GET /api/alert-process-type/options` | 处理类型 `[{label, value}]`，由各机构自定义（李虎：有效告警 / 家属/护士走动 / 误报 / 其他） |
-| `PUT /api/alert/process` | 处理告警：`{id, alertProcessTypeId, processingResults}`；批量处理是 `PUT /api/alert/batch-process {ids, ...}` |
+| `PUT /api/alert/process` | 处理告警：`{id, alertProcessTypeId, processingResults}`；批量处理是 `PUT /api/alert/batch-process {ids, alertProcessTypeId, processingResults}`（网页端告警列表勾选后的"批量处理"，2026-10-27 从前端代码确认是 PUT） |
+| `/api/alert-process-type`（通用 CRUD） | 告警处理类型的增删改查（网页端 告警管理 › 处理类型 `p__Alert__AlertProcessTypePage`）：`pages` 列表，`POST`/`PUT {id?, alertProcessTypeName（必填）, sortOrder（排序值，从小到大）, description（备注 ≤200）}`，`DELETE ?id=`。**列表 `pages` 不返回 `description`**（只有 id、名称、sortOrder、创建 / 更新时间和人），备注要 `GET ?id=` 取详情，编辑时不先取详情就会把备注清掉（2026-10-27 李虎机构实测增改删和单条 / 批量处理都正常）。另有 `POST /api/alert-process-type/sync-localization`（同步国际化词条，运维端不用）。运维端 工作台 › 告警管理 › 处理类型 照这个做 |
 
 ### 实时推送（SignalR /hub/message）
 - 订阅设备：`send("AddToGroupAsync", "sn1,sn1:radar,sn2,…")`（每台设备两个频道，用逗号拼成一个参数），取消订阅用 `RemoveFromGroupAsync`

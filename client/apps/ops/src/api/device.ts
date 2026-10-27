@@ -540,6 +540,43 @@ export async function processAlert(id: string, alertProcessTypeId: string, proce
   await api.put("/api/alert/process", { id, alertProcessTypeId, processingResults });
 }
 
+/** 批量处理（网页端告警列表勾选后"批量处理"） */
+export async function batchProcessAlerts(ids: string[], alertProcessTypeId: string, processingResults: string) {
+  await api.put("/api/alert/batch-process", { ids, alertProcessTypeId, processingResults });
+}
+
+/** 告警处理类型（网页端 告警管理 › 处理类型，通用 CRUD /api/alert-process-type，按机构） */
+export interface AlertProcessType {
+  id: string;
+  /** 必填 */
+  alertProcessTypeName: string;
+  /** 从小到大排序 */
+  sortOrder?: number;
+  /** 备注，≤ 200 字 */
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** 列表不带 description（2026-10-27 实测），备注只能逐条取详情 */
+export async function listProcessTypes() {
+  return (await api.get<AlertProcessType[]>("/api/alert-process-type/pages", { params: { current: 1, pageSize: 500 } })).data ?? [];
+}
+
+export async function getProcessType(id: string) {
+  return (await api.get<AlertProcessType>("/api/alert-process-type", { params: { id } })).data;
+}
+
+export async function saveProcessType(t: Pick<AlertProcessType, "alertProcessTypeName" | "sortOrder" | "description"> & { id?: string }) {
+  if (t.id) await api.put("/api/alert-process-type", t);
+  else await api.post("/api/alert-process-type", t);
+}
+
+export async function deleteProcessType(id: string) {
+  await api.del("/api/alert-process-type", { params: { id } });
+}
+
 // ---------- 设备属性（读取 / 下发） ----------
 
 /** 1 String，2 Short，3 Int，4 Long，5 Float，6 Double，7 Bool，8 Array，9 Json */

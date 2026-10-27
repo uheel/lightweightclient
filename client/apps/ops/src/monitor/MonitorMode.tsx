@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, ConfigProvider, Dropdown, Form, Input, Modal, Select, theme as antdTheme } from "antd";
+import { ConfigProvider, Dropdown, Modal, theme as antdTheme } from "antd";
 import { BgColorsOutlined, CheckOutlined, CompressOutlined, ExpandOutlined } from "@ant-design/icons";
 import { baseTheme, isTauri, POSTURE, WindowControls, type LiveData, type RealtimeState, type Session } from "@radar/core";
-import { getProcessTypes, processAlert, type OpsAlert } from "../api/device";
+import type { OpsAlert } from "../api/device";
+import { ProcessDialog } from "../alerts/ProcessDialog";
 import { getRoomDesign, radarElements, roomSize, type RoomDesign } from "../api/room";
 import RoomPlan, { type PlanRadar } from "../rooms/RoomPlan";
 import { facingOf, MODE, modeOf, MOUNT, mountOf, radarInRoom, zoneRect, zonesOf, type QlConfig } from "../rooms/qinglan";
@@ -299,7 +300,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
           </section>
         </div>
 
-        <ProcessDialog alert={processing} onClose={() => setProcessing(null)} onDone={alerts.reload} />
+        <ProcessDialog alerts={processing && [processing]} onClose={() => setProcessing(null)} onDone={alerts.reload} />
 
         <Modal
           open={!!replay}
@@ -606,7 +607,10 @@ function TargetMark({ t, config, fs }: { t: LiveTarget; config?: QlConfig; fs: n
 function AlertCard({ a, onSelect, onProcess, onReplay }: { a: OpsAlert; onSelect: () => void; onProcess: () => void; onReplay?: () => void }) {
   const lv = alertLevel(a);
   const where = [a.floorName, a.roomName].filter(Boolean).join(" ") || "位置未配置";
-  const detail = a.alertStatus === 1 ? a.deviceName || a.sn : [a.alertProcessTypeName, a.processByUserName].filter(Boolean).join(" · ") || "已处理";
+  const detail =
+    a.alertStatus === 1
+      ? a.deviceName || a.sn
+      : [a.alertProcessTypeName, a.processByUserName, a.processAt && `${a.processAt.slice(5, 16)} 处理`].filter(Boolean).join(" · ") || "已处理";
   return (
     <article className={`mon-alert ${lv}`}>
       <button className="mon-alert-main" onClick={onSelect}>
@@ -632,54 +636,5 @@ function AlertCard({ a, onSelect, onProcess, onReplay }: { a: OpsAlert; onSelect
         )}
       </span>
     </article>
-  );
-}
-
-/** 处理告警：选处理类型、写处理结果（与网页端、用户端的处理弹窗提交的内容一致） */
-function ProcessDialog({ alert, onClose, onDone }: { alert: OpsAlert | null; onClose: () => void; onDone: () => void }) {
-  const { message } = App.useApp();
-  const [types, setTypes] = useState<{ label: string; value: string }[]>();
-  const [saving, setSaving] = useState(false);
-  const [form] = Form.useForm<{ type: string; result?: string }>();
-
-  useEffect(() => {
-    if (alert && !types) getProcessTypes().then(setTypes, () => setTypes([]));
-    if (alert) form.resetFields();
-  }, [alert, types, form]);
-
-  async function submit() {
-    if (!alert) return;
-    const v = await form.validateFields();
-    setSaving(true);
-    try {
-      await processAlert(alert.id, v.type, v.result?.trim() ?? "");
-      message.success("已处理");
-      onClose();
-      onDone();
-    } catch (e) {
-      message.error(`处理失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal open={!!alert} title="处理告警" okText="提交" onOk={submit} confirmLoading={saving} onCancel={onClose} destroyOnHidden>
-      {alert && (
-        <>
-          <p className="mon-process-what">
-            <b>{alert.alertTypeName}</b> · {[alert.buildingName, alert.floorName, alert.roomName].filter(Boolean).join(" / ") || "位置未配置"} · {alert.createdAt}
-          </p>
-          <Form form={form} layout="vertical">
-            <Form.Item name="type" label="处理类型" rules={[{ required: true, message: "选择处理类型" }]}>
-              <Select loading={!types} options={types} placeholder="选择" />
-            </Form.Item>
-            <Form.Item name="result" label="处理结果">
-              <Input.TextArea rows={3} maxLength={200} placeholder="例如：已到房间查看，老人安好" />
-            </Form.Item>
-          </Form>
-        </>
-      )}
-    </Modal>
   );
 }
