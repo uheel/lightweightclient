@@ -335,6 +335,27 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 管理者：登录返回 `isAdmin=true`（机构管理员），或有 `SYSTEM_USER` / `SYSTEM_ROLE` 权限
 - **家属**：平台上找不到家属类账号，网页端也没有管理家属账号的地方（只有"运营管理"下的 App 和小程序配置）。推测家属走手机 App / 小程序的另一套账号体系（版本信息里有 `mobileApiVersion`）
 
+## 护理人员与护理组（2026-10-27 读平台前端 `p__Basic__CaregiverPage` / `p__Basic__CaregiverGroupPage` + 在李虎机构实测，测试数据已还原）
+
+平台菜单 基础管理 › 护理人员 `/care/basic/caregiver`、护理员组 `/care/basic/caregiver-group`（权限 `BASIC_INFO_CAREGIVER*`、`BASIC_INFO_CAREGIVER_GROUP*`）。运维端 工作台 › 护理班组（`pages/CaregiversPage.tsx`）照这个做。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/caregiver/pages` | 护理人员：`id, realName, code, type, answerCall, phone, gender, age, sortOrder, description, createdAt/By, updatedAt/By`（列表带备注） |
+| `GET/POST/PUT/DELETE /api/caregiver`（`?id=`） | `realName`、`code`（编号）、`type`、`answerCall` 必填。**`PUT` 是整份覆盖**：只传必填项时手机号、年龄、备注、排序值都被清掉，修改要带全部字段。`code` 重复时返回"编号【x】已存在！"。删除时平台自动把他移出所有组 |
+| `GET /sapi/code/options?codeType=CAREGIVER_TYPE` | 人员类型：1 护工、2 护士、3 医生（字典返回英文 Nursing worker / Nurse / Doctor，网页端自己翻译） |
+| `GET /api/caregiver-group/pages?pagination=false` | 护理组：`id, groupName, sortOrder, deviceCount, userCount`（还有 `description`，表单里叫备注） |
+| `POST/PUT/DELETE /api/caregiver-group`（`?id=`） | `{id?, groupName, description, sortOrder}`，新增返回 id |
+| `PUT /api/caregiver-group/batch-update-sort-order` | `{items:[{id, sortOrder}]}`，网页端按拖动后的顺序写 1、2、3… |
+| `GET /api/caregiver-group/devices?groupId=` | 返回**全部候选设备**，在这个组里的带 `groupId`。李虎 40 台：6/12/13 型雷达 36 台，**还混有 4 台 3 型管理主机**（字典 `groupCode` 是 SLAVE），平台也允许把它们加进组。运维端只让护理组管雷达：按设备类型字典 `groupCode = RADAR` 在本地筛选，组里已有的非雷达设备不显示、提示移出，任何一次保存设备都只写雷达。字段 `id, deviceName, sn, deviceType, sortOrder, createdAt` |
+| `GET /api/caregiver-group/users?groupId=` | 返回全部护理人员（`id` 是护理人员 id，`userName` 是编号），在组里的带 `groupId` 和 `sortOrder`（组内顺序） |
+| `PUT /api/caregiver-group/devices` `{groupId, deviceIds}` | **整组覆盖**组里的设备 |
+| `PUT /api/caregiver-group/users` `{groupId, caregiverIds}` | **整组覆盖**组里的护理人员，数组顺序就是组内顺序 |
+
+- **一台设备、一位护理员都可以同时在几个组里**（把同一台设备先后加进两个组，两个组都有它）
+- 网页端"查看二维码"就是把 `code` 生成二维码，没有别的内容
+- `answerCall`（接听来电）和组内顺序具体怎么影响呼叫，前端代码里看不出来，没有实测
+
 ## 护理值守用到的接口（2026-10-14）
 
 | 接口 | 说明 |

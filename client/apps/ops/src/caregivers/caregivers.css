@@ -1,0 +1,64 @@
+/* 护理班组（pages/CaregiversPage.tsx）。列表沿用设备页的 dev-list / dev-row */
+.cg-group-row { padding-left: 6px; }
+.cg-group-row.dragging, .cg-people li.dragging { opacity: 0.45; }
+.cg-handle { color: #B3B7C9; cursor: grab; flex: none; }
+.cg-group-row:hover .cg-handle, .cg-people li:hover .cg-handle { color: #5B6078; }
+
+.cg-detail { display: flex; flex-direction: column; gap: 12px; max-width: 1200px; }
+.cg-head .detail-title { flex-wrap: wrap; }
+.cg-head .detail-title .ant-tag { margin: 0; }
+.cg-desc { margin-top: 4px; white-space: pre-wrap; }
+.cg-empty { margin-top: 120px; }
+.cg-empty .ant-empty-image { height: auto; }
+.cg-empty-icon { font-size: 40px; color: #B3B7C9; }
+.cg-empty .ant-empty-description { max-width: 360px; margin: 0 auto 12px; color: #5B6078; }
+
+.cg-profile { display: flex; gap: 20px; align-items: flex-start; }
+.cg-info { flex: 1; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 20px; }
+.cg-info dt { font-size: 12px; color: #8A8FA8; }
+.cg-info dd { margin: 2px 0 0; white-space: pre-wrap; word-break: break-all; }
+.cg-qr { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.cg-qr .ant-qrcode { padding: 0; }
+
+.cg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cg-chips .ant-tag-checkable { margin: 0; padding: 3px 12px; font-size: 13px; border: 1px solid #E8EAF2; background: #fff; }
+.cg-chips .ant-tag-checkable-checked { border-color: #3B4FD8; background: #3B4FD8; }
+.cg-chips .busy { opacity: 0.5; }
+.cg-links { margin-top: 6px; display: flex; flex-wrap: wrap; }
+.cg-links .ant-btn { padding-left: 0; }
+
+/* 组详情：左护理员、右设备，窄窗口上下排 */
+.cg-cols { display: grid; grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); gap: 12px; align-items: start; }
+@media (max-width: 1200px) { .cg-cols { grid-template-columns: minmax(0, 1fr); } }
+.cg-add { display: flex; gap: 8px; margin-bottom: 10px; }
+.cg-people { list-style: none; margin: 0; padding: 0; }
+.cg-people li { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid #F4F5F9; }
+.cg-people li:last-child { border-bottom: 0; }
+.cg-idx { flex: none; width: 20px; height: 20px; border-radius: 50%; background: #EEF1FF; color: #3B4FD8; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+.cg-person { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.4; cursor: pointer; }
+.cg-person b { font-weight: 500; }
+.cg-person:hover b { color: #3B4FD8; }
+.cg-person small { font-size: 11px; color: #8A8FA8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 按楼层 › 房间列设备 */
+.cg-floors { display: flex; flex-direction: column; gap: 12px; }
+.cg-floor-name { font-size: 12px; color: #5B6078; font-weight: 500; margin-bottom: 6px; }
+.cg-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.cg-room { border: 1px solid #EEF0F5; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cg-room > b { font-weight: 500; font-size: 13px; }
+.cg-dev { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #5B6078; min-width: 0; }
+.cg-dev i { font-style: normal; font-size: 11px; color: #8A8FA8; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cg-x { margin-left: auto; color: #B3B7C9; cursor: pointer; font-size: 11px; padding: 2px; }
+.cg-dev i + .cg-x { margin-left: 4px; }
+.cg-x:hover { color: #C93A3A; }
+
+/* 选设备的树 */
+.cg-pick-tree { max-height: 460px; overflow: auto; border: 1px solid #EEF0F5; border-radius: 6px; padding: 6px 4px; }
+.cg-pick-dev { display: inline-flex; gap: 8px; align-items: baseline; }
+.cg-pick-other { font-size: 11px; color: #9A5B00; }
+
+/* 护理员表单：两列 */
+.cg-form { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+.cg-form-pair { display: contents; }
+.cg-form-wide { grid-column: 1 / -1; }
+.cg-nonradar { margin-bottom: 10px; }

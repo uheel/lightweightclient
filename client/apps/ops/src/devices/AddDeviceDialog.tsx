@@ -205,7 +205,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
       destroyOnHidden
       width={560}
     >
-      <Form form={form} layout="vertical" requiredMark="optional" style={{ marginTop: 16 }}>
+      <Form form={form} layout="vertical" requiredMark style={{ marginTop: 16 }}>
         <Form.Item name="deviceType" label="设备类型" rules={[{ required: true, message: "请选择设备型号" }]}>
           <TypeCascader groups={groups} />
         </Form.Item>

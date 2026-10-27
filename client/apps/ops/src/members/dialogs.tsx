@@ -180,7 +180,7 @@ export function MemberFormDialog({
 
   return (
     <Modal open={open} width={620} title={memberId ? "修改资料" : "新建长者"} okText="保存" confirmLoading={saving} onOk={submit} onCancel={onClose} destroyOnHidden>
-      <Form form={form} layout="vertical" className="mem-form" disabled={loading} requiredMark="optional">
+      <Form form={form} layout="vertical" className="mem-form" disabled={loading} requiredMark>
         <Form.Item name="realName" label="姓名" rules={[{ required: true, whitespace: true, message: "填姓名" }]}>
           <Input maxLength={32} autoFocus={!memberId} />
         </Form.Item>
@@ -192,10 +192,10 @@ export function MemberFormDialog({
         >
           <Input maxLength={20} />
         </Form.Item>
-        <Form.Item name="gender" label="性别">
-          <Select allowClear options={GENDERS} />
+        <Form.Item name="gender" label="性别" rules={[{ required: true, message: "选性别" }]}>
+          <Select options={GENDERS} />
         </Form.Item>
-        <Form.Item name="age" label="年龄">
+        <Form.Item name="age" label="年龄" rules={[{ required: true, message: "填年龄" }]}>
           <InputNumber min={0} max={130} style={{ width: "100%" }} />
         </Form.Item>
         <Form.Item name="birthDate" label="出生日期">
@@ -210,10 +210,10 @@ export function MemberFormDialog({
         <Form.Item name="idNumber" label="证件号码">
           <Input maxLength={32} />
         </Form.Item>
-        <Form.Item name="height" label="身高 cm">
+        <Form.Item name="height" label="身高 cm" rules={[{ required: true, message: "填身高" }]}>
           <InputNumber min={0} max={250} style={{ width: "100%" }} />
         </Form.Item>
-        <Form.Item name="weight" label="体重 kg">
+        <Form.Item name="weight" label="体重 kg" rules={[{ required: true, message: "填体重" }]}>
           <InputNumber min={0} max={300} style={{ width: "100%" }} />
         </Form.Item>
         <Form.Item name="address" label="地址" className="mem-form-wide">

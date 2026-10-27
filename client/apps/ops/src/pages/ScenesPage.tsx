@@ -18,6 +18,7 @@ import {
   type SendState,
 } from "../api/scene";
 import { AREA_NEED, DELAY_TEMPLATES, INSTALL_NEED, LEAVE_DELAY, pickTemplates, planDevice, pool, tplKey, type Choice, type DevicePlan, type OpKind } from "../scenes/plan";
+import { ModuleName } from "../workspace/ModuleName";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -396,7 +397,7 @@ export default function ScenesPage() {
   return (
     <div className="page scene-page">
       <div className="page-head">
-        <h1>批量场景</h1>
+        <h1><ModuleName k="scenes" /></h1>
         <Steps
           size="small"
           current={step}

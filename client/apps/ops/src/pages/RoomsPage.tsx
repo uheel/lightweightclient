@@ -11,6 +11,7 @@ import { pool } from "../scenes/plan";
 import { placeInLayout, setSlotArea, slotSource } from "../rooms/radarSlot";
 import { areaText, type InstallArea } from "../rooms/installArea";
 import { useGuideFocus } from "../guide/GuideContext";
+import { ModuleName } from "../workspace/ModuleName";
 
 type Filter = "all" | "radar" | "problem";
 
@@ -267,7 +268,7 @@ export default function RoomsPage() {
       <section className="dev-list room-list" onKeyDown={onKeyDown}>
         <div className="dev-list-head">
           <div className="dev-list-title">
-            <h1>房间布置</h1>
+            <h1><ModuleName k="rooms" /></h1>
             <span className="muted">
               {rooms.length} 间 · {counts.problem} 间有问题
             </span>

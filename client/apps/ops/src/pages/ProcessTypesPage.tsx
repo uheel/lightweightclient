@@ -3,6 +3,7 @@ import { App, Button, Form, Input, InputNumber, Modal, Table } from "antd";
 import type { TableColumnsType } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { deleteProcessType, getProcessType, listProcessTypes, saveProcessType, type AlertProcessType } from "../api/device";
+import { ModuleName } from "../workspace/ModuleName";
 
 type FormValues = Pick<AlertProcessType, "alertProcessTypeName" | "sortOrder" | "description">;
 
@@ -120,7 +121,7 @@ export default function ProcessTypesPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>处理类型</h1>
+        <h1><ModuleName k="processTypes" /></h1>
       </div>
       <div className="ops-card">
         <div className="toolbar">

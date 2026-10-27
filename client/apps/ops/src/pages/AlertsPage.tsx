@@ -5,6 +5,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import { ALERT_GROUPS, getAlertPage, type OpsAlert } from "../api/device";
 import { ProcessDialog } from "../alerts/ProcessDialog";
+import { ModuleName } from "../workspace/ModuleName";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
 
@@ -76,7 +77,7 @@ export default function AlertsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>告警记录</h1>
+        <h1><ModuleName k="alerts" /></h1>
         <Segmented
           options={ALERT_GROUPS}
           value={group}

@@ -8,6 +8,7 @@ import MemberDetail, { memberState, STATE_TEXT, type MemberState } from "../memb
 import { BedDialog, CheckOutDialog, MemberFormDialog, SwapDialog, type MemberDicts } from "../members/dialogs";
 import { useGuide } from "../guide/GuideContext";
 import { GuideEmpty } from "../guide/GuideEmpty";
+import { ModuleName } from "../workspace/ModuleName";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
@@ -152,7 +153,7 @@ export default function MembersPage() {
       <section className="dev-list" onKeyDown={onKeyDown}>
         <div className="dev-list-head">
           <div className="dev-list-title">
-            <h1>长者</h1>
+            <h1><ModuleName k="members" /></h1>
             <span className="muted">
               {members.length} 位 · {counts.in} 位入住
             </span>

@@ -11,7 +11,7 @@ import { useNames } from "./names";
  * 登录后的工作台：按工作类型分组的模块方块，右侧是快速开始里还没完成的事。
  * 数字都来自快速开始的检查结果（楼栋、房间、雷达），工作台自己不请求平台。
  */
-export function Workbench({ s, opened, unread, onOpen }: { s: Session; opened: ModuleKey[]; unread: number; onOpen: (k: ModuleKey) => void }) {
+export function Workbench({ s, unread, onOpen }: { s: Session; unread: number; onOpen: (k: ModuleKey) => void }) {
   const g = useGuide();
   const d = g?.data;
   const names = useNames();
@@ -49,21 +49,20 @@ export function Workbench({ s, opened, unread, onOpen }: { s: Session; opened: M
             {s.orgName} · {dayjs().format("M 月 D 日 dddd")}
           </span>
         </div>
-        {names.layout.filter((grp) => grp.keys.length).map((grp) => (
+        {names.desk.map((grp) => (
           <section key={grp.key} className="desk-group">
             <h2>{names.group(grp.key)}</h2>
             <div className="desk-tiles">
               {grp.keys.map((k) => {
                 const m = MODULES[k];
                 return (
-                  <button key={k} className={`desk-tile${k === "monitor" ? " dark wide" : ""}${opened.includes(k) ? " opened" : ""}`} onClick={() => onOpen(k)}>
+                  <button key={k} className={`desk-tile${k === "monitor" ? " dark wide" : ""}`} onClick={() => onOpen(k)}>
                     <span className="desk-tile-icon" style={{ background: m.tint, color: m.color }}>
                       {m.icon}
                     </span>
                     <b>{names.module(k)}</b>
                     <small>{stats[k] ?? m.desc}</small>
                     {flags[k] && <span className="desk-flag">{flags[k]}</span>}
-                    {opened.includes(k) && <span className="desk-opened">已打开</span>}
                   </button>
                 );
               })}

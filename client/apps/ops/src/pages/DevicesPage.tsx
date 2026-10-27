@@ -15,6 +15,7 @@ import { useLiveMap } from "../devices/useLiveMap";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import type { Spot } from "../rooms/qinglan";
 import { GuideEmpty } from "../guide/GuideEmpty";
+import { ModuleName } from "../workspace/ModuleName";
 
 type Filter = "all" | "online" | "offline" | "disabled";
 
@@ -290,7 +291,7 @@ export default function DevicesPage() {
       <section className="dev-list" style={{ width: listW }} onKeyDown={onKeyDown} hidden={listHidden}>
         <div className="dev-list-head">
           <div className="dev-list-title">
-            <h1>设备</h1>
+            <h1><ModuleName k="devices" /></h1>
             <span className="muted">
               {ofCat.length} 台 · {counts.online} 在线
             </span>

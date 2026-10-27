@@ -20,6 +20,7 @@
         "decorations": false,
         "transparent": true,
         "theme": "Light",
+        "dragDropEnabled": false,
         "windowEffects": { "effects": ["tabbed"] }
       }
     ],

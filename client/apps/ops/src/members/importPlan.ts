@@ -58,8 +58,8 @@ export const COLUMNS: Column[] = [
     format: "11 位手机号，只填数字（中间的空格、短横线会自动去掉）。平台按手机号识别长者：同一手机号在表里只能出现一次；已登记过的手机号不会重复建档，也不会修改原有资料",
     example: "13812345678",
   },
-  { key: "gender", title: "性别", width: 6, format: "下拉选择 男 / 女。不填时按身份证号推算", example: "女" },
-  { key: "age", title: "年龄", width: 6, format: "1–199 的整数，不带\"岁\"。不填时按出生日期推算", example: "81" },
+  { key: "gender", title: "性别", required: true, width: 6, format: "下拉选择 男 / 女。空着时按身份证号推算，推算不出就报错", example: "女" },
+  { key: "age", title: "年龄", required: true, width: 6, format: "1–199 的整数，不带\"岁\"。空着时按出生日期（或身份证号）推算，推算不出就报错", example: "81" },
   {
     key: "birthDate",
     title: "出生日期",
@@ -78,8 +78,8 @@ export const COLUMNS: Column[] = [
     example: "110101194503081224",
   },
   { key: "memberType", title: "老人分类", alias: ["分类"], width: 10, format: "下拉选择，只能选列表里的值（与平台\"老人分类\"选项一致）", example: "慢性病" },
-  { key: "height", title: "身高", alias: ["身高(cm)", "身高cm"], width: 7, format: "单位厘米，只填数字（50–250）", example: "158" },
-  { key: "weight", title: "体重", alias: ["体重(kg)", "体重kg"], width: 7, format: "单位公斤，只填数字（10–300）", example: "52" },
+  { key: "height", title: "身高", required: true, alias: ["身高(cm)", "身高cm"], width: 7, format: "单位厘米，只填数字（50–250）", example: "158" },
+  { key: "weight", title: "体重", required: true, alias: ["体重(kg)", "体重kg"], width: 7, format: "单位公斤，只填数字（10–300）", example: "52" },
   {
     key: "building",
     title: "楼栋",
@@ -246,7 +246,10 @@ export function parseRows(table: string[][], dicts: Dicts) {
       gender = /^(男|1|m|male)$/i.test(raw.gender) ? 1 : /^(女|2|f|female)$/i.test(raw.gender) ? 2 : undefined;
       if (!gender) errors.push(`性别"${raw.gender}"无法识别（填 男 / 女）`);
       else if (fromId && fromId.gender !== gender) warnings.push("性别与身份证号不一致，以表里填写的为准");
-    } else gender = fromId?.gender;
+    } else {
+      gender = fromId?.gender;
+      if (!gender) errors.push("性别为空（也没有能推算性别的身份证号）");
+    }
 
     // 出生日期、年龄
     let birth = raw.birthDate ? parseDate(raw.birthDate) : fromId?.birth;
@@ -262,6 +265,7 @@ export function parseRows(table: string[][], dicts: Dicts) {
         age = undefined;
       }
     } else if (birth) age = dayjs().diff(birth, "year");
+    else errors.push("年龄为空（也没有能推算年龄的出生日期或身份证号）");
 
     // 老人分类
     let memberType: number | undefined;
@@ -282,6 +286,8 @@ export function parseRows(table: string[][], dicts: Dicts) {
     };
     const height = num(raw.height, "身高", 50, 250);
     const weight = num(raw.weight, "体重", 10, 300);
+    if (!raw.height) errors.push("身高为空");
+    if (!raw.weight) errors.push("体重为空");
 
     // 床位
     let bed: Bed | undefined;

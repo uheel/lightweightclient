@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Dropdown, Empty, InputNumber, Spin } from "antd";
-import { CaretDownOutlined, CaretRightOutlined, DeleteOutlined, HomeOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, HomeOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { perfTimer } from "@radar/core";
 import { bindBedDevice, getRadars, getRoomDevices, unbindBedKeepRoom, type RoomDevice } from "../api/device";
 import type { Room } from "../api/room";
@@ -30,6 +30,7 @@ import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import { GuideEmpty } from "../guide/GuideEmpty";
 import { flashSpot } from "../guide/flash";
 import { syncAfter } from "../members/deviceSync";
+import { ModuleName } from "../workspace/ModuleName";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMPTY: Spaces = { buildings: [], floors: [], rooms: [], beds: [], radars: [] };
@@ -39,7 +40,8 @@ type Sel = { kind: "building" | "floor"; id: string };
 type DeleteTarget = { title: string; name: string; tally: Tally; askName: boolean; run: () => Promise<void> };
 
 /**
- * 楼宇：楼栋 / 楼层 / 房间 / 床位的基础资料。左边楼栋 › 楼层树，右边是选中楼层的房间格子，点房间在右侧改名、改尺寸、管床位。
+ * 楼宇：楼栋 / 楼层 / 房间 / 床位的基础资料。逐级进入：楼栋卡片 → 点进楼栋是楼层卡片 → 点进楼层是房间格子，点房间在右侧改名、改尺寸、管床位。
+ * 顶部面包屑回到上一级。
  * 没有户型：房间挂在机构的共用空白户型上，批量建房时可以照着一间已有的房间布置。
  * 进页面一次取回楼栋、楼层、房间、床位和雷达，之后分组、统计、删除前的影响范围都在本地算；改名、删除只改本地数据，新建后静默刷新一次。
  */
@@ -49,7 +51,6 @@ export default function SpacesPage() {
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<Sel>();
   const [roomId, setRoomId] = useState<string>();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [addingBuilding, setAddingBuilding] = useState(false);
   const [floorsFor, setFloorsFor] = useState<Building>();
   const [roomsFor, setRoomsFor] = useState<{ building: Building; floor: Floor }>();
@@ -91,16 +92,10 @@ export default function SpacesPage() {
 
   const ix = useMemo(() => indexSpaces(data), [data]);
 
-  // 选中的东西被删掉或还没选时：落到它的上一级，或第一栋楼的第一层
+  // 进去的楼栋 / 楼层没了（刷新后被别人删掉）：回到楼栋列表
   useEffect(() => {
-    if (loading) return;
-    if (sel?.kind === "floor" && ix.floor.has(sel.id)) return;
-    if (sel?.kind === "building" && ix.building.has(sel.id)) return;
-    const b = ix.buildings[0];
-    if (!b) return setSel(undefined);
-    const f = ix.floorsOf.get(b.id)?.[0];
-    setSel(f ? { kind: "floor", id: f.id } : { kind: "building", id: b.id });
-    setExpanded((s) => new Set(s).add(b.id));
+    if (loading || !sel) return;
+    if (!(sel.kind === "floor" ? ix.floor.has(sel.id) : ix.building.has(sel.id))) setSel(undefined);
   }, [ix, sel, loading]);
 
   useEffect(() => {
@@ -115,7 +110,6 @@ export default function SpacesPage() {
     if (!r) return;
     setFocusRoom(undefined);
     if (r.floorId) setSel({ kind: "floor", id: r.floorId });
-    if (r.buildingId) setExpanded((x) => new Set(x).add(r.buildingId!));
     setRoomId(r.id);
     if (focusRoom!.beds) flashSpot([`[data-spot="beds"][data-room="${r.id}"]`]);
   }, [focusRoom, ix]);
@@ -136,7 +130,7 @@ export default function SpacesPage() {
     if (roomId) loadRoomDevices(roomId);
   }, [roomId, loadRoomDevices]);
 
-  function pick(s: Sel) {
+  function pick(s: Sel | undefined) {
     setSel(s);
     setRoomId(undefined);
   }
@@ -158,7 +152,6 @@ export default function SpacesPage() {
     const b: Building = { id, buildingName: name };
     setData((d) => ({ ...d, buildings: [...d.buildings, b] }));
     setAddingBuilding(false);
-    setExpanded((s) => new Set(s).add(id));
     pick({ kind: "building", id });
     // 新楼栋紧接着加楼层
     setFloorsFor(b);
@@ -182,6 +175,7 @@ export default function SpacesPage() {
       askName: floors.length > 0,
       run: async () => {
         await deleteBuilding(b);
+        pick(undefined);
         setData((d) => without(d, { buildings: [b.id] }));
       },
     });
@@ -217,6 +211,7 @@ export default function SpacesPage() {
       askName: rooms.length > 0,
       run: async () => {
         await deleteFloor(f);
+        pick({ kind: "building", id: f.buildingId });
         setData((d) => without(d, { floors: [f.id] }));
       },
     });
@@ -301,78 +296,12 @@ export default function SpacesPage() {
   const allBeds = data.beds.length;
   const floorTally = (f: Floor) => tallyRooms(ix, roomsOfFloor(ix, f.id));
 
-  return (
-    <div className="workbench">
-      <section className="dev-list space-tree">
-        <div className="dev-list-head">
-          <div className="dev-list-title">
-            <h1>楼宇</h1>
-            <span className="muted">
-              {ix.buildings.length} 栋 · {data.rooms.length} 间 · {allBeds} 床
-            </span>
-            <Button type="text" icon={<ReloadOutlined />} onClick={() => load()} title="刷新" style={{ marginLeft: "auto" }} />
-          </div>
-        </div>
-        <div className="dev-rows" role="tree" aria-label="楼栋和楼层">
-          {loading && !data.buildings.length ? (
-            <Spin style={{ margin: 40 }} />
-          ) : (
-            ix.buildings.map((b) => {
-              const floors = ix.floorsOf.get(b.id) ?? [];
-              const open = expanded.has(b.id);
-              const rooms = roomsOfBuilding(ix, b.id).length;
-              return (
-                <div key={b.id} role="treeitem" aria-expanded={open}>
-                  <div className={`dev-row space-b${sel?.kind === "building" && sel.id === b.id ? " on" : ""}`} onClick={() => pick({ kind: "building", id: b.id })}>
-                    <span
-                      className="space-caret"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpanded((s) => {
-                          const n = new Set(s);
-                          if (n.has(b.id)) n.delete(b.id);
-                          else n.add(b.id);
-                          return n;
-                        });
-                      }}
-                    >
-                      {floors.length ? open ? <CaretDownOutlined /> : <CaretRightOutlined /> : null}
-                    </span>
-                    <span className="dev-row-main">
-                      <b>{b.buildingName}</b>
-                      <small>
-                        {floors.length} 层 · {rooms} 间
-                      </small>
-                    </span>
-                  </div>
-                  {open &&
-                    floors.map((f) => {
-                      const t = floorTally(f);
-                      return (
-                        <div key={f.id} role="treeitem" className={`dev-row space-f${sel?.kind === "floor" && sel.id === f.id ? " on" : ""}`} onClick={() => pick({ kind: "floor", id: f.id })}>
-                          <span className="dev-row-main">
-                            <b>{f.floorName}</b>
-                          </span>
-                          <span className="dev-row-last off">
-                            {t.rooms} 间 · {t.beds} 床
-                          </span>
-                        </div>
-                      );
-                    })}
-                </div>
-              );
-            })
-          )}
-          {!loading && !data.buildings.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有楼栋" />}
-        </div>
-        <div className="space-tree-foot">
-          <Button type="text" size="small" icon={<PlusOutlined />} onClick={() => setAddingBuilding(true)}>
-            新建楼栋
-          </Button>
-        </div>
-      </section>
+  const buildingTally = (b: Building) => tallyRooms(ix, roomsOfBuilding(ix, b.id), ix.floorsOf.get(b.id)?.length ?? 0);
+  const toList = () => pick(undefined);
 
-      <section className="dev-detail space-main">
+  return (
+    <div className="space-page">
+      <section className="space-main">
         {curFloor && curBuilding ? (
           <FloorView
             key={curFloor.id}
@@ -384,6 +313,7 @@ export default function SpacesPage() {
             tally={floorTally(curFloor)}
             selRoom={roomId}
             onPickRoom={(id) => setRoomId((cur) => (cur === id ? undefined : id))}
+            onPickList={toList}
             onPickBuilding={() => pick({ kind: "building", id: curBuilding.id })}
             onRename={onRenameFloor(curFloor)}
             onNumber={(n) => setFloorNumber(curFloor, n)}
@@ -413,26 +343,27 @@ export default function SpacesPage() {
           />
         ) : curBuilding ? (
           <BuildingView
+            key={curBuilding.id}
             building={curBuilding}
             floors={ix.floorsOf.get(curBuilding.id) ?? []}
             floorTally={floorTally}
+            onPickList={toList}
             onPickFloor={(id) => pick({ kind: "floor", id })}
             onRename={onRenameBuilding(curBuilding)}
             onAddFloors={() => setFloorsFor(curBuilding)}
             onDelete={() => askDeleteBuilding(curBuilding)}
           />
-        ) : loading ? (
-          <Spin style={{ margin: 80 }} />
         ) : (
-          <GuideEmpty
-            icon={<HomeOutlined />}
-            title="先建一栋楼"
-            desc="雷达、床位、长者都挂在房间上。顺序是：新建楼栋 → 批量加楼层 → 批量加房间（写 301-310 这样的范围，每间可以带几张床）。"
-          >
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddingBuilding(true)}>
-              新建楼栋
-            </Button>
-          </GuideEmpty>
+          <BuildingsView
+            buildings={ix.buildings}
+            loading={loading}
+            total={{ rooms: data.rooms.length, beds: allBeds }}
+            tally={buildingTally}
+            onPick={(id) => pick({ kind: "building", id })}
+            onAdd={() => setAddingBuilding(true)}
+            onRefresh={() => load()}
+            onDelete={askDeleteBuilding}
+          />
         )}
       </section>
 
@@ -444,7 +375,7 @@ export default function SpacesPage() {
         onDone={() => {
           const b = floorsFor;
           setFloorsFor(undefined);
-          if (b) setExpanded((s) => new Set(s).add(b.id));
+          if (b) pick({ kind: "building", id: b.id });
           load(true);
         }}
       />
@@ -483,11 +414,134 @@ export default function SpacesPage() {
   );
 }
 
-/** 楼栋：楼层列表 */
+/** 顶部面包屑：前面几级可以点回去 */
+function Crumbs({ items }: { items: { label: string; onClick: () => void }[] }) {
+  return (
+    <>
+      {items.map((x, i) => (
+        <button key={i} className="space-crumb" onClick={x.onClick}>
+          {x.label} ›
+        </button>
+      ))}
+    </>
+  );
+}
+
+/** 入住进度条：已住 / 床位 */
+function Occupancy({ t }: { t: Tally }) {
+  const pct = t.beds ? Math.round((t.occupied.length / t.beds) * 100) : 0;
+  return (
+    <span className="space-occ" title={`${t.occupied.length} / ${t.beds} 床已入住`}>
+      <span className="space-occ-bar">
+        <i style={{ width: `${pct}%` }} />
+      </span>
+      <span className="muted small">{t.beds ? `入住 ${t.occupied.length}/${t.beds}` : "没有床位"}</span>
+    </span>
+  );
+}
+
+/** 楼栋卡片上的示意图：按楼层数画几层窗户（最多 8 层） */
+function BuildingArt({ floors }: { floors: number }) {
+  const n = Math.max(1, Math.min(floors, 8));
+  const h = 9;
+  const top = 80 - n * h;
+  return (
+    <svg className="space-art" viewBox="0 0 160 84" aria-hidden="true">
+      <rect x="48" y={top - 6} width="64" height={n * h + 6} rx="3" />
+      {Array.from({ length: n }, (_, i) =>
+        [0, 1, 2, 3].map((j) => <rect key={`${i}-${j}`} className="win" x={55 + j * 14} y={top + i * h} width="8" height="5" rx="1" />),
+      )}
+      <line x1="24" x2="136" y1="80" y2="80" />
+    </svg>
+  );
+}
+
+/** 第一级：楼栋卡片 */
+function BuildingsView({
+  buildings,
+  loading,
+  total,
+  tally,
+  onPick,
+  onAdd,
+  onRefresh,
+  onDelete,
+}: {
+  buildings: Building[];
+  loading: boolean;
+  total: { rooms: number; beds: number };
+  tally: (b: Building) => Tally;
+  onPick: (id: string) => void;
+  onAdd: () => void;
+  onRefresh: () => void;
+  onDelete: (b: Building) => void;
+}) {
+  return (
+    <div className="space-view">
+      <div className="space-head">
+        <span className="space-title"><ModuleName k="spaces" /></span>
+        <span className="muted small">
+          {buildings.length} 栋 · {total.rooms} 间 · {total.beds} 床
+        </span>
+        <span className="grow" />
+        <Button type="text" icon={<ReloadOutlined />} onClick={onRefresh} title="刷新" />
+        <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>
+          新建楼栋
+        </Button>
+      </div>
+      <div className="space-scroll">
+        {loading && !buildings.length ? (
+          <Spin style={{ display: "block", margin: 80 }} />
+        ) : buildings.length ? (
+          <div className="space-cards">
+            {buildings.map((b) => {
+              const t = tally(b);
+              return (
+                <div key={b.id} className="space-card" role="button" tabIndex={0} onClick={() => onPick(b.id)} onKeyDown={(e) => e.key === "Enter" && onPick(b.id)}>
+                  <div className="space-card-art">
+                    <BuildingArt floors={t.floors} />
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <Dropdown menu={{ items: [{ key: "del", label: "删除楼栋", danger: true, icon: <DeleteOutlined />, onClick: () => onDelete(b) }] }} trigger={["click"]}>
+                        <Button className="space-card-more" size="small" type="text" icon={<MoreOutlined />} />
+                      </Dropdown>
+                    </span>
+                  </div>
+                  <div className="space-card-body">
+                    <b>{b.buildingName}</b>
+                    <span className="muted small">
+                      {t.floors} 层 · {t.rooms} 间 · {t.beds} 床{t.radars ? ` · ${t.radars} 台雷达` : ""}
+                    </span>
+                    <Occupancy t={t} />
+                  </div>
+                </div>
+              );
+            })}
+            <button className="space-card add" onClick={onAdd}>
+              <PlusOutlined /> 新建楼栋
+            </button>
+          </div>
+        ) : (
+          <GuideEmpty
+            icon={<HomeOutlined />}
+            title="先建一栋楼"
+            desc="雷达、床位、长者都挂在房间上。顺序是：新建楼栋 → 批量加楼层 → 批量加房间（写 301-310 这样的范围，每间可以带几张床）。"
+          >
+            <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>
+              新建楼栋
+            </Button>
+          </GuideEmpty>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 第二级：楼栋里的楼层卡片（高层在前） */
 function BuildingView({
   building,
   floors,
   floorTally,
+  onPickList,
   onPickFloor,
   onRename,
   onAddFloors,
@@ -496,6 +550,7 @@ function BuildingView({
   building: Building;
   floors: Floor[];
   floorTally: (f: Floor) => Tally;
+  onPickList: () => void;
   onPickFloor: (id: string) => void;
   onRename: (name: string) => Promise<void>;
   onAddFloors: () => void;
@@ -507,6 +562,7 @@ function BuildingView({
   return (
     <div className="space-view">
       <div className="space-head">
+        <Crumbs items={[{ label: "楼宇", onClick: onPickList }]} />
         <EditableText key={building.id} value={building.buildingName} onSave={onRename} className="space-title" />
         <span className="muted small">
           {floors.length} 层 · {sum("rooms")} 间 · {sum("beds")} 床 · {people} 人入住
@@ -519,33 +575,41 @@ function BuildingView({
           <Button icon={<MoreOutlined />} />
         </Dropdown>
       </div>
-      {floors.length ? (
-        <div className="space-floors">
-          {[...floors].reverse().map((f, i) => {
-            const t = ts[floors.length - 1 - i]!;
-            return (
-              <button key={f.id} className="space-floor" onClick={() => onPickFloor(f.id)}>
-                <b>{f.floorName}</b>
-                <span className="muted">
-                  {t.rooms} 间 · {t.beds} 床 · {t.occupied.length} 人入住
-                </span>
-                {t.radars > 0 && <span className="muted">{t.radars} 台雷达</span>}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <Empty style={{ marginTop: 80 }} description="这栋楼还没有楼层">
-          <Button type="primary" icon={<PlusOutlined />} onClick={onAddFloors}>
-            加楼层
-          </Button>
-        </Empty>
-      )}
+      <div className="space-scroll">
+        {floors.length ? (
+          <div className="space-cards floors">
+            {[...floors].reverse().map((f, i) => {
+              const t = ts[floors.length - 1 - i]!;
+              return (
+                <button key={f.id} className="space-card floor" onClick={() => onPickFloor(f.id)}>
+                  <span className="space-floor-no">{f.floorNumber ?? "–"}</span>
+                  <span className="space-card-body">
+                    <b>{f.floorName}</b>
+                    <span className="muted small">
+                      {t.rooms} 间 · {t.beds} 床{t.radars ? ` · ${t.radars} 台雷达` : ""}
+                    </span>
+                    <Occupancy t={t} />
+                  </span>
+                </button>
+              );
+            })}
+            <button className="space-card floor add" onClick={onAddFloors}>
+              <PlusOutlined /> 加楼层
+            </button>
+          </div>
+        ) : (
+          <Empty style={{ marginTop: 80 }} description="这栋楼还没有楼层">
+            <Button type="primary" icon={<PlusOutlined />} onClick={onAddFloors}>
+              加楼层
+            </Button>
+          </Empty>
+        )}
+      </div>
     </div>
   );
 }
 
-/** 楼层：房间格子 + 选中房间的面板 */
+/** 第三级：楼层里的房间格子 + 选中房间的面板 */
 function FloorView({
   building,
   floor,
@@ -555,6 +619,7 @@ function FloorView({
   tally,
   selRoom,
   onPickRoom,
+  onPickList,
   onPickBuilding,
   onRename,
   onNumber,
@@ -570,6 +635,7 @@ function FloorView({
   tally: Tally;
   selRoom?: string;
   onPickRoom: (id: string) => void;
+  onPickList: () => void;
   onPickBuilding: () => void;
   onRename: (name: string) => Promise<void>;
   onNumber: (n: number) => void;
@@ -584,9 +650,12 @@ function FloorView({
   return (
     <div className="space-view">
       <div className="space-head">
-        <button className="space-crumb" onClick={onPickBuilding}>
-          {building.buildingName} ›
-        </button>
+        <Crumbs
+          items={[
+            { label: "楼宇", onClick: onPickList },
+            { label: building.buildingName, onClick: onPickBuilding },
+          ]}
+        />
         <EditableText value={floor.floorName} onSave={onRename} className="space-title" />
         <span className="space-num muted small">
           楼层号

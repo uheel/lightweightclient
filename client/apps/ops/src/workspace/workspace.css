@@ -43,7 +43,6 @@
 .desk-tile.dark small { color: #A8AEDB; }
 .desk-tile.dark .desk-tile-icon { background: rgba(255, 255, 255, 0.12) !important; color: #B7C3FF !important; }
 .desk-flag { position: absolute; top: 12px; right: 12px; font-size: 11px; padding: 0 7px; line-height: 18px; border-radius: 9px; background: #FDECEC; color: #B4232A; }
-.desk-opened { position: absolute; right: 12px; bottom: 12px; font-size: 11px; color: #3B4FD8; }
 
 .desk-side { padding-top: 64px; }
 .desk-todo { background: #fff; border: 1px solid #E8EAF2; border-radius: 10px; overflow: hidden; margin-bottom: 6px; }
