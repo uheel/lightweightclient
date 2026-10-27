@@ -263,9 +263,17 @@ type Res =
 /**
  * 平台的姿态 / 事件时间线在多人时不可靠（2026-10-21 距离测试 …6711）：一条上报里有几个目标时只记第一个，坐着的人姿态、进区域事件全都没有；
  * 而且记在帧的目标编号下，和轨迹点的 userId 对不上。轨迹点倒是都有。所以出现 userId 2 起的轨迹的时段，姿态和进出事件全部改从设备原始帧解，
- * 每帧按时间 + 位置对到最近的轨迹点所在目标。这里拉这些时段的原始上报
+ * 每帧按时间 + 位置对到最近的轨迹点所在目标。这里拉这些时段的原始上报并解出帧。
+ *
+ * 6 型多人几乎全天都有，一台一天约 48 MB / 7.6 万条（每条上报都带帧，按 filter[rawData] 筛不掉任何一条），
+ * 一次 getAll 把 100 多页同时发出去，6 个请求槽全被占住，这期间再查别的时间段要排队好几秒，而且没法取消（2026-10-27 藕塘 perf 日志）。
+ * 所以按固定的 10 分钟格子拉：每格 3 页左右，同时只拉 2 格；有新查询（stale() 为真）就不再拉后面的格子；
+ * 已经过去的格子解好的帧记在内存里，同一天再查（10 小时换 24 小时、重新打开）直接用
  */
-async function loadFrameLogs(pts: { timestamp: number; sn: string; userId: number }[], sns: string[]) {
+const FRAME_WIN_MS = 10 * 60_000;
+const frameCache = new Map<string, Frame[]>();
+
+async function loadFrames(pts: { timestamp: number; sn: string; userId: number }[], sns: string[], stale: () => boolean) {
   const spans: { sn: string; a: number; b: number }[] = [];
   for (const sn of sns) {
     const ts = pts.filter((p) => p.sn === sn && p.userId >= FIRST_MISSED_UID).map((p) => p.timestamp).sort((a, b) => a - b);
@@ -275,20 +283,56 @@ async function loadFrameLogs(pts: { timestamp: number; sn: string; userId: numbe
       else spans.push({ sn, a: t, b: t });
     }
   }
-  // 每个时段内部已经是并发分页，时段之间再并发 2 个，别把请求槽全占了
-  return runLimited(
-    spans.map(({ sn, a, b }) => () =>
-      getAllDeviceLogs({ sn, command: "Device.postevent", range: [fmt(a - 5000), fmt(b + 5000)], pageSize: 200, max: Math.ceil((b - a) / 1000) * 3 + 200 }).then((r) => ({ sn, list: r.list })),
-    ),
+  const wins = new Map<string, { sn: string; s: number }>();
+  for (const { sn, a, b } of spans)
+    for (let s = Math.floor((a - 5000) / FRAME_WIN_MS) * FRAME_WIN_MS; s < b + 5000; s += FRAME_WIN_MS) wins.set(`${sn}:${s}`, { sn, s });
+  const got = new Map<string, Frame[] | Error>();
+  await runLimited(
+    [...wins].map(([key, { sn, s }]) => async () => {
+      let f = frameCache.get(key);
+      if (!f) {
+        if (stale()) return got.set(key, new Error("已取消"));
+        try {
+          const r = await getAllDeviceLogs({ sn, command: "Device.postevent", range: [fmt(s), fmt(s + FRAME_WIN_MS - 1000)], pageSize: 200, max: 3000 });
+          f = decodeFrames(r.list);
+        } catch (e) {
+          return got.set(key, e instanceof Error ? e : new Error(String(e)));
+        }
+        // 还没过完的格子以后还会有新数据，不记
+        if (s + FRAME_WIN_MS < Date.now() - 60_000) {
+          if (frameCache.size > 5000) frameCache.clear();
+          frameCache.set(key, f);
+        }
+      }
+      got.set(key, f);
+    }),
     2,
   );
+  if (stale()) return [];
+  return spans.map(({ sn, a, b }) => {
+    const frames: Frame[] = [];
+    for (let s = Math.floor((a - 5000) / FRAME_WIN_MS) * FRAME_WIN_MS; s < b + 5000; s += FRAME_WIN_MS) {
+      const f = got.get(`${sn}:${s}`);
+      if (f instanceof Error) return f;
+      for (const x of f ?? []) if (x.t >= a - 5000 && x.t <= b + 5000) frames.push(x);
+    }
+    return { sn, frames };
+  });
 }
 
 /**
  * 同一份查询正在加载时直接复用：打开回溯时自动查今天，开发模式下这个 effect 会跑两遍，
  * 两份一样的查询同时打平台，每个请求都慢一倍（2026-10-27 藕塘 perf 日志里每个请求都成对出现）
  */
-const inflight = new Map<string, Promise<ReplayData>>();
+export interface ReplayLoad {
+  /** 平台时间线拼出来的回放数据，先显示 */
+  data: ReplayData;
+  /** 有多人时段的 6 型设备时，原始帧解完后的整份数据；没有可补的为 null */
+  refined: Promise<ReplayData | null>;
+}
+
+/** 正在加载的查询；stale 换成最后一个调用方的，多人帧要不要接着拉看它 */
+const inflight = new Map<string, { p: Promise<ReplayLoad>; stale: { fn: () => boolean } }>();
 
 export function loadReplayData(
   roomId: string,
@@ -298,14 +342,19 @@ export function loadReplayData(
   sns: string[],
   onProgress?: (done: number, total: number) => void,
   pt?: PerfTimer,
-): Promise<ReplayData> {
+  /** 这次查询已经被新的查询取代（多人帧不再接着拉） */
+  stale: () => boolean = () => false,
+): Promise<ReplayLoad> {
   const key = JSON.stringify([roomId, Math.floor(start / 1000), Math.floor(end / 1000), sns]);
-  let p = inflight.get(key);
-  if (!p) {
-    p = loadReplayDataOnce(roomId, detail, start, end, sns, onProgress, pt).finally(() => inflight.delete(key));
-    inflight.set(key, p);
+  const cur = inflight.get(key);
+  if (cur) {
+    cur.stale.fn = stale;
+    return cur.p;
   }
-  return p;
+  const entry = { stale: { fn: stale } } as { p: Promise<ReplayLoad>; stale: { fn: () => boolean } };
+  entry.p = loadReplayDataOnce(roomId, detail, start, end, sns, onProgress, pt, () => entry.stale.fn()).finally(() => inflight.delete(key));
+  inflight.set(key, entry);
+  return entry.p;
 }
 
 async function loadReplayDataOnce(
@@ -316,9 +365,9 @@ async function loadReplayDataOnce(
   sns: string[],
   onProgress?: (done: number, total: number) => void,
   pt?: PerfTimer,
-): Promise<ReplayData> {
+  stale: () => boolean = () => false,
+): Promise<ReplayLoad> {
   const devices = (detail.devices ?? []).filter((d) => d.sn);
-  const nameOf = Object.fromEntries(devices.map((d) => [d.sn, d.deviceName || d.sn]));
   // 姿态 / 事件接口单次不能超过 24 小时，按天拆开查
   const chunks = splitRange(start, end);
   const get = async <T,>(path: string, params: Record<string, string>) => (await api.get<T>(path, { params })).data;
@@ -375,7 +424,7 @@ async function loadReplayDataOnce(
   const typeOf = Object.fromEntries(devices.map((d) => [d.sn, d.deviceType]));
   const frameSns = sns.filter((sn) => !isSlim(typeOf[sn]));
   const framesP = trajP.then(
-    (pts) => loadFrameLogs(pts, frameSns),
+    (pts) => loadFrames(pts, frameSns, stale),
     () => [],
   );
 
@@ -384,6 +433,27 @@ async function loadReplayDataOnce(
   pt?.info("requests", tasks.length + trajChunks.length * sns.length);
   const errors = results.filter((r): r is Error => r instanceof Error);
   results.push({ kind: "traj", data: traj });
+  const input: BuildInput = { detail, sns, results, warnings: errors.map((e) => e.message) };
+  const data = build(input, []);
+  pt?.lap("process");
+  pt?.info("points", data.allTs.length);
+  pt?.info("tracks", data.tracks.length);
+  // 多人时段的原始帧在后台继续拉，回来后整份重算，界面先用平台时间线显示（2026-10-27 藕塘 6 型一台 24 小时，帧 48 MB / 7 秒）
+  const refined = framesP.then((logs) => (logs.length ? build(input, logs) : null));
+  return { data, refined };
+}
+
+interface BuildInput {
+  detail: RoomDetail;
+  sns: string[];
+  results: (Res | Error)[];
+  warnings: string[];
+}
+
+/** 把拉回来的数据整理成回放数据；logs 是多人时段的原始上报（还没到时传空数组）。不改 input，可以重复调用 */
+function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<ReturnType<typeof loadFrames>>): ReplayData {
+  const nameOf = Object.fromEntries((detail.devices ?? []).filter((d) => d.sn).map((d) => [d.sn, d.deviceName || d.sn]));
+  const errors: Error[] = [];
 
   const trackMap = new Map<string, Omit<Track, "runs" | "color" | "label">>();
   const getTrack = (sn: string, uid: number) => {
@@ -424,14 +494,12 @@ async function loadReplayDataOnce(
   for (const el of detail.elements ?? []) if (el.sn && el.qingLanConfig?.container) qcBySn[el.sn] = el.qingLanConfig;
 
   {
-    const logs = await framesP;
-    pt?.lap("frames");
     for (const r of logs) {
       if (r instanceof Error) {
         errors.push(new Error(`多人时目标 2 起的姿态没补上：${r.message}`));
         continue;
       }
-      const frames = decodeFrames(r.list);
+      const { frames } = r;
       if (!frames.length) continue;
       const a = frames[0].t;
       const b = frames[frames.length - 1].t + 999;
@@ -548,10 +616,7 @@ async function loadReplayDataOnce(
   for (const tr of tracks) for (const p of tr.points) allTs.push(p.t);
   allTs.sort((a, b) => a - b);
 
-  pt?.lap("process");
-  pt?.info("points", allTs.length);
-  pt?.info("tracks", tracks.length);
-  return { tracks, events, marks, allTs, converted, warnings: errors.map((e) => e.message) };
+  return { tracks, events, marks, allTs, converted, warnings: [...warnings, ...errors.map((e) => e.message)] };
 }
 
 /**

@@ -87,6 +87,15 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
   const [playing, setPlaying] = useState(false);
   const [span, setSpan] = useState("");
   const [q, setQ] = useState<[number, number]>([0, 0]);
+  /** 只认最后一次查询的结果（补全数据后到，期间可能又查了别的时间段） */
+  const queryId = useRef(0);
+  // 关掉回溯后，后台还在拉的多人帧也停下
+  useEffect(
+    () => () => {
+      queryId.current++;
+    },
+    [],
+  );
 
   // 画布引擎；没绑定房间 / 房间加载失败时只显示提示，没有画布
   const hasStage = !!roomId && !roomError;
@@ -128,26 +137,41 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
     if (end - start > MAX_RANGE_DAYS * 864e5) return setMsg({ text: `时间段不能超过 ${MAX_RANGE_DAYS} 天`, err: true });
     if (!list.length) return setMsg({ text: "请至少选择一台设备", err: true });
     engine.current?.pause();
+    const id = ++queryId.current;
     setLoading(true);
     setMsg({ text: "加载中…" });
     try {
       const pt = perfTimer("轨迹回放");
       pt.info("hours", Math.round((end - start) / 36e5));
       pt.info("devices", list.length);
-      const res = await loadReplayData(roomId, d, start, end, list, (done, total) => setMsg({ text: `加载中… ${done}/${total}` }), pt);
+      const load = await loadReplayData(roomId, d, start, end, list, (done, total) => id === queryId.current && setMsg({ text: `加载中… ${done}/${total}` }), pt, () => id !== queryId.current);
+      // 同一份查询被复用时（开发模式下自动查今天跑两遍）只有最后一次接着往下走
+      if (id !== queryId.current) return;
+      const res = load.data;
       setData(res);
       setQ([start, end]);
       engine.current?.setData(res, start, end);
       pt.lap("engine");
       pt.endAfterPaint();
-      const parts = [`${res.tracks.length} 个目标`, `${res.allTs.length} 个轨迹点`, `${res.marks.length} 个事件`];
-      if (res.converted.length) parts.push(`已按安装方向换算坐标：${res.converted.join("、")}`);
-      if (res.warnings.length) parts.push(`${res.warnings.length} 个请求失败：${res.warnings[0]}`);
-      setMsg({ text: parts.join(" · "), err: res.warnings.length > 0 });
-    } catch (e) {
-      setMsg({ text: e instanceof Error ? e.message : String(e), err: true });
-    } finally {
+      setMsg({ text: summary(res, "多人时段的姿态补全中…"), err: res.warnings.length > 0 });
       setLoading(false);
+      // 从第一份显示出来算起，多人姿态还要等多久
+      const pt2 = perfTimer("轨迹回放补全");
+      const more = await load.refined;
+      if (id !== queryId.current) return;
+      pt2.lap("frames");
+      if (more) {
+        setData(more);
+        engine.current?.updateData(more);
+        pt2.info("tracks", more.tracks.length);
+        pt2.endAfterPaint();
+      }
+      const final = more ?? res;
+      setMsg({ text: summary(final), err: final.warnings.length > 0 });
+    } catch (e) {
+      if (id === queryId.current) setMsg({ text: e instanceof Error ? e.message : String(e), err: true });
+    } finally {
+      if (id === queryId.current) setLoading(false);
     }
   }
 
@@ -356,6 +380,14 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
       </div>
     </div>
   );
+}
+
+function summary(res: ReplayData, extra?: string) {
+  const parts = [`${res.tracks.length} 个目标`, `${res.allTs.length} 个轨迹点`, `${res.marks.length} 个事件`];
+  if (res.converted.length) parts.push(`已按安装方向换算坐标：${res.converted.join("、")}`);
+  if (res.warnings.length) parts.push(`${res.warnings.length} 个请求失败：${res.warnings[0]}`);
+  if (extra) parts.push(extra);
+  return parts.join(" · ");
 }
 
 function Now({ clock, data }: { clock: Clock; data: ReplayData | null }) {

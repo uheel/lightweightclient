@@ -188,6 +188,13 @@ export class ReplayEngine {
     this.seek(Math.max(q0, first - 1000));
   }
 
+  /** 换成同一时间段补全后的数据（多人时段的姿态后到），播放位置、视图、播放状态都不变 */
+  updateData(data: ReplayData) {
+    this.data = data;
+    this.resizeTimeline();
+    this.renderFrame(true);
+  }
+
   /** 重绘（选项变化后调用） */
   refresh() {
     this.renderFrame(true);
