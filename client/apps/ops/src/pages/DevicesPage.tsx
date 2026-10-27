@@ -3,7 +3,7 @@ import { App, Button, Empty, Input, Select, Spin } from "antd";
 import { HddOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { deviceLink, perfTimer, type DeviceLink } from "@radar/core";
-import { getAllDevices, getDeviceTypeGroups, getDeviceTypeMap, getRadars } from "../api/device";
+import { CAREGIVER_WATCH_TYPE, getAllDevices, getDeviceTypeGroups, getDeviceTypeMap, getRadars } from "../api/device";
 import { getMasters, MASTER_TYPE } from "../api/master";
 import AddDeviceDialog from "../devices/AddDeviceDialog";
 import DeviceDetail from "../devices/DeviceDetail";
@@ -399,7 +399,7 @@ export default function DevicesPage() {
           <Empty style={{ marginTop: 120 }} description="选择左侧的设备查看详情" />
         )}
       </section>
-      <AddDeviceDialog open={adding} existing={list} defaultType={cat === "master" ? MASTER_TYPE : undefined} onClose={() => setAdding(false)} onCreated={onCreated} />
+      <AddDeviceDialog open={adding} existing={list} defaultType={cat === "master" ? MASTER_TYPE : cat === "watch" ? CAREGIVER_WATCH_TYPE : undefined} onClose={() => setAdding(false)} onCreated={onCreated} />
     </div>
   );
 }

@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
-import { App, Checkbox, Form, Input, Modal, Select, Space } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Checkbox, Form, Input, Modal, Radio, Select, Space } from "antd";
 import {
+  CAREGIVER_WATCH_TYPE,
+  createCaregiverWatch,
   createRadar,
+  getFreeSip,
   getBuildingOptions,
   getFloorOptions,
   getRadars,
@@ -13,6 +16,7 @@ import {
 import { createMaster, MASTER_TYPE } from "../api/master";
 import { placeInLayout, SLOT_TEXT, slotSource, type SlotSource } from "../rooms/radarSlot";
 import { SlotAreaLine } from "../rooms/AreaSelect";
+import TypeCascader, { type TypeGroup } from "./TypeCascader";
 import type { InstallArea } from "../rooms/installArea";
 
 interface Values {
@@ -23,9 +27,16 @@ interface Values {
   floorId?: string;
   roomId?: string;
   description?: string;
+  /** 护工手表：0 局域网，1 云对讲 */
+  callType?: 0 | 1;
+  netLocalIp?: string;
+  mac?: string;
 }
 
-/** 添加设备：雷达（字段同平台雷达设备页的"新增"）或管理主机（同平台管理主机页的"新增"：只有名称和序列号） */
+/** 护工手表云对讲用的 SIP 账号（平台账号池里取的，保存时才占用） */
+type Sip = { sipAccount?: string; sipPassword?: string; sipServer?: string };
+
+/** 添加设备：雷达（字段同平台雷达设备页的"新增"）、管理主机（同平台管理主机页的"新增"：只有名称和序列号）或护工手表（同平台护工手表管理的"新增"） */
 export default function AddDeviceDialog({ open, existing, defaultType, onClose, onCreated }: {
   open: boolean;
   /** 打开时默认选中的设备类型（例如列表正按管理主机筛选时） */
@@ -37,7 +48,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
 }) {
   const { message } = App.useApp();
   const [form] = Form.useForm<Values>();
-  const [types, setTypes] = useState<{ value: number; label: string }[]>([]);
+  const [radarTypes, setRadarTypes] = useState<{ value: number; label: string }[]>([]);
   const [buildings, setBuildings] = useState<Option[]>([]);
   const [floors, setFloors] = useState<Option[]>([]);
   const [rooms, setRooms] = useState<Option[]>([]);
@@ -53,14 +64,17 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
   const [area, setArea] = useState<InstallArea | null>(null);
   /** 新建空白位置时的装法：1 侧装，0 顶装 */
   const [mount, setMount] = useState<0 | 1>(1);
+  const callType = Form.useWatch("callType", form);
+  const [sip, setSip] = useState<Sip>();
+  const [sipLoading, setSipLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     form.resetFields();
     if (defaultType !== undefined) form.setFieldsValue({ deviceType: defaultType });
     setMount(1);
-    // 雷达各型号 + 管理主机（字典里管理主机归在外设分组，单独加）
-    getRadarTypes().then((t) => setTypes([...t, { value: MASTER_TYPE, label: "管理主机" }]), () => setTypes([{ value: MASTER_TYPE, label: "管理主机" }]));
+    setSip(undefined);
+    getRadarTypes().then(setRadarTypes, () => setRadarTypes([]));
     getBuildingOptions().then(setBuildings, () => {});
   }, [open, form, defaultType]);
 
@@ -73,11 +87,43 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
     if (floorId) getRoomOptions(floorId).then(setRooms, () => {});
   }, [floorId]);
 
+  /** 设备类型分栏：大类 → 型号。雷达型号来自平台字典，管理主机、护工手表目前各一个型号 */
+  const groups = useMemo<TypeGroup[]>(
+    () => [
+      { value: "radar", label: "毫米波雷达", types: radarTypes },
+      { value: "master", label: "管理主机", types: [{ value: MASTER_TYPE, label: "管理主机" }] },
+      { value: "watch", label: "手表", types: [{ value: CAREGIVER_WATCH_TYPE, label: "护工手表" }] },
+    ],
+    [radarTypes],
+  );
+
   const isMaster = deviceType === MASTER_TYPE;
+  const isWatch = deviceType === CAREGIVER_WATCH_TYPE;
+  /** 不装在房间里的设备 */
+  const noRoom = isMaster || isWatch;
+
+  async function pickSip() {
+    setSipLoading(true);
+    try {
+      const s = await getFreeSip();
+      if (!s.sipAccount) throw new Error("平台账号池里没有空闲的 SIP 账号");
+      setSip(s);
+    } catch (e) {
+      message.error(`取 SIP 账号失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSipLoading(false);
+    }
+  }
+
+  // 护工手表选云对讲时自动取一个 SIP 账号
+  useEffect(() => {
+    if (isWatch && callType === 1 && !sip) pickSip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWatch, callType]);
 
   useEffect(() => {
     setSlot(undefined);
-    if (!roomId || isMaster) return;
+    if (!roomId || noRoom) return;
     let alive = true;
     slotSource({ sn: "", deviceType } as Radar, roomId).then(
       (x) => {
@@ -90,10 +136,14 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
     return () => {
       alive = false;
     };
-  }, [roomId, deviceType, isMaster]);
+  }, [roomId, deviceType, noRoom]);
 
   async function submit() {
     const v = await form.validateFields();
+    if (v.deviceType === CAREGIVER_WATCH_TYPE && v.callType === 1 && !sip?.sipAccount) {
+      message.warning("云对讲要先取到一个 SIP 账号");
+      return;
+    }
     setSaving(true);
     try {
       const sn = v.sn.trim();
@@ -102,6 +152,22 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
         // 管理主机不装在房间里；它管哪些房间在主机详情的"覆盖房间"里勾
         await createMaster({ sn, deviceName, description: v.description?.trim() || undefined });
         message.success(`已添加管理主机 ${deviceName}，接着在它的"覆盖房间"里勾上要管的房间`);
+        onCreated(sn);
+        return;
+      }
+      if (v.deviceType === CAREGIVER_WATCH_TYPE) {
+        const cloud = v.callType === 1;
+        await createCaregiverWatch({
+          deviceName,
+          imei: sn,
+          callType: cloud ? 1 : 0,
+          netLocalIp: cloud ? undefined : v.netLocalIp?.trim(),
+          sipAccount: cloud ? sip?.sipAccount : undefined,
+          sipPassword: cloud ? sip?.sipPassword : undefined,
+          mac: v.mac?.trim() || undefined,
+          description: v.description?.trim() || undefined,
+        });
+        message.success(`已添加护工手表 ${deviceName}${cloud ? `，SIP 号码 ${sip?.sipAccount}` : ""}`);
         onCreated(sn);
         return;
       }
@@ -138,9 +204,12 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
       width={560}
     >
       <Form form={form} layout="vertical" requiredMark="optional" style={{ marginTop: 16 }}>
+        <Form.Item name="deviceType" label="设备类型" rules={[{ required: true, message: "请选择设备型号" }]}>
+          <TypeCascader groups={groups} />
+        </Form.Item>
         <Form.Item
           name="sn"
-          label="序列号（SN）"
+          label={isWatch ? "序列号 / IMEI" : "序列号（SN）"}
           extra="全平台唯一"
           rules={[
             { required: true, whitespace: true, message: "请输入序列号" },
@@ -154,21 +223,59 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
         >
           <Input className="mono" maxLength={64} placeholder="请输入" allowClear />
         </Form.Item>
-        <Form.Item name="deviceType" label="设备类型" rules={[{ required: true, message: "请选择设备类型" }]}>
-          <Select options={types} placeholder="请选择" showSearch optionFilterProp="label" />
-        </Form.Item>
         <Form.Item
           name="deviceName"
           label="设备名称"
           rules={[
             { required: true, whitespace: true, message: "请输入设备名称" },
             // 平台限制：雷达 32 个字，管理主机 64 个字
-            { max: isMaster ? 64 : 32, message: `最多 ${isMaster ? 64 : 32} 个字` },
+            { max: noRoom ? 64 : 32, message: `最多 ${noRoom ? 64 : 32} 个字` },
           ]}
         >
-          <Input maxLength={isMaster ? 64 : 32} placeholder={isMaster ? "例如 1 楼护士站" : "例如 101 房间"} />
+          <Input maxLength={noRoom ? 64 : 32} placeholder={isMaster ? "例如 1 楼护士站" : isWatch ? "例如 2 楼护工 1 号" : "例如 101 房间"} />
         </Form.Item>
-        {isMaster ? (
+        {isWatch ? (
+          <>
+            <Form.Item name="callType" label="通话方式" initialValue={0}>
+              <Radio.Group
+                optionType="button"
+                options={[
+                  { value: 0, label: "局域网" },
+                  { value: 1, label: "云对讲" },
+                ]}
+              />
+            </Form.Item>
+            {callType === 1 ? (
+              <Form.Item label="SIP 账号" extra="从平台账号池里随机取一个，添加后这个号码就归这块手表">
+                <Space>
+                  <span className="mono">{sip?.sipAccount ?? (sipLoading ? "正在取…" : "—")}</span>
+                  {sip?.sipServer && <span className="muted small">{sip.sipServer}</span>}
+                  <Button size="small" loading={sipLoading} onClick={pickSip}>
+                    换一个
+                  </Button>
+                </Space>
+              </Form.Item>
+            ) : (
+              <Form.Item
+                name="netLocalIp"
+                label="手表 IP 地址"
+                extra="手表在局域网里的 IP，主机和雷达按这个地址呼它"
+                rules={[
+                  { required: true, whitespace: true, message: "请输入手表的 IP 地址" },
+                  { pattern: /^\s*(\d{1,3}\.){3}\d{1,3}\s*$/, message: "格式像 192.168.1.20" },
+                ]}
+              >
+                <Input className="mono" maxLength={64} placeholder="例如 192.168.1.20" />
+              </Form.Item>
+            )}
+            <Form.Item name="mac" label="蓝牙 MAC" extra="可以不填">
+              <Input className="mono" maxLength={64} placeholder="例如 AA:BB:CC:DD:EE:FF" />
+            </Form.Item>
+            <p className="muted small" style={{ marginTop: -8 }}>
+              护工手表不装在房间里，也不绑长者；护工在手表上用自己的编号登录后就能用。
+            </p>
+          </>
+        ) : isMaster ? (
           <p className="muted small" style={{ marginTop: -8 }}>
             管理主机不装在房间里。添加后在它的"覆盖房间"里勾上要管的房间，主机上才有这些房间的雷达；云对讲还要给主机启用 SIP 账号。
           </p>
@@ -200,7 +307,7 @@ export default function AddDeviceDialog({ open, existing, defaultType, onClose, 
           </Space.Compact>
         </Form.Item>
         )}
-        {!isMaster && roomId && slot && slot.kind !== "has" && (
+        {!noRoom && roomId && slot && slot.kind !== "has" && (
           <Form.Item style={{ marginTop: -12 }}>
             <Checkbox checked={place} onChange={(e) => setPlace(e.target.checked)}>
               {slot.kind === "roomType" && slot.typeName ? `从户型"${slot.typeName}"拷一个雷达位置（沿用户型里的安装方式和区域）` : SLOT_TEXT[slot.kind]}

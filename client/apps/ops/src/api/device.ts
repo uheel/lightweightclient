@@ -122,6 +122,37 @@ export async function createSlave(d: { deviceName: string; sn: string; deviceTyp
   return res.data;
 }
 
+/** 护工手表（B29），平台"护工手表管理"只管这一型；字典里归在 WATCH 分组 */
+export const CAREGIVER_WATCH_TYPE = 117;
+
+export interface NewCaregiverWatch {
+  deviceName: string;
+  /** 序列号或 IMEI，全平台唯一；全类型设备列表里就是它的 sn */
+  imei: string;
+  /** 0 局域网（要填手表的局域网 IP），1 云对讲（要占一个 SIP 账号） */
+  callType: 0 | 1;
+  netLocalIp?: string;
+  sipAccount?: string;
+  sipPassword?: string;
+  /** 蓝牙 MAC，可不填 */
+  mac?: string;
+  description?: string;
+}
+
+/**
+ * 新增护工手表，和平台"护工手表管理"的"新增"一样：POST /api/monitor-watch，返回 id。
+ * watchType 固定 91（网页端表单的隐藏值）。IMEI 重复时平台报"Device 【x】 already exists"（2026-10-27 李虎实测，测试手表已删）
+ */
+export async function createCaregiverWatch(w: NewCaregiverWatch) {
+  const res = await api.post<string>("/api/monitor-watch", { ...w, deviceType: CAREGIVER_WATCH_TYPE, watchType: 91, sortOrder: 0 });
+  return res.data;
+}
+
+/** 平台账号池里随机一个空闲 SIP 账号（只是取一个，保存设备时才占用；每次调用给的不一样） */
+export async function getFreeSip() {
+  return (await api.get<{ sipAccount?: string; sipPassword?: string; sipServer?: string }>("/api/device-sip/available")).data ?? {};
+}
+
 /** 设备记录（GET /api/device/v3?id=），编辑时要整条带回 */
 interface DeviceRecord {
   id: string;
