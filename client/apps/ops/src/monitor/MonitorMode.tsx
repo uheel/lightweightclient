@@ -12,6 +12,7 @@ import { STATE_TEXT } from "../pages/RealtimePage";
 import { bedName, bedVitals, CARE_GROUPS, durationText, hasVitals, useMonitorData, type BedVitals, type RoomKind, type RoomTile } from "./useMonitorData";
 import { useLiveTargets, type LiveTarget } from "./useLiveTargets";
 import { replayPalette, saveScheme, savedScheme, SCHEMES, schemeCss, type Scheme } from "./schemes";
+import { enterFullscreen, isFullscreen, leaveFullscreen } from "../workspace/fullscreen";
 import "./monitor.css";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -44,32 +45,6 @@ function liveToRoom(c: QlConfig, x: number, y: number): [number, number] {
   if (dir === 3) return [cx + x, cy - y];
   if (dir === 2) return [cx - y, cy - x];
   return [cx + y, cy + x];
-}
-
-const currentWindow = () => import("@tauri-apps/api/window").then((m) => m.getCurrentWindow());
-/** 进全屏前窗口是不是最大化的，退出全屏时还原 */
-let wasMaximized = false;
-
-/**
- * 全屏。Windows 上无边框窗口有两个坑，都会让网页区域比屏幕矮、底下露出一条底色：
- * 1. 最大化状态下直接全屏，网页还停在最大化时的高度（屏幕减任务栏），所以先取消最大化；
- * 2. 窗口带阴影时也会少一截，全屏期间关掉阴影。
- */
-async function enterFullscreen() {
-  const w = await currentWindow();
-  wasMaximized = await w.isMaximized();
-  if (wasMaximized) await w.unmaximize();
-  await w.setShadow(false);
-  await w.setFullscreen(true);
-}
-
-async function leaveFullscreen() {
-  const w = await currentWindow();
-  if (!(await w.isFullscreen())) return;
-  await w.setFullscreen(false);
-  await w.setShadow(true);
-  if (wasMaximized) await w.maximize();
-  wasMaximized = false;
 }
 
 /** 告警卡片的级别：未处理的护理告警红，未处理的离线 / 安装姿态橙，已处理的灰 */
@@ -124,7 +99,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
 
   const [fullscreen, setFullscreen] = useState(false);
   async function toggleFullscreen() {
-    const next = !(await currentWindow().then((w) => w.isFullscreen()));
+    const next = !(await isFullscreen());
     await (next ? enterFullscreen() : leaveFullscreen());
     setFullscreen(next);
   }
