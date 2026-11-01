@@ -1,5 +1,6 @@
 import { assetUrl } from "@radar/core";
-import { decoratedInClient } from "../../rooms/furniture/catalog";
+import type { PlanElement } from "../../api/room";
+import { decoratedInClient, isDecor } from "../../rooms/furniture/catalog";
 import { boundRect, containerRect, type QlConfig } from "../../rooms/qinglan";
 import { clamp, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
 
@@ -429,7 +430,7 @@ export class ReplayEngine {
         }
       }
     }
-    for (const el of elements) if (!this.clientDecor || (el.type !== 2 && el.type !== 4)) this.drawElement(ctx, el, s);
+    for (const el of elements) if (!this.clientDecor || !isDecor(el as PlanElement)) this.drawElement(ctx, el, s);
     if (this.clientDecor) return;
     ctx.lineWidth = bg.strokeWidth || 2;
     ctx.strokeStyle = bg.stroke || this.C.roomStroke;
