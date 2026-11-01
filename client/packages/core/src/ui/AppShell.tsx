@@ -18,6 +18,7 @@ export interface ShellNavItem<K extends string> {
  */
 export function AppShell<K extends string>({
   appName,
+  logo,
   org,
   live,
   user,
@@ -30,6 +31,8 @@ export function AppShell<K extends string>({
   children,
 }: {
   appName: string;
+  /** 不传用默认 Logo */
+  logo?: ReactNode;
   /** 标题栏左侧的机构选择 */
   org?: ReactNode;
   /** 实时状态：文字和圆点颜色 */
@@ -58,7 +61,7 @@ export function AppShell<K extends string>({
     <div className="shell">
       <header className="shell-header" data-tauri-drag-region>
         <div className="shell-brand" data-tauri-drag-region>
-          <img src="/logo.svg" alt="" width={24} height={24} />
+          {logo ?? <img src="/logo.svg" alt="" width={24} height={24} />}
           {appName}
         </div>
         {org}

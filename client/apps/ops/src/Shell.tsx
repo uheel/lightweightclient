@@ -28,6 +28,7 @@ import type { NavKey } from "./guide/steps";
 import { WorkTabs, type OpenKey, type TabKey } from "./workspace/WorkTabs";
 import { Workbench } from "./workspace/Workbench";
 import { isLink, useNames, type ItemKey } from "./workspace/names";
+import { BrandLogo, refreshBrand, useBrand } from "./workspace/brand";
 import { moduleAllowed } from "./workspace/modules";
 import LinkPage from "./pages/LinkPage";
 import { PaneActive } from "./workspace/dataChange";
@@ -70,6 +71,12 @@ export default function Shell({ s }: { s: Session }) {
   );
   const rt = useRealtime(s.orgId, onEvent);
   const names = useNames();
+  const brand = useBrand();
+
+  // 名称和 Logo 按机构：登录、切换机构时读一次
+  useEffect(() => {
+    refreshBrand();
+  }, [s.orgId]);
 
   /** 打开模块：已经开着就切过去；监控不开标签，打开全屏监控模式 */
   const go = useCallback((k: ItemKey | "home") => {
@@ -137,7 +144,8 @@ export default function Shell({ s }: { s: Session }) {
     // 以 orgId 作为 key：切换机构时快速开始的检查结果和本机记录都换成新机构的
     <GuideProvider key={s.orgId} orgId={s.orgId} nav={isLink(active) ? "home" : active} onNav={go}>
       <AppShell
-        appName="Radar Config"
+        appName={brand.name}
+        logo={<BrandLogo size={24} />}
         org={<OrgPicker s={s} className="shell-org" fallback={<span className="shell-pill">{s.orgName}</span>} />}
         live={{ text: `实时${st.text}`, color: st.dot, title: "SignalR /hub/message" }}
         user={{

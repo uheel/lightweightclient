@@ -13,6 +13,7 @@ import { bedName, bedVitals, CARE_GROUPS, durationText, hasVitals, useMonitorDat
 import { useLiveTargets, type LiveTarget } from "./useLiveTargets";
 import { replayPalette, saveScheme, savedScheme, SCHEMES, schemeCss, type Scheme } from "./schemes";
 import { enterFullscreen, isFullscreen, leaveFullscreen } from "../workspace/fullscreen";
+import { BrandLogo, brandName } from "../workspace/brand";
 import "./monitor.css";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -129,8 +130,8 @@ export default function MonitorMode({ s, rt, initialRoom, onExit }: { s: Session
       <div className="monitor" data-scheme={scheme.key}>
         <header className="mon-head" data-tauri-drag-region>
           <div className="mon-brand" data-tauri-drag-region>
-            <img src="/logo.svg" alt="" width={22} height={22} />
-            <span>Radar Config</span>
+            <BrandLogo size={22} />
+            <span>{brandName()}</span>
             <span className="mon-pill">监控模式</span>
           </div>
           <span className="mon-org" data-tauri-drag-region>

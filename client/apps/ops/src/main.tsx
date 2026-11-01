@@ -8,6 +8,7 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import "dayjs/locale/zh-cn";
 import { AlertPopup, baseTheme, isPopupWindow } from "@radar/core";
 import RootApp from "./App";
+import { brandName } from "./workspace/brand";
 import "./styles.css";
 
 dayjs.extend(relativeTime);
@@ -26,7 +27,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <ConfigProvider locale={zhCN} theme={baseTheme}>
       <AntApp>
         {/* 同一份页面也给告警弹窗窗口用（packages/core/rust/alert_popup.rs 用 index.html#alert-popup 打开） */}
-        {isPopupWindow ? <AlertPopup appName="Radar Config" /> : <RootApp />}
+        {isPopupWindow ? <AlertPopup appName={brandName()} /> : <RootApp />}
       </AntApp>
     </ConfigProvider>
   </React.StrictMode>,

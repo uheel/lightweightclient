@@ -12,6 +12,8 @@ const SCOPE_ORG = 2;
 export interface ClientAssets {
   /** 楼栋 id → 图片文件 id */
   buildings?: Record<string, string>;
+  /** 客户端名称和 Logo（文件 id），没有就是默认，见 workspace/brand.tsx */
+  brand?: { name?: string; logo?: string };
 }
 
 export async function getClientAssets(): Promise<ClientAssets> {

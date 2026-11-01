@@ -917,6 +917,7 @@ topic `sdb/master/<SN>/iot`（下行）/ `…/ak`（上行），消息体 `{comm
 - `DELETE /sapi/oss?id=` 删文件或文件夹（`data: 1`）；`POST /sapi/oss/download` `{keys: [...]}` 打包成 zip
 - **读文件不用登录**：`GET /sapi/oss/<id>` 不带 token、不带 cookie 也是 200，可以直接 `<img src>`
   - `?w=` / `?h=` 服务器缩图（9MB 的 PNG `?w=64` 只有 7.6KB），`?b64=true` 返回 base64（会转成 JPEG）
+  - **缩图丢透明**：透明底的 webp 带 `?w=` 后透明处变成不透明黑色，不带参数的原图正常（2026-11-01 李虎实测）。要透明就读原图
   - 响应头 `Cache-Control: public, max-age=31536000, immutable`，没有 ETag。**replace 之后同一地址会一直拿到旧缓存**；平台前端靠加 `?t=随机数` 刷新。客户端换图最好上传新文件、改指向、删旧文件
   - **没有 `Access-Control-Allow-Origin`**：客户端 webview 里用 `<img>` 可以，用 `fetch` 跨域读不行，要读内容走 Rust
   - 删掉之后 `GET` 是 404

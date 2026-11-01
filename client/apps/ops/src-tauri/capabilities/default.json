@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "core:window:allow-set-fullscreen",
     "core:window:allow-set-shadow",
+    "core:window:allow-set-title",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "updater:default",

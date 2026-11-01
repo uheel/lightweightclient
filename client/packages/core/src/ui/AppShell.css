@@ -12,7 +12,7 @@ body {
   height: 40px; flex: none; display: flex; align-items: center; gap: 12px;
   padding: 0 0 0 14px; -webkit-user-select: none; user-select: none; background: #fff; border-bottom: 1px solid #E8EAF2;
 }
-.shell-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: #111441; }
+.shell-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: #111441; white-space: nowrap; flex: none; }
 .shell-org { width: 220px; }
 .shell-header .ant-select-selector { height: 28px !important; }
 .shell-pill {

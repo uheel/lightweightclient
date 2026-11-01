@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { App, Button, Checkbox, Radio, Spin, Switch } from "antd";
-import { MenuOutlined } from "@ant-design/icons";
+import { App, Button, Checkbox, Input, Radio, Spin, Switch } from "antd";
+import { MenuOutlined, UploadOutlined } from "@ant-design/icons";
 import { ModuleName } from "../workspace/ModuleName";
+import { BRAND_NAME_MAX, BrandLogo, DEFAULT_NAME, resetBrandLogo, saveBrandLogo, saveBrandName, useBrand } from "../workspace/brand";
+import { IMAGE_ACCEPT } from "../api/files";
 import { ALERT_GROUPS } from "../api/device";
 import { setPopupSettings, usePopupSettings } from "../alerts/popupSettings";
 import { getOrgSettings, onWatchPushChanged, setNotifyWatch } from "../api/orgSettings";
 import { getAlertTypeConfig, getAlertTypes, isOurAlertType, setWatchPush, watchPushOn, type AlertType, type AlertTypeConfig } from "../api/alertType";
 
-/** 系统设置：告警弹窗开关；推送告警到护工手表（机构设置，存在平台）。工作台的类别和模块在"菜单设置"里改 */
+/** 系统设置：名称和 Logo（机构设置，存在平台）；告警弹窗开关；推送告警到护工手表（机构设置，存在平台）。工作台的类别和模块在"菜单设置"里改 */
 export default function SettingsPage({ onOpen }: { onOpen: (k: "menus") => void }) {
   return (
     <div className="page">
@@ -18,8 +20,82 @@ export default function SettingsPage({ onOpen }: { onOpen: (k: "menus") => void 
           <ModuleName k="menus" />
         </Button>
       </div>
+      <BrandCard />
       <AlertPopupCard />
       <WatchPushCard />
+    </div>
+  );
+}
+
+/** 客户端名称和 Logo：存在平台、按机构；切换机构时外壳重新读，这里跟着变 */
+function BrandCard() {
+  const { message } = App.useApp();
+  const b = useBrand();
+  const [draft, setDraft] = useState(b.customName ?? "");
+  const [busy, setBusy] = useState<"name" | "logo">();
+  const nameChanged = draft.trim() !== (b.customName ?? "");
+
+  useEffect(() => setDraft(b.customName ?? ""), [b.customName]);
+
+  async function run(kind: "name" | "logo", f: () => Promise<void>) {
+    setBusy(kind);
+    try {
+      await f();
+    } catch (e) {
+      message.error(`保存失败：${(e as Error).message}`);
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  function pickLogo() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = IMAGE_ACCEPT;
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) run("logo", () => saveBrandLogo(file));
+    };
+    input.click();
+  }
+
+  return (
+    <div className="ops-card settings-popup">
+      <h2>
+        名称和 Logo
+        <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+          显示在登录页、标题栏、监控模式、告警弹窗和窗口标题上。存在平台上，当前机构的人都生效；登录页显示这台电脑上次用过的。安装包和桌面图标不会变
+        </span>
+      </h2>
+      <div className="settings-popup-row">
+        <span style={{ width: 64, flex: "none" }}>名称</span>
+        <Input
+          style={{ width: 240 }}
+          maxLength={BRAND_NAME_MAX}
+          showCount
+          placeholder={DEFAULT_NAME}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPressEnter={() => nameChanged && run("name", () => saveBrandName(draft))}
+        />
+        <Button type="primary" loading={busy === "name"} disabled={!nameChanged} onClick={() => run("name", () => saveBrandName(draft))}>
+          保存
+        </Button>
+        <span className="muted">留空用默认名称</span>
+      </div>
+      <div className="settings-popup-row">
+        <span style={{ width: 64, flex: "none" }}>Logo</span>
+        <BrandLogo size={48} />
+        <Button icon={<UploadOutlined />} loading={busy === "logo"} onClick={pickLogo}>
+          更换
+        </Button>
+        {b.customLogo && (
+          <Button disabled={busy === "logo"} onClick={() => run("logo", resetBrandLogo)}>
+            恢复默认
+          </Button>
+        )}
+        <span className="muted">建议用正方形、透明底的 PNG</span>
+      </div>
     </div>
   );
 }

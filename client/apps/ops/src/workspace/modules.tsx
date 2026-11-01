@@ -27,7 +27,7 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   members: { key: "members", label: "长者档案", icon: <TeamOutlined />, desc: "长者信息、入住与床位", tint: "#FFF4E0", color: "#9A5B00" },
   caregivers: { key: "caregivers", label: "护理班组", icon: <SolutionOutlined />, desc: "护理员、护理组与负责的设备", tint: "#FFF4E0", color: "#9A5B00" },
   rooms: { key: "rooms", label: "房间诊断", icon: <MedicineBoxOutlined />, desc: "逐间检查布置与设备", tint: "#E6F3F7", color: "#1E83A3" },
-  settings: { key: "settings", label: "系统设置", icon: <SettingOutlined />, desc: "告警弹窗、推送到护工手表", tint: "#F1F2F7", color: "#5B6078" },
+  settings: { key: "settings", label: "系统设置", icon: <SettingOutlined />, desc: "名称和 Logo、告警弹窗、推送到护工手表", tint: "#F1F2F7", color: "#5B6078" },
   menus: { key: "menus", label: "菜单设置", icon: <MenuOutlined />, desc: "工作台类别和模块的名字、顺序、隐藏", tint: "#F1F2F7", color: "#5B6078" },
   dataWall: { key: "dataWall", label: "数据魔墙", icon: <DashboardOutlined />, desc: "全房间实时：呼吸、心率、睡眠、有人无人", tint: "#E7F6F3", color: "#0F8A72" },
   wallSettings: { key: "wallSettings", label: "魔墙设置", icon: <ControlOutlined />, desc: "轮播，页面的显示、顺序和停留时间", tint: "#E7F6F3", color: "#0F8A72" },
