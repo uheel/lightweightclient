@@ -28,7 +28,7 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   rooms: { key: "rooms", label: "房间诊断", icon: <MedicineBoxOutlined />, desc: "逐间检查布置与设备", tint: "#E6F3F7", color: "#1E83A3" },
   settings: { key: "settings", label: "系统设置", icon: <SettingOutlined />, desc: "告警弹窗、推送到护工手表", tint: "#F1F2F7", color: "#5B6078" },
   menus: { key: "menus", label: "菜单设置", icon: <MenuOutlined />, desc: "工作台类别和模块的名字、顺序、隐藏", tint: "#F1F2F7", color: "#5B6078" },
-  dataWall: { key: "dataWall", label: "数据魔墙", icon: <DashboardOutlined />, desc: "运营展示大屏：告警处置、睡眠健康", tint: "#E7F6F3", color: "#0F8A72" },
+  dataWall: { key: "dataWall", label: "数据魔墙", icon: <DashboardOutlined />, desc: "全房间实时：呼吸、心率、睡眠、有人无人", tint: "#E7F6F3", color: "#0F8A72" },
   realtime: { key: "realtime", label: "实时推送", icon: <NotificationOutlined />, desc: "平台推送消息（调试用）", tint: "#F1F2F7", color: "#5B6078" },
 };
 

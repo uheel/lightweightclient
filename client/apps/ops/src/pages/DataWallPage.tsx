@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Segmented, Tooltip } from "antd";
-import { FullscreenOutlined, LeftOutlined, PauseOutlined, CaretRightOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Button, InputNumber, Popover, Radio, Segmented, Switch, TreeSelect } from "antd";
+import { ExclamationCircleOutlined, FullscreenOutlined, LeftOutlined, RightOutlined, SettingOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { isTauri, session } from "@radar/core";
-import { useWallData } from "../datawall/data";
-import { computeStats, RANGES, SCORE_BANDS, TIMELY_MINUTES, type RangeKey, type WallStats } from "../datawall/stats";
-import { DayBars, DayLine, HBars, Heatmap, StackCols } from "../datawall/charts";
+import { isTauri, session, type RealtimeState } from "@radar/core";
+import type { OpsAlert } from "../api/device";
+import { bedName, CARE_GROUPS, durationText, useMonitorData } from "../monitor/useMonitorData";
+import { buildRooms, countCells, freshCareAlerts, getSlots, inScope, isUrgent, layoutHint, layoutWall, loadSavedSlots, loadSettings, saveSettings, saveSlots, scopeTree, suggestGrid, type Cell, type PlacedRoom, type Slot, type Tier, type WallRow, type WallSettings } from "../datawall/model";
 import { enterFullscreen, leaveFullscreen } from "../workspace/fullscreen";
 import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import "../datawall/wall.css";
@@ -13,176 +13,24 @@ import "../datawall/wall.css";
 /** 舞台按 1920×1080 设计，整体等比缩放 */
 const W = 1920;
 const H = 1080;
-/** 每页停留 */
+/** 放不下时每页停留 */
 const PAGE_MS = 20_000;
-const RANGE_KEY = "ops.dataWall.range";
+/** 长期开着时重取房间、雷达、长者的间隔（状态靠推送） */
+const RELOAD_MS = 10 * 60_000;
+const NAMES_KEY = "ops.dataWall.names";
+const REFRESH_ON: Topic[] = ["device", "space", "member"];
+/** 自动滚动的速度（舞台像素 / 秒） */
+const SCROLL_SPEED = 30;
+const noAlerts = () => {};
+const NO_SLOTS = new Map<string, Slot>();
 
-const pct = (v?: number) => (v === undefined ? "—" : `${Math.round(v * 100)}%`);
-const num = (v?: number, d = 0) => (v === undefined ? "—" : v.toFixed(d));
-/** 分钟 → "3.5 分钟" / "3 小时 46 分" */
-function minText(v?: number) {
-  if (v === undefined) return "—";
-  if (v < 60) return `${v < 10 ? v.toFixed(1) : Math.round(v)} 分钟`;
-  const m = Math.round(v);
-  return `${Math.floor(m / 60)} 小时${m % 60 ? ` ${m % 60} 分` : ""}`;
-}
-/** 坐标轴上的分钟：90 → "1.5时" */
-const minTick = (v: number) => (v < 60 ? `${v}分` : `${+(v / 60).toFixed(1)}小时`);
-const hourTick = (v: number) => `${+(v / 60).toFixed(1)}小时`;
-
-function Kpi({ label, value, unit, sub, tone }: { label: string; value: ReactNode; unit?: string; sub?: ReactNode; tone?: "good" | "bad" }) {
-  return (
-    <div className={`wall-kpi${tone ? ` wall-kpi-${tone}` : ""}`}>
-      <div className="wall-kpi-label">{label}</div>
-      <div className="wall-kpi-value">
-        {value}
-        {unit && <span className="wall-kpi-unit">{unit}</span>}
-      </div>
-      {sub && <div className="wall-kpi-sub">{sub}</div>}
-    </div>
-  );
-}
-
-function Panel({ title, note, children, style }: { title: string; note?: ReactNode; children: ReactNode; style?: CSSProperties }) {
-  return (
-    <section className="wall-panel" style={style}>
-      <header>
-        <h3>{title}</h3>
-        {note && <span>{note}</span>}
-      </header>
-      <div className="wall-panel-body">{children}</div>
-    </section>
-  );
-}
-
-/** 面板尺寸（舞台像素）：一行两块，宽的 1104、窄的 712；两行，每行 352 */
-const WIDE = 1104;
-const NARROW = 712;
-const ROW = 352;
-/** 面板里图表的大小（减去内边距和标题） */
-const cw = (pw: number) => pw - 48;
-const CH = ROW - 48 - 44;
-
-function OverviewPage({ st }: { st: WallStats }) {
-  const a = st.alerts;
-  const days = st.days.length;
-  return (
-    <>
-      <div className="wall-kpis">
-        <Kpi label="在住长者" value={st.members.total} unit="人" sub={`其中 ${st.members.sleepers} 人有睡眠监测`} />
-        <Kpi label="床位入住率" value={pct(st.beds.total ? st.beds.occupied / st.beds.total : undefined)} sub={`${st.beds.occupied} / ${st.beds.total} 张床`} />
-        <Kpi label="监测雷达在线" value={st.radars.online} unit={`/ ${st.radars.total} 台`} sub={`在线率 ${pct(st.radars.total ? st.radars.online / st.radars.total : undefined)}`} />
-        <Kpi
-          label="连续安全天数"
-          value={`${st.safeDays.value}${st.safeDays.atLeast ? "+" : ""}`}
-          unit="天"
-          sub={st.safeDays.atLeast ? "统计范围内跌倒、坐地告警都及时处理" : `距最近一次跌倒 / 坐地告警超 ${TIMELY_MINUTES} 分钟才处理`}
-          tone={st.safeDays.value >= 7 ? "good" : undefined}
-        />
-        <Kpi label="护理告警" value={a.total} unit="次" sub={`日均 ${num(a.total / days, 1)} 次`} />
-        <Kpi label="平均睡眠评分" value={num(st.sleep.avgScore)} unit="分" sub={st.sleep.avgScore === undefined ? "暂无睡眠报告" : "按每人每晚的报告平均"} />
-      </div>
-      <div className="wall-grid">
-        <Panel title="每日护理告警" note="场景、事件、紧急求助三类；不含设备离线" style={{ width: WIDE }}>
-          <DayBars days={st.days} values={a.perDay} w={cw(WIDE)} h={CH} unit=" 次" />
-        </Panel>
-        <Panel title="告警类型" note={`共 ${a.total} 次`} style={{ width: NARROW }}>
-          <HBars items={a.types} w={cw(NARROW)} />
-        </Panel>
-        <Panel title="长者年龄" note={st.members.ageUnknown ? `${st.members.ageUnknown} 人未填年龄` : undefined} style={{ width: NARROW }}>
-          <HBars items={st.members.ageBuckets} w={cw(NARROW)} fmt={(v) => `${v} 人`} />
-        </Panel>
-        <Panel title="告警处理结果" note="已处理告警的处理类型" style={{ width: WIDE }}>
-          <HBars items={a.processTypes} w={cw(WIDE)} fmt={(v) => `${v} 次`} />
-        </Panel>
-      </div>
-    </>
-  );
-}
-
-function AlertPage({ st }: { st: WallStats }) {
-  const a = st.alerts;
-  return (
-    <>
-      <div className="wall-kpis">
-        <Kpi label="处理用时（中位数）" value={minText(a.lagMedian)} sub="从告警发生到点了处理" tone={a.lagMedian !== undefined && a.lagMedian <= TIMELY_MINUTES ? "good" : "bad"} />
-        <Kpi label={`${TIMELY_MINUTES} 分钟内处理`} value={pct(a.timelyRate)} sub={`占全部 ${a.total} 次护理告警`} />
-        <Kpi label="误报占比" value={pct(a.falseRate)} sub="处理类型为“误报”的比例" />
-        <Kpi label="待处理" value={a.pending} unit="条" sub="近 31 天内还没处理的护理告警" tone={a.pending ? "bad" : "good"} />
-      </div>
-      <div className="wall-grid">
-        <Panel title="每日处理用时（中位数）" note={`虚线为目标 ${TIMELY_MINUTES} 分钟`} style={{ width: WIDE }}>
-          <DayLine days={st.days} values={a.lagPerDay} w={cw(WIDE)} h={CH} fmt={minTick} label={minText} minutes target={{ value: TIMELY_MINUTES, label: `目标 ${TIMELY_MINUTES} 分钟` }} />
-        </Panel>
-        <Panel title="处理用时分布" style={{ width: NARROW }}>
-          <HBars items={a.lagBuckets} w={cw(NARROW)} fmt={(v) => `${v}`} />
-        </Panel>
-        <Panel title="告警时段分布" note="星期 × 小时，颜色越亮告警越多，可用来排班" style={{ width: W - 80 }}>
-          <Heatmap grid={a.heat} w={W - 80 - 48} h={CH} />
-        </Panel>
-      </div>
-    </>
-  );
-}
-
-function SleepPage({ st }: { st: WallStats }) {
-  const s = st.sleep;
-  return (
-    <>
-      <div className="wall-kpis">
-        <Kpi label="平均睡眠评分" value={num(s.avgScore)} unit="分" sub="≥80 良好 · 70–79 一般 · 60–69 偏低" />
-        <Kpi label="平均每晚睡眠" value={minText(s.avgSleepMinutes)} sub="每人每晚睡着的时长" />
-        <Kpi label="人均夜间离床" value={num(s.avgLeaveBed, 1)} unit="次 / 晚" sub="报告监测时段 20:00–08:00" />
-        <Kpi label="报告覆盖" value={pct(s.coverage)} sub={`平均每晚有报告的人 / ${st.members.sleepers} 位有睡眠监测的长者`} />
-      </div>
-      <div className="wall-grid">
-        <Panel
-          title="睡眠评分分档"
-          note={
-            <span className="wall-legend">
-              {SCORE_BANDS.map((b, i) => (
-                <span key={b.label}>
-                  <i className={`wall-sw wc-band${i}`} />
-                  {b.label}
-                </span>
-              ))}
-            </span>
-          }
-          style={{ width: WIDE }}
-        >
-          <StackCols cols={s.bands} w={cw(WIDE)} h={CH} names={SCORE_BANDS.map((b) => b.label)} />
-        </Panel>
-        <Panel title="人均夜间离床" style={{ width: NARROW }}>
-          <DayBars days={st.days} values={s.perDayLeave.map((v) => (v === undefined ? undefined : +v.toFixed(1)))} w={cw(NARROW)} h={CH} unit=" 次" />
-        </Panel>
-        <Panel title="平均每晚睡眠时长" style={{ width: W - 80 }}>
-          <DayLine days={st.days} values={s.perDayMinutes} w={W - 80 - 48} h={CH} fmt={hourTick} label={minText} minutes />
-        </Panel>
-      </div>
-    </>
-  );
-}
-
-const PAGES = [
-  { title: "运营概况", render: (st: WallStats) => <OverviewPage st={st} /> },
-  { title: "告警处置", render: (st: WallStats) => <AlertPage st={st} /> },
-  { title: "睡眠健康", render: (st: WallStats) => <SleepPage st={st} /> },
-];
-
-/** 顶栏的时钟单独每秒刷新，不带着图表一起重画 */
-function Clock() {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <div className="wall-clock">
-      <b>{dayjs(now).format("HH:mm:ss")}</b>
-      <span>{dayjs(now).format("YYYY年M月D日")} 星期{"日一二三四五六"[dayjs(now).day()]}</span>
-    </div>
-  );
-}
+const loadNames = () => {
+  try {
+    return localStorage.getItem(NAMES_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
 
 /** 舞台：铺满容器，1920×1080 等比缩放居中 */
 function Stage({ children }: { children: ReactNode }) {
@@ -205,60 +53,231 @@ function Stage({ children }: { children: ReactNode }) {
   );
 }
 
-const REFRESH_ON: Topic[] = ["device", "space", "member", "alert"];
+function BedCell({ c, tier }: { c: Cell; tier: Tier }) {
+  const vitals = c.heartRate !== undefined || c.respiratoryRate !== undefined;
+  // 圆点按这个人实测的呼吸频率起伏
+  const breath = (c.tone === "sleep" || c.tone === "awake") && c.respiratoryRate ? `${(60 / c.respiratoryRate).toFixed(1)}s` : undefined;
+  return (
+    <div className={`wc wc-${c.tone}${c.longOut ? " wc-long" : ""}${c.label ? "" : " wc-solo"}${vitals && !c.issue ? " wc-has-vitals" : ""}${c.issue ? " wc-has-issue" : ""}`} style={{ width: tier.w, height: tier.h }} title={`${c.label ? `${c.label}：` : ""}${c.state}${c.issue ? `，${c.issue}` : ""}${c.pending ? `，${c.pending}未处理` : ""}`}>
+      {(c.label || c.pending || c.bed) && (
+        <div className="wc-top">
+          <span className="wc-label">{c.label}</span>
+          {c.pending && <span className="wc-pend">未处理</span>}
+          {c.bed && <i className="wc-dot" style={breath ? { animationName: "wall-breath", animationDuration: breath } : undefined} />}
+        </div>
+      )}
+      {/* 呼吸暂停、体征弱比睡眠状态要紧，有就写它 */}
+      <div className={`wc-state${c.issue ? " wc-warn" : ""}`}>{c.issue ?? c.state}</div>
+      {vitals && (
+        <div className="wc-vitals">
+          <span>
+            {c.heartRate ?? "—"}
+            <small>心率</small>
+          </span>
+          <span>
+            {c.respiratoryRate ?? "—"}
+            <small>呼吸</small>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoomBlock({ place, tier: pageTier, onOpen }: { place: PlacedRoom; tier: Tier; onOpen: (id: string) => void }) {
+  const { room, cols, width, height, title } = place;
+  const tier = place.tier ?? pageTier;
+  // 手动行列的房间格子一样大，床位格子的大小、字号每个房间各算各的
+  const own = place.tier ? ({ "--u": `${tier.u}px`, height } as CSSProperties) : undefined;
+  return (
+    <section className={`wr${room.alert ? " wr-alert" : ""}${place.tier ? ` t-${tier.name}` : ""}`} style={{ width, ...own }} onClick={() => onOpen(room.id)} title="打开实时监控">
+      <header style={{ height: tier.head }}>{title ?? room.name}</header>
+      <div className="wr-cells" style={{ gridTemplateColumns: `repeat(${cols}, ${tier.w}px)`, gridAutoRows: tier.h }}>
+        {room.cells.map((c) => (
+          <BedCell key={c.sn} c={c} tier={tier} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** 显示设置：范围、排版、放不下时 */
+function SettingsForm({ v, tree, roomCount, hint, onChange }: { v: WallSettings; tree: ReturnType<typeof scopeTree>; roomCount: number; hint?: string; onChange: (v: WallSettings) => void }) {
+  return (
+    <div className="wall-set">
+      <label>显示范围</label>
+      <TreeSelect
+        size="small"
+        treeCheckable
+        treeDefaultExpandAll
+        showCheckedStrategy={TreeSelect.SHOW_PARENT}
+        placeholder="全部楼栋、楼层"
+        maxTagCount="responsive"
+        value={v.scope}
+        treeData={tree}
+        onChange={(scope: string[]) => onChange({ ...v, scope })}
+        getPopupContainer={(n) => n.parentElement!}
+      />
+      <label>排版</label>
+      <Segmented
+        size="small"
+        value={v.mode}
+        onChange={(mode) => onChange({ ...v, ...(v.rows && v.cols ? undefined : suggestGrid(roomCount)), mode: mode as WallSettings["mode"] })}
+        options={[
+          { value: "auto", label: "自动" },
+          { value: "grid", label: "手动行列" },
+        ]}
+      />
+      {v.mode === "grid" && (
+        <>
+          <label>一屏</label>
+          <span className="wall-set-grid">
+            <InputNumber size="small" min={1} max={20} value={v.rows} onChange={(rows) => rows && onChange({ ...v, rows })} /> 行
+            <InputNumber size="small" min={1} max={20} value={v.cols} onChange={(cols) => cols && onChange({ ...v, cols })} /> 列房间
+          </span>
+        </>
+      )}
+      <label>放不下时</label>
+      <Radio.Group size="small" value={v.overflow} onChange={(e) => onChange({ ...v, overflow: e.target.value })}>
+        <Radio value="page">翻屏轮播</Radio>
+        <Radio value="scroll">自动滚动</Radio>
+        <Radio value="shrink">整屏缩小</Radio>
+      </Radio.Group>
+      {hint && <div className="wall-set-hint">{hint}</div>}
+    </div>
+  );
+}
+
+/** 内容比屏幕高时上下来回滚动（大屏没人操作）；两头各停一下 */
+function Scroller({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const [extra, setExtra] = useState(0);
+  useLayoutEffect(() => {
+    if (!enabled) return setExtra(0);
+    const measure = () => setExtra(Math.max(0, inner.current!.offsetHeight - outer.current!.clientHeight));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(outer.current!);
+    ro.observe(inner.current!);
+    return () => ro.disconnect();
+  }, [enabled]);
+  const style = extra > 0 ? ({ "--scroll": `-${extra}px`, animationDuration: `${Math.max(6, extra / SCROLL_SPEED / 0.8)}s` } as CSSProperties) : undefined;
+  return (
+    <div ref={outer} className="wall-scroller">
+      <div ref={inner} className={extra > 0 ? "wall-scrolling" : undefined} style={style}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const alertPlace = (a: OpsAlert) => [a.floorName, a.roomName, a.deviceName && a.sn ? bedName(a.deviceName, a.roomName ?? "", a.sn) : undefined].filter((x, i, xs) => x && xs.indexOf(x) === i).join(" ");
 
 /**
- * 数据魔墙 · 运营展示墙（大厅、来访参观、汇报用）：三页自动轮播，全是汇总数字，不出现长者姓名。
- * 数据口径见 docs/data-wall.md 第 3 节；取数见 datawall/data.ts，统计见 datawall/stats.ts。
+ * 看板本身：标签开着就一直挂着、一直订阅推送，隐藏时（切标签、进实时监控）只是不刷界面，
+ * 这样切回来马上是最新的，不用重新等设备推送。关掉标签才断开
  */
-export default function DataWallPage() {
+function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; onOpenRoom: (id: string) => void }) {
   const s = session.get()!;
-  const { data, error, loading, sleep, refresh } = useWallData(s.orgId);
-  useRefreshOn(REFRESH_ON, refresh);
-  const [range, setRange] = useState<RangeKey>(() => {
-    try {
-      return (localStorage.getItem(RANGE_KEY) as RangeKey) || "30";
-    } catch {
-      return "30";
-    }
-  });
-  const [page, setPage] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [show, setShow] = useState(false);
-
-  const st = useMemo(() => (data ? computeStats(data, range, data.loadedAt) : undefined), [data, range]);
-
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!playing) return;
-    const t = setTimeout(() => setPage((p) => (p + 1) % PAGES.length), PAGE_MS);
-    return () => clearTimeout(t);
-  }, [playing, page]);
+    if (!active) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  /** 实时连接连上的时间（断开后重新计） */
+  const [listeningSince, setListeningSince] = useState<number>();
+  useEffect(() => setListeningSince(rt === "connected" ? Date.now() : undefined), [rt]);
 
-  const pickRange = (k: RangeKey) => {
-    setRange(k);
+  const data = useMonitorData(now, noAlerts, !active);
+  const [slots, setSlots] = useState<Map<string, Slot> | undefined>(() => loadSavedSlots(s.orgId));
+  const loadSlots = useCallback(
+    () =>
+      getSlots()
+        .then((x) => {
+          setSlots(x);
+          saveSlots(s.orgId, x);
+        })
+        .catch((e) => console.error("数据魔墙：加载长者列表失败", e)),
+    [s.orgId],
+  );
+  const { reload } = data;
+  const refresh = useCallback(() => {
+    reload();
+    loadSlots();
+  }, [reload, loadSlots]);
+  useRefreshOn(REFRESH_ON, refresh);
+  useEffect(() => {
+    loadSlots();
+    const t = setInterval(refresh, RELOAD_MS);
+    return () => clearInterval(t);
+  }, [loadSlots, refresh]);
+
+  const [showName, setShowName] = useState(loadNames);
+  const pickNames = (v: boolean) => {
+    setShowName(v);
     try {
-      localStorage.setItem(RANGE_KEY, k);
+      localStorage.setItem(NAMES_KEY, v ? "1" : "0");
     } catch {
       /* 只是记住选择 */
     }
   };
 
+  const [settings, setSettings] = useState(() => loadSettings(s.orgId));
+  const pickSettings = (v: WallSettings) => {
+    setSettings(v);
+    saveSettings(s.orgId, v);
+  };
+  const { scope } = settings;
+
+  const allAlerts = useMemo(() => freshCareAlerts(data.alerts.pending, now), [data.alerts.pending, now]);
+  const allRooms = useMemo(() => buildRooms(data.tiles, data.live, data.links, slots ?? NO_SLOTS, allAlerts, { now, listeningSince: slots ? listeningSince : undefined, showName, slotsKnown: !!slots }), [data.tiles, data.live, data.links, slots, allAlerts, now, listeningSince, showName]);
+  const tree = useMemo(() => scopeTree(allRooms), [allRooms]);
+  // 显示范围：墙上、总数、横幅都只看范围内的，范围外还有多少告警写在页脚
+  const rooms = useMemo(() => allRooms.filter((r) => inScope(scope, r.floorKey)), [allRooms, scope]);
+  const alerts = useMemo(() => allAlerts.filter((a) => inScope(scope, `${a.buildingName ?? ""}|${a.floorName ?? ""}`)), [allAlerts, scope]);
+  const n = countCells(rooms);
+  const layout = layoutWall(rooms, settings);
+  const { tier, pages } = layout;
+  const hint = rooms.length ? layoutHint(layout) : undefined;
+
+  const [pageState, setPage] = useState(0);
+  const page = Math.min(pageState, pages.length - 1);
+  const flip = useCallback((d: number) => setPage((p) => (Math.min(p, pages.length - 1) + d + pages.length) % pages.length), [pages.length]);
+  const urgent = useMemo(() => alerts.filter((a) => isUrgent(a, now)), [alerts, now]);
+  const newest = urgent[0];
+  useEffect(() => {
+    if (!active || pages.length < 2) return;
+    const t = setTimeout(() => flip(1), PAGE_MS);
+    return () => clearTimeout(t);
+  }, [active, page, pages.length, flip]);
+  // 新告警：翻到它的房间所在的页
+  const newestRoom = rooms.find((r) => r.cells.some((c) => c.sn === newest?.sn))?.id;
+  useEffect(() => {
+    if (!newestRoom) return;
+    const i = pages.findIndex((cols) => cols.flat().some((row) => row.rooms.some((x) => x.room.id === newestRoom)));
+    if (i >= 0) setPage(i);
+    // 只在最新的告警变了时翻
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newest?.id, newestRoom]);
+
+  const [show, setShow] = useState(false);
   async function startShow() {
     setShow(true);
-    setPlaying(true);
     await enterFullscreen().catch(() => {});
   }
-  async function endShow() {
+  const endShow = useCallback(async () => {
     setShow(false);
     await leaveFullscreen().catch(() => {});
-  }
-  // 放映时 Esc 退出；左右键翻页
+  }, []);
   useEffect(() => {
     if (!show) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") endShow();
-      else if (e.key === "ArrowRight") setPage((p) => (p + 1) % PAGES.length);
-      else if (e.key === "ArrowLeft") setPage((p) => (p + PAGES.length - 1) % PAGES.length);
+      else if (e.key === "ArrowRight") flip(1);
+      else if (e.key === "ArrowLeft") flip(-1);
     };
     // 浏览器调试时 Esc 由浏览器先退出网页全屏
     const onFs = () => !document.fullscreenElement && !isTauri && setShow(false);
@@ -268,77 +287,171 @@ export default function DataWallPage() {
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("fullscreenchange", onFs);
     };
-  }, [show]);
-  // 离开页面（关标签、切机构）时恢复窗口
+  }, [show, endShow, flip]);
+  // 关标签、切机构时恢复窗口
   useEffect(() => () => void leaveFullscreen().catch(() => {}), []);
 
-  const rangeLabel = RANGES.find((r) => r.key === range)!.label;
-  const sleepNote =
-    st && st.sleep.expected
-      ? st.sleep.fetched < st.sleep.expected
-        ? `睡眠报告补取中 ${st.sleep.fetched} / ${st.sleep.expected} 人晚`
-        : st.sleep.firstDay && st.sleep.firstDay !== st.days[0]
-          ? `睡眠统计自 ${dayjs(st.sleep.firstDay).format("M月D日")}起（之前没有报告）`
-          : ""
-      : "";
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 设置面板关闭的时间：点墙面关面板时，同一次点击不要再打开房间 */
+  const settingsClosedAt = useRef(0);
+  const open = (id: string) => {
+    if (settingsOpen || Date.now() - settingsClosedAt.current < 400) return;
+    endShow();
+    onOpenRoom(id);
+  };
+  const older = data.alerts.pending.filter((a) => CARE_GROUPS.has(a.alertTypeGroup ?? 0)).length - allAlerts.length;
+  const outside = allAlerts.length - alerts.length;
 
-  const wall = (
-    <div className="wall">
-      <Stage>
-        <header className="wall-head">
-          <div className="wall-org">
-            <b>{s.orgName}</b>
-            <span>运营展示 · {rangeLabel}</span>
+  const column = (rows: WallRow[]) =>
+    rows.map((row, i) => (
+      <div key={i} className={`wall-row${row.floor !== undefined && i ? " wall-row-floor" : ""}`}>
+        {!layout.grid && (
+          <div className="wall-floor">
+            {row.floor}
+            {row.building && <small title={row.building}>{row.building}</small>}
           </div>
-          <div className="wall-title">
-            <h1>{PAGES[page].title}</h1>
-            <div className="wall-dots">
-              {PAGES.map((p, i) => (
-                <i key={p.title} className={i === page ? "on" : ""} onClick={() => setPage(i)} />
-              ))}
-            </div>
-          </div>
-          <Clock />
-        </header>
-        <main className="wall-body" key={page}>
-          {st ? PAGES[page].render(st) : <div className="wall-empty">{error ? `取数失败：${error}` : "正在取数…"}</div>}
-        </main>
-        <footer className="wall-foot">
-          <span>数据来自设备与告警原始记录，由本机统计{data ? ` · 更新于 ${dayjs(data.loadedAt).format("HH:mm")}` : ""}</span>
-          <span>{sleepNote}</span>
-        </footer>
-      </Stage>
-      {show && (
-        <button className="wall-exit" onClick={endShow} title="退出放映（Esc）">
-          退出放映
-        </button>
-      )}
-    </div>
-  );
-
-  if (show) return <div className="wall-show">{wall}</div>;
+        )}
+        <div className="wall-rooms">
+          {row.rooms.map((x) => (
+            <RoomBlock key={x.room.id} place={x} tier={tier} onOpen={open} />
+          ))}
+        </div>
+      </div>
+    ));
 
   return (
-    <div className="wall-page">
-      <div className="wall-bar">
-        <Segmented size="small" value={range} onChange={(v) => pickRange(v as RangeKey)} options={RANGES.map((r) => ({ value: r.key, label: r.label }))} />
-        <span className="wall-bar-sep" />
-        <Button size="small" icon={<LeftOutlined />} onClick={() => setPage((p) => (p + PAGES.length - 1) % PAGES.length)} />
-        <Button size="small" icon={playing ? <PauseOutlined /> : <CaretRightOutlined />} onClick={() => setPlaying((x) => !x)}>
-          {playing ? "暂停轮播" : "继续轮播"}
-        </Button>
-        <Button size="small" icon={<RightOutlined />} onClick={() => setPage((p) => (p + 1) % PAGES.length)} />
-        <span className="wall-bar-sep" />
-        <Tooltip title={sleep.total > sleep.done ? `睡眠报告 ${sleep.done} / ${sleep.total}` : undefined}>
-          <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh}>
-            刷新
+    <div className={show ? "wall-show" : "wall-page"}>
+      {!show && (
+        <div className="wall-bar">
+          <Switch size="small" checked={showName} onChange={pickNames} />
+          <span>显示长者姓氏</span>
+          {pages.length > 1 && (
+            <>
+              <span className="wall-bar-sep" />
+              <Button size="small" icon={<LeftOutlined />} onClick={() => flip(-1)} />
+              <span>
+                {page + 1} / {pages.length}
+              </span>
+              <Button size="small" icon={<RightOutlined />} onClick={() => flip(1)} />
+            </>
+          )}
+          <span className="wall-bar-sep" />
+          <Popover
+            trigger="click"
+            placement="bottomLeft"
+            title="显示设置"
+            open={settingsOpen}
+            onOpenChange={(v) => {
+              setSettingsOpen(v);
+              if (!v) settingsClosedAt.current = Date.now();
+            }}
+            content={<SettingsForm v={settings} tree={tree} roomCount={rooms.length} hint={hint} onChange={pickSettings} />}
+          >
+            <Button size="small" icon={<SettingOutlined />}>
+              显示设置
+            </Button>
+          </Popover>
+          <Button size="small" type="primary" icon={<FullscreenOutlined />} onClick={startShow}>
+            全屏放映
           </Button>
-        </Tooltip>
-        <Button size="small" type="primary" icon={<FullscreenOutlined />} onClick={startShow}>
-          全屏放映
-        </Button>
+          {hint && (
+            <span className="wall-bar-hint" title={hint}>
+              <ExclamationCircleOutlined /> {hint}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="wall">
+        <Stage>
+          <header className="wall-head">
+            <div className="wall-org">
+              <b>{s.orgName}</b>
+              <span>{scope.length ? "部分楼层实时" : "全院实时"}{pages.length > 1 ? ` · 第 ${page + 1} / ${pages.length} 屏` : ""}</span>
+            </div>
+            {newest ? (
+              <button className="wall-banner" onClick={() => newestRoom && open(newestRoom)}>
+                <b>{newest.alertTypeName}</b>
+                <span>{alertPlace(newest)}</span>
+                <span>已 {durationText(now - Date.parse(newest.createdAt.replace(" ", "T")))}</span>
+                {urgent.length > 1 && <span className="wall-banner-more">共 {urgent.length} 条紧急</span>}
+              </button>
+            ) : (
+              <div className="wall-kpi-ok">{rt === "connected" && !alerts.length ? "当前没有待处理告警" : ""}</div>
+            )}
+            <div className="wall-clock">
+              <b>{dayjs(now).format("HH:mm:ss")}</b>
+              <span>
+                {dayjs(now).format("YYYY年M月D日")} 星期{"日一二三四五六"[dayjs(now).day()]}
+              </span>
+            </div>
+          </header>
+          <div className="wall-kpis">
+            <div>
+              <b>{n.sleep + n.awake}</b>在床
+            </div>
+            <div className="sleep">
+              <b>{n.sleep}</b>睡着
+            </div>
+            <div className="awake">
+              <b>{n.awake}</b>在床醒着
+            </div>
+            <div className="out">
+              <b>{n.out}</b>不在床
+            </div>
+            <div className="busy">
+              <b>{n.busy}</b>有人
+            </div>
+            <div className="empty">
+              <b>{n.empty}</b>无人
+            </div>
+            <div className="none">
+              <b>{n.none}</b>离线
+            </div>
+            <div className={urgent.length ? "alert" : alerts.length ? "out" : undefined}>
+              <b>{alerts.length}</b>待处理告警
+            </div>
+          </div>
+          <main className={`wall-body t-${tier.name}`} key={page} style={{ "--u": `${tier.u}px` } as CSSProperties}>
+            {data.error ? <div className="wall-empty">取数失败：{data.error}</div> : data.loading && !rooms.length ? <div className="wall-empty">正在取数…</div> : rooms.length ? (
+              <Scroller enabled={!!layout.scroll}>
+                <div className="wall-columns" style={layout.scale ? { width: `${100 / layout.scale}%`, transform: `scale(${layout.scale})`, transformOrigin: "0 0" } : undefined}>
+                  {pages[page].map((rows, i) => (
+                    <div key={i} className="wall-column">
+                      {column(rows)}
+                    </div>
+                  ))}
+                </div>
+              </Scroller>
+            ) : <div className="wall-empty">{scope.length && allRooms.length ? "所选范围里没有绑定雷达的房间" : "这个机构还没有绑定雷达的房间"}</div>}
+          </main>
+          <footer className="wall-foot">
+            <span>{rt === "connected" ? "实时连接正常" : <em>实时连接中断，屏上内容可能不是最新</em>}</span>
+            <span>
+              {rooms.length} 间房 · {rooms.reduce((x, r) => x + r.cells.length, 0)} 台雷达
+              {outside > 0 ? ` · 范围外 ${outside} 条待处理` : ""}
+              {older > 0 ? ` · 另有 ${older} 条超过 24 小时未处理` : ""}
+            </span>
+          </footer>
+        </Stage>
+        {show && (
+          <button className="wall-exit" onClick={endShow} title="退出放映（Esc）">
+            退出放映
+          </button>
+        )}
       </div>
-      {wall}
     </div>
   );
+}
+
+/** 数据魔墙：全房间实时看板。房间位置固定，每台雷达一格：床位显示睡眠和心率呼吸，其他显示有人无人 */
+export default function DataWallPage({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; onOpenRoom: (id: string) => void }) {
+  // 清掉上一版运营展示墙留在本机的缓存
+  useEffect(() => {
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith("ops.dataWall.nights.") || k === "ops.dataWall.range") localStorage.removeItem(k);
+    } catch {
+      /* 清不掉也不影响 */
+    }
+  }, []);
+  return <Wall active={active} rt={rt} onOpenRoom={onOpenRoom} />;
 }

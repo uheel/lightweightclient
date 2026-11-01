@@ -99,7 +99,7 @@ export interface MonitorAlerts {
 }
 
 /** 告警：每组取今天的和未处理的。收到告警推送时重取（合并 1 秒内的多条），另外每分钟兜底一次 */
-function useAlerts(onNew: (a: OpsAlert[]) => void) {
+function useAlerts(onNew: (a: OpsAlert[]) => void, paused: boolean) {
   const [data, setData] = useState<MonitorAlerts>({ stream: [], pending: [], pendingTotal: 0, todayTotal: 0 });
   const known = useRef<Set<string> | null>(null);
   const onNewRef = useRef(onNew);
@@ -132,7 +132,9 @@ function useAlerts(onNew: (a: OpsAlert[]) => void) {
     }
   }, []);
 
+  // 隐藏时不轮询，显示时（含第一次）取一次
   useEffect(() => {
+    if (paused) return;
     reload();
     let timer: number | undefined;
     const soon = () => {
@@ -146,7 +148,7 @@ function useAlerts(onNew: (a: OpsAlert[]) => void) {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, [reload]);
+  }, [reload, paused]);
 
   return { ...data, reload };
 }
@@ -157,7 +159,7 @@ const tag = (r: { list: OpsAlert[]; total: number }, g: number) => ({ ...r, list
 const placeKey = (b?: string, f?: string, r?: string) => [b ?? "", f ?? "", r ?? ""].join("|");
 
 /** 一台在线设备的实时状态归成房间状态 */
-function deviceState(live: LiveData | undefined, now: number): { kind: RoomKind; state: string; people: number } {
+export function deviceState(live: LiveData | undefined, now: number): { kind: RoomKind; state: string; people: number } {
   if (!live) return { kind: "empty", state: "无人", people: 0 };
   if (live.posture !== undefined && ALARM_POSTURES.has(live.posture) && live.presence !== 0) return { kind: "alert", state: POSTURE[live.posture], people: Math.max(1, live.targets ?? 1) };
   if (live.fall) return { kind: "alert", state: "疑似跌倒", people: Math.max(1, live.targets ?? 1) };
@@ -184,8 +186,9 @@ const parseTime = (s?: string) => (s ? Date.parse(s.replace(" ", "T")) : NaN);
 /**
  * 监控模式的全部数据：房间、雷达、实时推送、告警，房间状态在本地推出来。
  * 平台只取房间 / 雷达列表（各一次）和告警；在线、有人、在床都按设备推送判断（与设备列表、用户端规则一致）。
+ * paused：页面隐藏时不刷界面、不取告警，推送照收，恢复时马上是最新的（数据魔墙用）。
  */
-export function useMonitorData(now: number, onNewAlerts: (a: OpsAlert[]) => void) {
+export function useMonitorData(now: number, onNewAlerts: (a: OpsAlert[]) => void, paused = false) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [radars, setRadars] = useState<Radar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -209,8 +212,8 @@ export function useMonitorData(now: number, onNewAlerts: (a: OpsAlert[]) => void
   }, [load]);
 
   const sns = useMemo(() => radars.map((d) => d.sn), [radars]);
-  const live = useLiveMap(sns);
-  const alerts = useAlerts(onNewAlerts);
+  const live = useLiveMap(sns, paused);
+  const alerts = useAlerts(onNewAlerts, paused);
 
   const links = useMemo(() => {
     const m = new Map<string, DeviceLink>();

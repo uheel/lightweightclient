@@ -59,7 +59,7 @@ const KIND_LABEL: Record<RoomKind, string> = { alert: "告警", busy: "有人", 
  * 监控模式：值守时全屏开着的深色界面（设计稿"监控模式"画板）。
  * 左边房间卡片（告警优先 · 有人 · 无人 · 离线），中间选中房间的平面图和实时目标，右边今天的告警流。
  */
-export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: RealtimeState; onExit: (to?: "alerts") => void }) {
+export default function MonitorMode({ s, rt, initialRoom, onExit }: { s: Session; rt: RealtimeState; /** 打开时选中的房间（从数据魔墙点进来时） */ initialRoom?: string; onExit: (to?: "alerts") => void }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -75,7 +75,7 @@ export default function MonitorMode({ s, rt, onExit }: { s: Session; rt: Realtim
   const data = useMonitorData(now, onNewAlerts);
   const { tiles, stats, alerts, live } = data;
 
-  const [selId, setSelId] = useState<string>();
+  const [selId, setSelId] = useState<string | undefined>(initialRoom);
   useEffect(() => {
     if (follow.current) {
       const t = tiles.find((x) => x.alert?.id === follow.current);

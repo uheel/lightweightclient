@@ -45,6 +45,8 @@ export default function Shell({ s }: { s: Session }) {
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
   const [monitor, setMonitor] = useState(false);
+  /** 从数据魔墙点房间进监控模式时，选中那个房间 */
+  const [monitorRoom, setMonitorRoom] = useState<string>();
   // 告警弹窗（系统设置里打开）；监控模式有自己的告警列表，开着时不在应用内弹提醒
   const alertCenter = useAlertCenter(s.orgId, usePopupSettings(), monitor);
 
@@ -163,7 +165,14 @@ export default function Shell({ s }: { s: Session }) {
                   ) : k === "menus" ? (
                     <MenuSettingsPage />
                   ) : k === "dataWall" ? (
-                    <DataWallPage />
+                    <DataWallPage
+                      active={active === "dataWall" && !monitor}
+                      rt={rt}
+                      onOpenRoom={(id) => {
+                        setMonitorRoom(id);
+                        setMonitor(true);
+                      }}
+                    />
                   ) : (
                     <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
                   )}
@@ -185,8 +194,10 @@ export default function Shell({ s }: { s: Session }) {
             key={`monitor-${s.orgId}`}
             s={s}
             rt={rt}
+            initialRoom={monitorRoom}
             onExit={(to) => {
               setMonitor(false);
+              setMonitorRoom(undefined);
               if (to) go(to);
             }}
           />

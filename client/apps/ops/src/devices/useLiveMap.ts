@@ -4,8 +4,9 @@ import { deviceChannels, parseDeviceData, realtime, subscribeChannels, type Devi
 /**
  * 订阅一组设备的实时推送，按 SN 合并成最新状态（与用户端 useCareData 的做法一致）。
  * 每台设备约 1–2 秒推一次，几百台设备时推送很密，这里先攒在 ref 里，每秒刷一次界面。
+ * paused 时照常订阅、接收，只是不刷界面（页面隐藏时用）；恢复时立刻刷一次，不用重新等推送。
  */
-export function useLiveMap(sns: string[]) {
+export function useLiveMap(sns: string[], paused = false) {
   const [map, setMap] = useState<Record<string, LiveData>>({});
   const pending = useRef<Record<string, LiveData>>({});
   const key = sns.join(",");
@@ -23,7 +24,12 @@ export function useLiveMap(sns: string[]) {
       const patch = parseDeviceData(m);
       if (patch) pending.current[m.sn] = { ...pending.current[m.sn], ...patch } as LiveData;
     });
-    const flush = setInterval(() => {
+    return off;
+  }, []);
+
+  useEffect(() => {
+    if (paused) return;
+    const flush = () => {
       const p = pending.current;
       if (!Object.keys(p).length) return;
       pending.current = {};
@@ -32,12 +38,11 @@ export function useLiveMap(sns: string[]) {
         for (const [sn, patch] of Object.entries(p)) next[sn] = { ...prev[sn], ...patch };
         return next;
       });
-    }, 1000);
-    return () => {
-      off();
-      clearInterval(flush);
     };
-  }, []);
+    flush();
+    const t = setInterval(flush, 1000);
+    return () => clearInterval(t);
+  }, [paused]);
 
   return map;
 }
