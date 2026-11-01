@@ -358,6 +358,36 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 - 网页端"查看二维码"就是把 `code` 生成二维码，没有别的内容
 - `answerCall`（接听来电）和组内顺序具体怎么影响呼叫，前端代码里看不出来，没有实测
 
+## 步态分析（2026-11-01 读平台前端 `modules__gait__*` + 只读实测）
+
+平台菜单 步态分析（`/gait`）。路由有十几个页面，但权限资源树只有 7 个菜单 + 12 个操作，也就是普通账号能授权的只有 步态传感器、用户管理、采集记录；轨迹回放、实时数据、量表、风险模型等只有超管（`isSa`）进得去。运维端 工作台 › 步态分析 照这三个模块做。
+
+**权限**：`GAIT` › `GAIT_DEVICE_MANAGEMENT` › `GAIT_SENSOR`，`GAIT_MEMBER_MANAGEMENT` › `GAIT_MEMBER_USER`，`GAIT_COLLECTION_RECORD_MANAGEMENT` › `GAIT_COLLECTION_RECORD`，三个末端各有 `:view / :add / :update / :delete`。有步态设备的 50 个机构、77 个角色里只有 4 个角色有步态权限：1 个全有；2 个有 `GAIT` 但只有传感器；1 个有传感器却没有 `GAIT`。机构管理员角色也没有。所以要按三个末端菜单判断，不能看 `GAIT`。`/sapi/permission/granted-role-resources` 返回的是资源树节点的 `value`（不是 `resKey`）。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/device-gait-sensor/pages` | 传感器：`id, sn, deviceName, identifier（Mac，苹果手机是 UUID，136 台里 28 台不是 MAC 格式）, orgId, orgName, isOnline, lastActivityTime, battery, rssi, datasetCount, memberId, realName, sortOrder, description, createdAt/By, updatedAt` |
+| `GET/POST/PUT/DELETE /api/device-gait-sensor`（`?id=`） | 表单：`deviceName`（≤64）、`sn`（≤32，全平台唯一）、`sortOrder`、`description`。`GET` 只返回 `id, identifier, deviceName, sn, sortOrder` |
+| `POST /api/device-gait-sensor/bind`、`/unbind` | `{deviceId, memberId}`；候选用户 `GET /api/member/checked-in-options?orgId=` |
+| `GET /api/device/activity-time?sn=` | 设备最后活动时间，比列表的新几分钟（网页端鼠标放到心跳图标上才取） |
+| `GET /api/gait-sensor-data/pages?deviceId=` | 设备状态：`role, uptime, battery, voltage, status, phoneRssi, masterRssi, slaveRssi, version, slaveMac, createdAt` |
+| `GET /api/gait-data/fall-data/pages?deviceId=` | 跌倒记录：`createdAt, deviceTime, type`（0 未知，1 跌倒，2 疑似跌倒） |
+| `GET /api/v3/gait-analysis/members` | 用户列表：`id, realName, gender, age, height, weight, phoneNumber（不打码）, orgName, deviceCount, checkType, createdAt`。**和长者是同一批人**：李虎 73 人，和 `/api/member/pages` 一样；增删改走 `/api/member`。平台机构下只有本机构的 64 人（传感器却能看到 50 个机构的） |
+| `GET /api/metric-segment/pages` | 采集记录：`id, title（编号）, deviceId, deviceName, sn, memberId, memberName, duration, fallRiskType（1 低 2 中 3 高，没评估的没有）, fallRiskTypeDsp, fallRiskScore, fallRiskModelName/Code, segmentType, createdAt`。李虎 161 条里 38 条没有风险评级 |
+| `GET /api/metric-segment/members` | 有记录的用户：`memberId, realName, gender, age, segmentCount, lastCreatedAt` |
+| `DELETE /api/metric-segment?id=` | 删除记录及对应步态、IMU 数据 |
+| `POST /api/gait-metric/update/segment` | 重新生成报告 `{memberId, segmentId}` |
+| `GET /api/v3/gait-metric/report?segmentId=` | 报告（约 2.6KB）：用户资料、`gaitAnalysisResponse{score, analysis[]}`、风险、各指标和 `*ByFoot{left,right,average}`、`referenceStandard`（参考范围）、`aiAnalysisStatus`（pending / empty / failed）和 `aiAnalysisDeadlineAt`。`stepSpeed` 和它的参考范围都是 km/h，显示除以 3.6 |
+| `GET /api/gait-assessment-scale/web/member-panel?memberId=` | 健康评估：`{member{…currentRiskType, currentRiskLevelName}, scales[{id, scaleName, category, description, questionCount, assessmentCount}]}` |
+| `GET /api/gait-assessment-scale?id=` | 量表：`questions[{title, options[{label, text, score}]}], scoreRules` |
+| `GET /api/gait-assessment-record/web/member-pages?memberId&scaleId` | 评估记录：`id, totalScore, riskType, riskLevelName, assessmentTime, healthAdvice` |
+| `POST /api/gait-assessment-record/web/submit` | `{memberId, scaleId, answers[{questionIndex, optionIndex}]}`，返回评估结果 |
+| `GET /api/gait-assessment-record?id=` | 评估详情，多 `answers[{questionIndex, questionTitle, optionLabel, optionText, score}]`。**评估记录不能删**（`DELETE` 返回 405） |
+
+- **报告的显示规则在前端**：偏高偏低按参考范围判断；左右对称性 = `100 - 2|左-右|/(左+右)×100`（取绝对值，限制在 0～100）；步幅身高比 = 步幅 / 身高，参考范围 = 步幅下限 / 身高上限 ～ 步幅上限 / 身高下限；综合评分 ≥80 正常。评分、风险、AI 建议由平台算。网页端的"下载报告"就是 `window.print()`；运维端不走打印窗口，`gait/pdf.ts` 把报告页截图生成图片式 PDF 直接下载（文字不能选中）
+- **`isOnline` 对步态传感器不可靠**：全平台显示在线的 62 台里，39 台最后活动超过 24 小时，23 台列表里没有活动时间（抽查的这 6 台 `activity-time` 也都是几天前）。网页端除了列表值只有 `onDeviceOnlineStatusChange` 推送，点心跳图标调 `/api/device/sync-online-status` 手动同步。运维端算在线要求最后活动在 30 分钟内
+- 运维端没做的：数据集（136 台里只有 3 台有）、IMU 和步态原始数据、Excel 导出、趋势、3D 轨迹、"清空所有数据"（只有超管）
+
 ## 护理值守用到的接口（2026-10-14）
 
 | 接口 | 说明 |

@@ -1,0 +1,98 @@
+/* 步态分析（pages/Gait*Page.tsx）。列表沿用设备页的 dev-list / dev-row */
+.dot.stale { background: #E0A100; }
+.gait-note { margin-top: 6px; font-size: 12px; color: #9A5B00; }
+.gait-detail { max-width: 1200px; }
+.gait-info { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 20px; }
+.gait-info dt { font-size: 12px; color: #8A8FA8; }
+.gait-info dd { margin: 2px 0 0; word-break: break-all; }
+.gait-info dd .ant-btn { padding: 0 0 0 8px; height: auto; }
+
+/* 健康评估 */
+.gait-assess { display: flex; flex-direction: column; gap: 8px; max-height: 64vh; overflow: auto; }
+.gait-question { padding: 10px 12px; border: 1px solid #EEF0F5; border-radius: 6px; }
+.gait-question-title { font-weight: 500; margin-bottom: 6px; }
+.gait-question .ant-radio-group { display: flex; flex-direction: column; gap: 2px; }
+.gait-result { padding: 12px 14px; border-radius: 6px; background: #F5F7FF; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.gait-result-score { font-size: 20px; font-weight: 600; color: #3B4FD8; }
+.gait-result p { flex-basis: 100%; margin: 0; }
+
+/* 采集记录 */
+.gait-records { position: relative; }
+.gait-records [hidden] { display: none; }
+.gait-records-main { padding: 12px 16px; background: #F7F8FC; }
+.gait-records-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+
+/* 报告：模块内全屏，页面是一张 A4 宽的纸，下载的 PDF 就是截的它（宽度和 gait/pdf.ts 的 PAGE_W 一致） */
+.gait-report-page { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: #E7EAF3; }
+.gait-report-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fff; border-bottom: 1px solid #E8EAF2; }
+.gait-report-scroll { flex: 1; overflow: auto; padding: 20px 16px 32px; }
+
+.gr-paper { width: 794px; margin: 0 auto; background: #fff; color: #1B1D2E; box-shadow: 0 1px 2px rgba(17, 20, 65, 0.1), 0 8px 28px rgba(17, 20, 65, 0.08); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+
+.gr-hero { padding: 26px 36px 18px; background: #111441; color: #fff; }
+.gr-hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.gr-hero h1 { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: 0.04em; color: #fff; }
+.gr-hero p { margin: 3px 0 0; font-size: 13px; color: #AEB4DC; }
+.gr-hero-meta { margin: 3px 0 0; display: grid; grid-template-columns: auto auto; gap: 2px 12px; font-size: 12px; }
+.gr-hero-meta dt { color: #AEB4DC; }
+.gr-hero-meta dd { margin: 0; text-align: right; }
+.gr-person { margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.18); display: flex; align-items: baseline; gap: 22px; color: #D8DBF0; }
+.gr-person b { font-size: 17px; font-weight: 600; color: #fff; margin-right: 4px; }
+
+.gr-verdict { display: grid; grid-template-columns: 158px 142px minmax(0, 1fr); border-bottom: 1px solid #E3E6EF; }
+.gr-verdict-cell { padding: 16px 16px 16px 36px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gr-verdict-cell + .gr-verdict-cell { padding-left: 18px; border-left: 1px solid #E3E6EF; }
+.gr-verdict-cell.wide { padding-right: 36px; }
+.gr-cell-label { font-size: 12px; color: #5B6078; }
+.gr-big { font-size: 27px; line-height: 1.25; font-weight: 600; color: #17794A; white-space: nowrap; }
+.gr-big small { margin-left: 3px; font-size: 13px; font-weight: 400; color: #5B6078; }
+.gr-big.low, .gr-big.risk-low { color: #9A5B00; }
+.gr-big.high, .gr-big.risk-high { color: #B4232A; }
+.gr-big.risk-unknown { color: #5B6078; }
+.gr-cell-note { font-size: 12px; color: #7A8096; }
+.gr-cell-ok { margin-top: 6px; color: #17794A; }
+.gr-attention { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.gr-attention span { padding: 1px 7px; border-radius: 3px; font-size: 12px; white-space: nowrap; background: #FFF4E0; color: #8A5200; }
+.gr-attention .high { background: #FDECEC; color: #A81F26; }
+
+.gr-paper h2 { margin: 0; font-size: 15px; font-weight: 600; color: #111441; }
+.gr-advice { padding: 16px 36px 18px; background: #F5F6FC; }
+.gr-advice h2 { margin-bottom: 6px; }
+.gr-advice ol, .gr-advice ul { margin: 4px 0; padding-left: 18px; }
+.gr-advice li { padding-left: 2px; line-height: 1.75; }
+.gr-advice p { margin: 4px 0; line-height: 1.75; }
+.gr-advice h4 { margin: 8px 0 2px; font-size: 13px; font-weight: 600; }
+.gr-advice strong { font-weight: 600; color: #111441; }
+
+.gr-legend { padding: 20px 36px 8px; display: flex; align-items: center; justify-content: space-between; }
+.gr-legend-items { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #5B6078; }
+.gr-legend-items .gr-mark { position: static; transform: none; }
+.gr-legend-items .gr-mark.right, .gr-legend-band { margin-left: 10px; }
+.gr-legend-band { display: inline-block; width: 22px; height: 8px; border-radius: 2px; background: #BFE5CF; }
+
+.gr-group { padding: 6px 36px 12px; }
+.gr-group h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: #3B4FD8; }
+.gr-row { display: grid; grid-template-columns: 82px 72px 72px minmax(0, 1fr) 62px 96px; column-gap: 8px; align-items: center; min-height: 42px; padding: 3px 0; border-top: 1px solid #EDEFF5; }
+.gr-head { min-height: 0; padding: 4px 0; border-top: 0; font-size: 11px; color: #7A8096; }
+.gr-name { font-weight: 500; }
+.gr-span2 { grid-column: span 2; }
+.gr-ref { font-size: 11.5px; color: #5B6078; white-space: nowrap; }
+.gr-dash { color: #B3B7C9; }
+.gr-total { font-size: 12px; color: #5B6078; }
+
+.gr-value { display: inline-grid; grid-template-columns: auto auto; column-gap: 2px; align-items: baseline; justify-content: start; }
+.gr-value b { font-size: 14px; font-weight: 600; }
+.gr-value small { font-size: 10.5px; color: #7A8096; }
+.gr-value em { grid-column: 1 / -1; font-style: normal; font-size: 10.5px; line-height: 1.2; }
+.gr-value.low b, .gr-value.low em { color: #9A5B00; }
+.gr-value.high b, .gr-value.high em { color: #B4232A; }
+
+.gr-track { position: relative; display: block; height: 36px; }
+.gr-rail { position: absolute; left: 0; right: 0; top: 17px; height: 2px; background: #DDE0EA; }
+.gr-band { position: absolute; top: 14px; height: 8px; border-radius: 2px; background: #BFE5CF; }
+.gr-mark { position: absolute; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; font-style: normal; font-size: 9.5px; line-height: 1; color: #fff; transform: translateX(-50%); box-shadow: 0 0 0 1.5px #fff; }
+.gr-mark.left { top: 1px; background: #3B4FD8; }
+.gr-mark.right { top: 20px; background: #0F8A72; }
+.gr-mark.single { top: 11.5px; width: 13px; height: 13px; background: #111441; }
+
+.gr-foot { padding: 12px 36px 18px; font-size: 11px; color: #7A8096; text-align: center; }

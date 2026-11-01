@@ -19,7 +19,9 @@ export type Topic =
   | "member"
   /** 写到设备上的配置：属性、场景、通话 */
   | "config"
-  | "alert";
+  | "alert"
+  /** 步态采集记录、健康评估 */
+  | "gait";
 
 /** 按顺序匹配地址前缀，第一条命中的算数 */
 const RULES: [prefix: string, topics: Topic[]][] = [
@@ -37,6 +39,9 @@ const RULES: [prefix: string, topics: Topic[]][] = [
   ["/api/bed", ["space"]],
   ["/api/member", ["member"]],
   ["/api/alert/", ["alert"]],
+  ["/api/metric-segment", ["gait"]],
+  ["/api/gait-metric", ["gait"]],
+  ["/api/gait-assessment-record", ["gait"]],
 ];
 
 /**
@@ -56,7 +61,7 @@ const IGNORE = [
   "/api/settings/org",
 ];
 
-const ALL: Topic[] = ["device", "space", "design", "member", "config", "alert"];
+const ALL: Topic[] = ["device", "space", "design", "member", "config", "alert", "gait"];
 
 /** 切到页面后多久之内完成的写操作，算上一页发起的（一次保存连着写几个接口，通常两三秒） */
 const JUST_SWITCHED_MS = 5000;

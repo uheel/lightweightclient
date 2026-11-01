@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { GROUPS, MODULES, type GroupKey, type ModuleKey } from "./modules";
+import { session } from "@radar/core";
+import { GROUPS, MODULES, moduleAllowed, type GroupKey, type ModuleKey } from "./modules";
 
 /** 类别：内置的（GroupKey）或系统设置里新增的（"c" 开头） */
 export type GroupId = GroupKey | `c${string}`;
@@ -215,10 +216,14 @@ export function useNames() {
     return g && all.includes(g) ? g : LINK_FALLBACK;
   };
   // 每个类别里内置模块在前，链接模块按新增先后排在后面
-  const layout = groupOrder(n).map((g) => ({
-    key: g,
-    keys: [...ORDER.filter((k) => groupOf(k) === g), ...(n.links ?? []).map((l) => l.key).filter((k) => groupOfItem(k) === g)] as ItemKey[],
-  }));
+  // 没有权限的模块不出现；步态类别里一个模块都看不到时，菜单设置里也不显示这个类别
+  const s = session.get();
+  const layout = groupOrder(n)
+    .map((g) => ({
+      key: g,
+      keys: [...ORDER.filter((k) => groupOf(k) === g && moduleAllowed(s, k)), ...(n.links ?? []).map((l) => l.key).filter((k) => groupOfItem(k) === g)] as ItemKey[],
+    }))
+    .filter((g) => g.key !== "gait" || g.keys.length);
   const groupHidden = (g: GroupId) => !!n.hiddenGroups?.includes(g);
   const moduleHidden = (k: ItemKey) => (defaultHidden(k) ? !n.shownModules?.includes(k) : !!n.hiddenModules?.includes(k));
   return {

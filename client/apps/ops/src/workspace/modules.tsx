@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { AlertOutlined, ControlOutlined, DashboardOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, HomeOutlined, MedicineBoxOutlined, MenuOutlined, SolutionOutlined, NotificationOutlined, SettingOutlined, TagsOutlined, TeamOutlined } from "@ant-design/icons";
+import { AlertOutlined, ControlOutlined, DashboardOutlined, DeploymentUnitOutlined, FundProjectionScreenOutlined, HddOutlined, HomeOutlined, MedicineBoxOutlined, MenuOutlined, ProfileOutlined, RadarChartOutlined, SolutionOutlined, NotificationOutlined, SettingOutlined, TagsOutlined, TeamOutlined, UserOutlined } from "@ant-design/icons";
+import { hasPermission, type Session } from "@radar/core";
 import type { NavKey } from "../guide/steps";
 
 /** 工作台上的模块。"monitor" 不开标签，而是打开全屏的监控模式 */
@@ -30,10 +31,13 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   menus: { key: "menus", label: "菜单设置", icon: <MenuOutlined />, desc: "工作台类别和模块的名字、顺序、隐藏", tint: "#F1F2F7", color: "#5B6078" },
   dataWall: { key: "dataWall", label: "数据魔墙", icon: <DashboardOutlined />, desc: "全房间实时：呼吸、心率、睡眠、有人无人", tint: "#E7F6F3", color: "#0F8A72" },
   wallSettings: { key: "wallSettings", label: "魔墙设置", icon: <ControlOutlined />, desc: "轮播，页面的显示、顺序和停留时间", tint: "#E7F6F3", color: "#0F8A72" },
+  gaitSensors: { key: "gaitSensors", label: "步态传感器", icon: <RadarChartOutlined />, desc: "传感器、绑定用户、设备状态", tint: "#E8F3FF", color: "#1668BD" },
+  gaitUsers: { key: "gaitUsers", label: "用户管理", icon: <UserOutlined />, desc: "步态用户档案与健康评估", tint: "#E8F3FF", color: "#1668BD" },
+  gaitRecords: { key: "gaitRecords", label: "采集记录", icon: <ProfileOutlined />, desc: "采集记录、步态报告与 PDF", tint: "#E8F3FF", color: "#1668BD" },
   realtime: { key: "realtime", label: "实时推送", icon: <NotificationOutlined />, desc: "平台推送消息（调试用）", tint: "#F1F2F7", color: "#5B6078" },
 };
 
-export type GroupKey = "duty" | "dashboard" | "deploy" | "debug" | "alarm" | "system";
+export type GroupKey = "duty" | "dashboard" | "gait" | "deploy" | "debug" | "alarm" | "system";
 
 /** 工作台的分组（类别）和顺序；key 用来存自定义名字，别改 */
 export const GROUPS: { key: GroupKey; title: string; keys: ModuleKey[] }[] = [
@@ -41,6 +45,22 @@ export const GROUPS: { key: GroupKey; title: string; keys: ModuleKey[] }[] = [
   { key: "deploy", title: "基础管理", keys: ["devices", "spaces", "members", "caregivers"] },
   { key: "alarm", title: "告警管理", keys: ["scenes", "alerts", "processTypes"] },
   { key: "dashboard", title: "数据看板", keys: ["dataWall", "wallSettings"] },
+  { key: "gait", title: "步态分析", keys: ["gaitSensors", "gaitUsers", "gaitRecords"] },
   { key: "debug", title: "排查与诊断", keys: ["rooms", "realtime"] },
   { key: "system", title: "系统管理", keys: ["settings", "menus"] },
 ];
+
+/**
+ * 按平台菜单权限显示的模块（运维端其他模块不做权限判断）。看具体模块的权限，不看总菜单 GAIT：
+ * 平台上有的角色勾了传感器却没勾 GAIT，也有的勾了 GAIT 但只有传感器（2026-11-01 实测）。
+ */
+const MODULE_PERMISSION: Partial<Record<ModuleKey, string>> = {
+  gaitSensors: "GAIT_SENSOR",
+  gaitUsers: "GAIT_MEMBER_USER",
+  gaitRecords: "GAIT_COLLECTION_RECORD",
+};
+
+export function moduleAllowed(s: Session | null, k: ModuleKey) {
+  const p = MODULE_PERMISSION[k];
+  return !p || (!!s && hasPermission(s, p));
+}

@@ -14,6 +14,9 @@ import WallSettingsPage from "./pages/WallSettingsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import CaregiversPage from "./pages/CaregiversPage";
+import GaitSensorsPage from "./pages/GaitSensorsPage";
+import GaitUsersPage from "./pages/GaitUsersPage";
+import GaitRecordsPage, { type RecordFocus } from "./pages/GaitRecordsPage";
 import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
 import MonitorMode from "./monitor/MonitorMode";
 import { ProcessDialog } from "./alerts/ProcessDialog";
@@ -25,11 +28,12 @@ import type { NavKey } from "./guide/steps";
 import { WorkTabs, type OpenKey, type TabKey } from "./workspace/WorkTabs";
 import { Workbench } from "./workspace/Workbench";
 import { isLink, useNames, type ItemKey } from "./workspace/names";
+import { moduleAllowed } from "./workspace/modules";
 import LinkPage from "./pages/LinkPage";
 import { PaneActive } from "./workspace/dataChange";
 import "./workspace/workspace.css";
 
-const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall", "wallSettings"];
+const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall", "wallSettings", "gaitSensors", "gaitUsers", "gaitRecords"];
 
 async function logout() {
   await stopRealtime();
@@ -48,6 +52,8 @@ export default function Shell({ s }: { s: Session }) {
   const [monitor, setMonitor] = useState(false);
   /** 从数据魔墙点房间进监控模式时，选中那个房间 */
   const [monitorRoom, setMonitorRoom] = useState<string>();
+  /** 从传感器、用户跳到采集记录时带的筛选 */
+  const [recordFocus, setRecordFocus] = useState<RecordFocus>();
   // 告警弹窗（系统设置里打开）；监控模式有自己的告警列表，开着时不在应用内弹提醒
   const alertCenter = useAlertCenter(s.orgId, usePopupSettings(), monitor);
 
@@ -72,6 +78,23 @@ export default function Shell({ s }: { s: Session }) {
     if (k !== "home") setTabs((t) => (t.includes(k) ? t : [...t, k]));
     setActive(k);
   }, []);
+
+  const openRecords = useCallback(
+    (f: Omit<RecordFocus, "seq">) => {
+      setRecordFocus((old) => ({ ...f, seq: (old?.seq ?? 0) + 1 }));
+      go("gaitRecords");
+    },
+    [go],
+  );
+
+  // 权限按机构算：切到没有权限的机构时，关掉已经打开的步态模块
+  useEffect(() => {
+    const denied = tabs.filter((k) => !isLink(k) && !moduleAllowed(s, k));
+    if (denied.length) {
+      setTabs((t) => t.filter((k) => !denied.includes(k)));
+      if (active !== "home" && denied.includes(active)) setActive("home");
+    }
+  }, [s, tabs, active]);
 
   // 推送页开着时新消息直接算已读
   useEffect(() => {
@@ -157,6 +180,12 @@ export default function Shell({ s }: { s: Session }) {
                     <MembersPage />
                   ) : k === "caregivers" ? (
                     <CaregiversPage />
+                  ) : k === "gaitSensors" ? (
+                    <GaitSensorsPage onOpenRecords={openRecords} />
+                  ) : k === "gaitUsers" ? (
+                    <GaitUsersPage onOpenRecords={openRecords} />
+                  ) : k === "gaitRecords" ? (
+                    <GaitRecordsPage focus={recordFocus} />
                   ) : k === "alerts" ? (
                     <AlertsPage />
                   ) : k === "processTypes" ? (
