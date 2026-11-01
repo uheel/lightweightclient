@@ -89,6 +89,8 @@
 | 房间详情 | `/care/monitoring/room-view?roomId=` | 第一个绑了雷达的房间（楼栋、楼层低的在前、房间）；藏掉平台菜单 |
 | 睡眠报告 | `/health/sleep-report-device?sn=&date=` | 平台的纯净路由，没有菜单。前 12 位长者里，按看床设备的来源查 `/api/member-report/date`（往前 3 个月，值为 1 才算有），取日期最新的那位。都没有时退到平台默认的长者，用下面的报告页显示 |
 | 安全守护报告 | `/care/health/member-health-report` | 同样取日期最新的长者，都没有时退到平台默认的长者；藏掉平台菜单 |
+| 步态分析报告 | `/gait/analysis/report?deviceId=&id=&reportNo=` | 最近 50 条采集记录里最新的评估过的一条，都没评估过就取最新的；藏掉平台菜单 |
+| 步态趋势 | `/gait/trend?memberId=` | `/api/metric-segment/members` 里最近有采集记录的用户；藏掉平台菜单 |
 
 不直接用平台报告页的默认值：不带参数时它取 `/api/member-report/default-info` 的长者，来源默认 AIO，藕塘社区多数是 UltraFall，直接显示"报告生成失败"。默认的长者还可能已退住（展厅演示的默认长者退住了，不在实时监护的长者列表里，当前在住的 11 位 10–11 月都没有睡眠报告，只有他 9 月 16 日有）。
 
@@ -96,7 +98,7 @@
 
 藏菜单也是初始化脚本做的（`platformScript`）：样式藏 `.ant-pro-sider`、`.ant-layout-sider`、`.ant-pro-layout-header`、`header.ant-layout-header`、`.ant-breadcrumb` 和菜单占位 `.ant-layout-has-sider>div:first-child`；平台改版时可能失效。挑选结果在打开魔墙时定一次，长期开着不会换到新的一天。这几个页面的设计尺寸先用 1920×1080，报告页很长，只显示第一屏，下面要手动滚。
 
-**显示方式**：Tauri 子 webview，切走只是藏起来，切回来不重新加载。前端的 `new Webview` 不能带初始化脚本，由 Rust 命令 `child_webview_create` 建（`src-tauri/src/child_webview.rs`），移动、隐藏、关闭和链接模块共用 `workspace/childWebview.ts`。
+**显示方式**：Tauri 子 webview，加载一次就一直留着，切换、放多久都不重新加载（用户 2026-11-01 明确要求，宁可多占内存：8 个平台页面运维端 WebView2 共约 1.7 GB，不需要的在魔墙设置里隐藏）。所以平台页面的内容可能停在加载时，平台页面自己刷新的部分除外。重新加载只发生在切换机构、关掉魔墙标签、在设置里隐藏后再打开、退出客户端时。前端的 `new Webview` 不能带初始化脚本，由 Rust 命令 `child_webview_create` 建（`src-tauri/src/child_webview.rs`），移动、隐藏、关闭和链接模块共用 `workspace/childWebview.ts`。
 
 **登录**：平台页面加载前，初始化脚本写入平台网页端登录后存的键（`platformScript`，键名取自平台前端代码）：sessionStorage 的 `SDB_TOKEN`、`SDB_USERID`、`SDB_USER_NAME`、`SDB_REAL_NAME`、`SDB_NICK_NAME`、`SDB_ORG_ID`、`SDB_ORG_TYPE`、`SDB_ORG_NAME`、`SDB_RAW_ORG_ID`、`SDB_SA`、`SDB_AD`、`SDB_MENUS`（权限 key 数组），localStorage 的 `SDB_ORG_ID`、`SDB_ORG_TYPE`、`umi_locale`（zh-CN）。脚本先校验域名，跳到别的网站不会写过去。切机构时子 webview 重建。浏览器调试时写不进去，只显示提示。
 
@@ -118,6 +120,14 @@
 - **页面**：每页可调顺序、显示隐藏、停留秒数（5～600，全房间看板默认每屏 20 秒，平台页面默认 30 秒），至少留一页，可恢复默认。
 - 隐藏的平台页面关掉子 webview，不占内存，再打开时重新加载。隐藏全房间看板后不挂载、不收推送、不取告警，来紧急告警也不会切过去，设置页有提醒。
 - 全房间看板自己的显示范围、行列、放不下时仍在魔墙工具栏的"显示设置"里，按机构分别保存（要用当前机构的楼层）。
+
+## 3. 性能和长时间待机（2026-11-01）
+
+**推送不触发渲染**：原来外壳把每条推送存进 state，给"实时推送"页用，每条推送所有打开的标签都重新渲染。现在记录放在 React 外面（`logEvent`），那个页面显示着时才每秒取一次；`useLiveMap` 在标签隐藏时也不刷界面。藕塘社区 40 台雷达，浏览器调试版（开发模式）实测每秒整页渲染：魔墙隐藏时 16 → 0.6 次；再开 4 个标签 30 → 约 0.1 次，主线程长任务 18% → 0，41 → 60 帧。这些页面都静止时，35 秒内没有平台请求（告警每 60 秒轮询一次）。
+
+**实时连接一直重连**（`core/realtime.ts`，两个客户端共用）：原来 SignalR 重试 5 次（约 47 秒）后放弃，之后只能手动重连。现在一直重试（最长隔 30 秒），重建连接失败也会再试；网络恢复（`online`）、窗口回到前台（`visibilitychange`）时没连着就马上连。阻断 70 秒再放开，9 秒内自己连回来。真实的电脑睡眠没测过。
+
+**隐藏过久切回来重取**：`useRefreshOn` 里，标签隐藏超过 5 分钟（`HIDDEN_STALE_MS`），切回来静默重取一次，用了它的页面都生效。没超过时不重取。平台页面不算在内，见第 2 节，不重新加载。
 
 ## 早期草案：两块屏的定位
 

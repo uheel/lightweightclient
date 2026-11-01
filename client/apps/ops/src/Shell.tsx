@@ -17,7 +17,7 @@ import CaregiversPage from "./pages/CaregiversPage";
 import GaitSensorsPage from "./pages/GaitSensorsPage";
 import GaitUsersPage from "./pages/GaitUsersPage";
 import GaitRecordsPage, { type RecordFocus } from "./pages/GaitRecordsPage";
-import RealtimePage, { STATE_TEXT } from "./pages/RealtimePage";
+import RealtimePage, { logEvent, STATE_TEXT } from "./pages/RealtimePage";
 import MonitorMode from "./monitor/MonitorMode";
 import { ProcessDialog } from "./alerts/ProcessDialog";
 import { useAlertCenter } from "./alerts/useAlertCenter";
@@ -47,7 +47,6 @@ export default function Shell({ s }: { s: Session }) {
   /** 打开的模块标签（顺序即标签顺序）；每次登录都从工作台开始 */
   const [tabs, setTabs] = useState<OpenKey[]>([]);
   const [active, setActive] = useState<TabKey>("home");
-  const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [unread, setUnread] = useState(0);
   const [monitor, setMonitor] = useState(false);
   /** 从数据魔墙点房间进监控模式时，选中那个房间 */
@@ -59,8 +58,8 @@ export default function Shell({ s }: { s: Session }) {
 
   const onEvent = useCallback(
     (e: RealtimeEvent) => {
-      // 设备数据推送量很大，实时消息页只留最近 500 条
-      setEvents((list) => [e, ...list].slice(0, 500));
+      // 设备数据推送量很大（几十台设备每秒十几条），这里不能改 state，否则每条推送所有标签都重新渲染一遍
+      logEvent(e);
       if (e.method !== "DeviceData") setUnread((n) => n + 1);
       if (e.method === "AntNotification" && e.payload && typeof e.payload === "object") {
         const p = e.payload as { message?: string; description?: string };
@@ -207,7 +206,7 @@ export default function Shell({ s }: { s: Session }) {
                       }}
                     />
                   ) : (
-                    <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
+                    <RealtimePage state={rt} />
                   )}
                   </PaneActive.Provider>
                 </div>

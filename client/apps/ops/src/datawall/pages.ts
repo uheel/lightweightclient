@@ -1,5 +1,5 @@
 import type { Session } from "@radar/core";
-import { firstRoomTarget, safetyReportTarget, sleepReportTarget, type PlatformTarget } from "./platformTargets";
+import { firstRoomTarget, gaitReportTarget, gaitTrendTarget, safetyReportTarget, sleepReportTarget, type PlatformTarget } from "./platformTargets";
 
 /**
  * 数据魔墙有哪些页面。轮播开关、显示隐藏、顺序、停留时间在"魔墙设置"里改（config.ts）。
@@ -33,11 +33,15 @@ export const WALL_PAGES: WallPageDef[] = [
   { key: "room", title: "房间详情", kind: "platform", target: firstRoomTarget, design: DESIGN_1080, hideChrome: true },
   { key: "sleep", title: "睡眠报告", kind: "platform", target: sleepReportTarget, design: DESIGN_1080, hideChrome: true },
   { key: "safety", title: "安全守护报告", kind: "platform", target: safetyReportTarget, design: DESIGN_1080, hideChrome: true },
+  { key: "gaitReport", title: "步态分析报告", kind: "platform", target: gaitReportTarget, design: DESIGN_1080, hideChrome: true },
+  { key: "gaitTrend", title: "步态趋势", kind: "platform", target: gaitTrendTarget, design: DESIGN_1080, hideChrome: true },
 ];
 
 /**
  * 打开魔墙后隔多久开始在后台加载平台页面，每页再隔多久（一个一个来：后面的能复用前面建好的连接）。
- * 本机到平台新建连接常卡 10 秒左右（2026-11-01 实测 13 个文件 5 个卡住；接口本身约 100 毫秒，脚本约 3 MB），不提前加载就会白屏等
+ * 本机到平台新建连接常卡 10 秒左右（2026-11-01 实测 13 个文件 5 个卡住；接口本身约 100 毫秒，脚本约 3 MB），
+ * 所以页面加载一次就一直留着（用户 2026-11-01 明确要求：切换、放很久都不重新加载，宁可多占内存）。
+ * 8 个平台页面都留着时，运维端的 WebView2 进程共约 1.7 GB；不需要的页面在魔墙设置里隐藏
  */
 export const PRELOAD_START_MS = 2000;
 export const PRELOAD_STEP_MS = 5000;

@@ -57,6 +57,11 @@ let conn: signalR.HubConnection | null = null;
 let generation = 0;
 let state: RealtimeState = "disconnected";
 let lastError: string | undefined;
+/** 自动重连的等待时间（毫秒），到最后一个后一直按它重试：电脑睡眠、断网多久都要能连回来 */
+const RETRY_DELAYS = [0, 2000, 5000, 10000, 30000];
+/** 连接彻底断开（重新建连失败）后，下一次整个重建的定时器 */
+let retryTimer: number | undefined;
+let retryCount = 0;
 const stateListeners = new Set<StateListener>();
 const eventListeners = new Set<EventListener>();
 
@@ -100,8 +105,35 @@ async function closeCurrent() {
   }
 }
 
+function clearRetry() {
+  window.clearTimeout(retryTimer);
+  retryTimer = undefined;
+}
+
+function scheduleRetry() {
+  clearRetry();
+  const delay = RETRY_DELAYS[Math.min(++retryCount, RETRY_DELAYS.length - 1)];
+  retryTimer = window.setTimeout(() => void startRealtime(), delay);
+}
+
+let wakeListening = false;
+
+/** 网络恢复、窗口回到前台时（常见于电脑唤醒）不等定时器，没连着就马上连 */
+function listenForWake() {
+  if (wakeListening) return;
+  wakeListening = true;
+  const wake = () => {
+    if (document.visibilityState === "hidden" || !session.get()) return;
+    if (state === "disconnected" || state === "reconnecting") void startRealtime();
+  };
+  window.addEventListener("online", wake);
+  document.addEventListener("visibilitychange", wake);
+}
+
 export async function startRealtime() {
   const gen = ++generation;
+  clearRetry();
+  listenForWake();
   await closeCurrent();
   const s = session.get();
   if (gen !== generation) return;
@@ -113,7 +145,7 @@ export async function startRealtime() {
       skipNegotiation: true,
       transport: signalR.HttpTransportType.WebSockets,
     })
-    .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+    .withAutomaticReconnect({ nextRetryDelayInMilliseconds: (c) => RETRY_DELAYS[Math.min(c.previousRetryCount, RETRY_DELAYS.length - 1)] })
     .configureLogging(new ProbeLogger())
     .build();
 
@@ -131,7 +163,9 @@ export async function startRealtime() {
     setState("connected");
   });
   c.onclose((err) => {
-    if (conn === c) setState("disconnected", err?.message);
+    if (conn !== c) return;
+    setState("disconnected", err?.message);
+    scheduleRetry();
   });
 
   conn = c;
@@ -140,14 +174,19 @@ export async function startRealtime() {
     await c.start();
     if (gen !== generation) return;
     await joinGroup();
+    retryCount = 0;
     setState("connected");
   } catch (e) {
-    if (conn === c) setState("disconnected", e instanceof Error ? e.message : String(e));
+    if (conn !== c) return;
+    setState("disconnected", e instanceof Error ? e.message : String(e));
+    scheduleRetry();
   }
 }
 
 export async function stopRealtime() {
   const gen = ++generation;
+  clearRetry();
+  retryCount = 0;
   await closeCurrent();
   // 停止期间如果又发起了新连接，就不要覆盖它的状态
   if (gen === generation) setState("disconnected");

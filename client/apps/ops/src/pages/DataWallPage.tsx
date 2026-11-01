@@ -269,6 +269,7 @@ function Wall({
   const hint = rooms.length ? layoutHint(layout) : undefined;
 
   const [pageState, setPage] = useState(0);
+  const [round, setRound] = useState(0);
   const page = Math.min(pageState, pages.length - 1);
   const flip = useCallback((d: number) => setPage((p) => (Math.min(p, pages.length - 1) + d + pages.length) % pages.length), [pages.length]);
   const onUrgentRef = useRef(onUrgent);
@@ -281,9 +282,11 @@ function Wall({
       if (page < pages.length - 1) return setPage(page + 1);
       setPage(0);
       onScreensDone();
+      // 下一页没加载好时还留在看板，要接着计时
+      setRound((n) => n + 1);
     }, screenSeconds * 1000);
     return () => clearTimeout(t);
-  }, [active, playing, screenSeconds, page, pages.length, onScreensDone]);
+  }, [active, playing, screenSeconds, page, pages.length, onScreensDone, round]);
   // 新告警：翻到它的房间所在的页
   const newestRoom = rooms.find((r) => r.cells.some((c) => c.sn === newest?.sn))?.id;
   /** 见过的最新紧急告警时间：第一次加载时已有的不算新的；最新那条过了紧急期、换成旧的一条时也不算 */
@@ -452,20 +455,22 @@ function PlatformView({ page, s, visible, onReady }: { page: Extract<WallPageDef
   const box = useRef<HTMLDivElement>(null);
   /** 要打开的地址：有些页面要先挑房间、长者、日期。undefined 还没挑好，null 这个机构没有可显示的 */
   const [target, setTarget] = useState<PlatformTarget | null>();
+  // 只挑一次：挑的结果变了子 webview 就会重新加载。魔墙设置改停留时间等会换一个 page 对象，不能因此重挑
+  const pageRef = useRef(page);
   useEffect(() => {
     let dead = false;
-    const t = page.target;
+    const t = pageRef.current.target;
     if (typeof t !== "function") return setTarget(t);
     t()
       .then((x) => !dead && setTarget(x ?? null))
       .catch((e) => {
-        console.error(`数据魔墙：${page.title}找不到要显示的内容`, e);
+        console.error(`数据魔墙：${pageRef.current.title}找不到要显示的内容`, e);
         if (!dead) setTarget(null);
       });
     return () => {
       dead = true;
     };
-  }, [page]);
+  }, []);
   const url = useMemo(() => (target ? platformUrl(s, target.path) : undefined), [s, target]);
   const script = useMemo(() => platformScript(s, { hideChrome: page.hideChrome, report: target?.report }), [s, page.hideChrome, target?.report]);
   const overlay = useOverlayOpen(isTauri && visible);
@@ -505,21 +510,22 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
   const playing = !paused || !config.carousel;
   const [show, setShow] = useState(false);
   const [barSlot, setBarSlot] = useState<HTMLElement | null>(null);
-  /** 开始后台加载的平台页面（一个一个开始）；手动点到的马上开始 */
+  /** 开始加载的平台页面（一个一个开始）；手动点到的马上开始。加载后一直留着，切换、放多久都不重新加载 */
   const [opened, setOpened] = useState<string[]>([]);
   const open = useCallback((key: string) => setOpened((x) => (x.includes(key) ? x : [...x, key])), []);
   const platformKeys = pages.flatMap((p) => (p.kind === "platform" ? [p.key] : [])).join(",");
   const everActive = useRef(false);
   if (active) everActive.current = true;
+  const wasEverActive = everActive.current;
   useEffect(() => {
-    if (!everActive.current) return;
+    if (!wasEverActive) return;
     const timers = platformKeys
       .split(",")
       .filter(Boolean)
       .map((key, i) => setTimeout(() => open(key), PRELOAD_START_MS + i * PRELOAD_STEP_MS));
     return () => timers.forEach(clearTimeout);
-  }, [active, platformKeys, open]);
-  // 隐藏的页面关掉子 webview，不占内存；再打开时重新加载
+  }, [wasEverActive, platformKeys, open]);
+  // 设置里隐藏的页面关掉子 webview，不占内存；再打开时重新加载
   useEffect(() => {
     const keep = (x: string[]) => {
       const left = x.filter((k) => platformKeys.split(",").includes(k));
@@ -530,7 +536,7 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
   }, [platformKeys]);
   useEffect(() => {
     if (active && current.kind === "platform") open(current.key);
-  }, [active, current, open]);
+  }, [active, current.kind, current.key, open]);
   /** 加载好的平台页面。没加载好的轮播时跳过，不让大屏白屏 */
   const [ready, setReady] = useState<string[]>([]);
   const onReady = useCallback((key: string) => setReady((x) => (x.includes(key) ? x : [...x, key])), []);
@@ -558,12 +564,17 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
     if (carouselRef.current) step(1);
   }, [step]);
   const toRooms = useCallback(() => setCurrentKey("rooms"), []);
+  const [round, setRound] = useState(0);
   // 平台页面的停留；全房间看板翻完自己的几屏再轮到下一个（onScreensDone）
   useEffect(() => {
     if (!active || !config.carousel || paused || current.kind === "rooms") return;
-    const t = setTimeout(next, current.seconds * 1000);
+    const t = setTimeout(() => {
+      next();
+      // 别的页面都没加载好时还留在这一页，要接着计时
+      setRound((n) => n + 1);
+    }, current.seconds * 1000);
     return () => clearTimeout(t);
-  }, [active, config.carousel, paused, current.kind, current.key, current.seconds, next]);
+  }, [active, config.carousel, paused, current.kind, current.key, current.seconds, next, round]);
 
   async function startShow() {
     setShow(true);

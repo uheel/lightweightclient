@@ -1,6 +1,20 @@
+import { useContext, useEffect, useState } from "react";
 import { Alert, Button, Card, Empty, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { realtime, startRealtime, status, type RealtimeEvent, type RealtimeState } from "@radar/core";
+import { PaneActive } from "../workspace/dataChange";
+
+/** 实时推送页只留最近这么多条 */
+const LOG_SIZE = 500;
+/** 推送记录放在 React 外面，收到推送不触发渲染；这个页面显示着时才每秒取一次 */
+let log: RealtimeEvent[] = [];
+
+export function logEvent(e: RealtimeEvent) {
+  log.push(e);
+  if (log.length > LOG_SIZE * 2) log = log.slice(-LOG_SIZE);
+}
+
+const latestEvents = () => log.slice(-LOG_SIZE).reverse();
 
 export const STATE_TEXT: Record<RealtimeState, { text: string; color: string; dot: string }> = {
   connected: { text: "已连接", color: "success", dot: status.online.dot },
@@ -9,15 +23,19 @@ export const STATE_TEXT: Record<RealtimeState, { text: string; color: string; do
   disconnected: { text: "未连接", color: "default", dot: status.alert.dot },
 };
 
-export default function RealtimePage({
-  state,
-  events,
-  onClear,
-}: {
-  state: RealtimeState;
-  events: RealtimeEvent[];
-  onClear: () => void;
-}) {
+export default function RealtimePage({ state }: { state: RealtimeState }) {
+  const active = useContext(PaneActive);
+  const [events, setEvents] = useState(latestEvents);
+  useEffect(() => {
+    if (!active) return;
+    setEvents(latestEvents());
+    const t = setInterval(() => setEvents(latestEvents()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  const onClear = () => {
+    log = [];
+    setEvents([]);
+  };
   return (
     <div className="page">
       <Card size="small">

@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import { api } from "@radar/core";
 import { getRadars } from "../api/device";
+import { getSegmentMembers, type GaitSegment } from "../api/gait";
 import { getRooms } from "../api/room";
 
 /**
@@ -121,4 +122,25 @@ export async function safetyReportTarget(): Promise<PlatformTarget | undefined> 
   const member = await platformDefaultMember();
   const day = member && (await latestDay(member, SAFETY_REPORT));
   return day ? reportTarget(member!, SAFETY_REPORT, day) : undefined;
+}
+
+// ---------- 步态（地址见平台前端：采集记录页的跳转、趋势页读 memberId） ----------
+
+/** 找最新记录时看前多少条（平台按时间倒序） */
+const RECENT_SEGMENTS = 50;
+
+/** 步态分析报告：最新一条评估过的采集记录；都没评估过就取最新的 */
+export async function gaitReportTarget(): Promise<PlatformTarget | undefined> {
+  const list = (await api.get<GaitSegment[]>("/api/metric-segment/pages", { params: { current: 1, pageSize: RECENT_SEGMENTS } })).data ?? [];
+  const usable = list.filter((x) => x.deviceId).sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  const seg = usable.find((x) => x.fallRiskType) ?? usable[0];
+  if (!seg) return undefined;
+  const q = new URLSearchParams({ deviceId: seg.deviceId!, id: seg.id, reportNo: seg.title || seg.id });
+  return { path: `/gait/analysis/report?${q}` };
+}
+
+/** 步态趋势：最近有采集记录的用户 */
+export async function gaitTrendTarget(): Promise<PlatformTarget | undefined> {
+  const newest = (await getSegmentMembers()).sort((a, b) => (b.lastCreatedAt ?? "").localeCompare(a.lastCreatedAt ?? ""))[0];
+  return newest && { path: `/gait/trend?memberId=${encodeURIComponent(newest.memberId)}` };
 }

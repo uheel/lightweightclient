@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { deviceChannels, parseDeviceData, realtime, subscribeChannels, type DeviceDataMessage, type LiveData } from "@radar/core";
+import { PaneActive } from "../workspace/dataChange";
 
 /**
  * 订阅一组设备的实时推送，按 SN 合并成最新状态（与用户端 useCareData 的做法一致）。
  * 每台设备约 1–2 秒推一次，几百台设备时推送很密，这里先攒在 ref 里，每秒刷一次界面。
- * paused 时照常订阅、接收，只是不刷界面（页面隐藏时用）；恢复时立刻刷一次，不用重新等推送。
+ * 所在的标签隐藏时或 paused 时照常订阅、接收，只是不刷界面；恢复时立刻刷一次，不用重新等推送。
  */
-export function useLiveMap(sns: string[], paused = false) {
+export function useLiveMap(sns: string[], pausedByCaller = false) {
+  const paused = pausedByCaller || !useContext(PaneActive);
   const [map, setMap] = useState<Record<string, LiveData>>({});
   const pending = useRef<Record<string, LiveData>>({});
   const key = sns.join(",");

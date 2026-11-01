@@ -66,6 +66,9 @@ const ALL: Topic[] = ["device", "space", "design", "member", "config", "alert", 
 /** 切到页面后多久之内完成的写操作，算上一页发起的（一次保存连着写几个接口，通常两三秒） */
 const JUST_SWITCHED_MS = 5000;
 
+/** 标签隐藏超过这么久，切回来时静默重取一次（平台上别人改的、新增的这里收不到通知） */
+const HIDDEN_STALE_MS = 5 * 60_000;
+
 /** 没登记的写接口按"什么都可能变了"算：顶多多取一次，不会漏 */
 function topicsOf(path: string): Topic[] {
   if (IGNORE.some((p) => path.startsWith(p))) return [];
@@ -100,6 +103,7 @@ export function useRefreshOn(topics: readonly Topic[], refresh: () => unknown, o
   latest.current = { refresh, topics, active, whileVisible: opts?.whileVisible };
   const stale = useRef(false);
   const activeSince = useRef(Date.now());
+  const hiddenSince = useRef<number>(undefined);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -120,8 +124,14 @@ export function useRefreshOn(topics: readonly Topic[], refresh: () => unknown, o
   }, []);
 
   useEffect(() => {
-    if (active) activeSince.current = Date.now();
-    if (active && stale.current) {
+    if (!active) {
+      hiddenSince.current = Date.now();
+      return;
+    }
+    activeSince.current = Date.now();
+    const hiddenLong = hiddenSince.current !== undefined && Date.now() - hiddenSince.current >= HIDDEN_STALE_MS;
+    hiddenSince.current = undefined;
+    if (stale.current || hiddenLong) {
       stale.current = false;
       latest.current.refresh();
     }
