@@ -4,6 +4,8 @@ mod api_http;
 #[path = "../../../../packages/core/rust/alert_popup.rs"]
 mod alert_popup;
 
+mod child_webview;
+
 use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,7 +30,8 @@ pub fn run() {
             alert_popup::alert_popup_show,
             alert_popup::alert_popup_hide,
             alert_popup::alert_popup_create,
-            alert_popup::alert_popup_destroy
+            alert_popup::alert_popup_destroy,
+            child_webview::child_webview_create
         ])
         // 告警弹窗窗口只在系统设置里打开了"告警弹窗"后才建（前端调 alert_popup_create）
         .on_window_event(|w, e| match e {

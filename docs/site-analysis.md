@@ -386,7 +386,7 @@ function toRoom(cx, cy, x, y, installType, dir, rotationDeg) {
 | `GET /api/cockpit/v2/elder/dashboard?reportLimit&rankingLimit&attentionLimit` | 健康驾驶舱：`summary`、`attentionItems`、`rankings`，以及 **`sleepReports`（机构内各长者"昨夜"的睡眠报告，带评分和趋势）**。`reportLimit=1000` 可用 |
 | `GET /api/health/portrait-report?memberId&date` | 健康画像。`sleepReport` 里有某一天的睡眠分期（**没有评分**），可以按天查历史；另有 BMI、身高体重、运动统计 |
 | `GET /api/member/data/radar-vital-minute-pages?filter[memberId]=` | 每分钟心率呼吸：`minuteAt, heartRateAverage/Min/Max, respiratoryRateAverage/Min/Max, qualityStatus`（memberId 必须写成 `filter[memberId]`） |
-| `GET /api/member-report/date?reportType=1&memberId&date=YYYY-MM` | 当月哪几天有报告。reportType：1 睡眠，2 安全守护，3 空间活力，4 跌倒监测，5 健康画像 |
+| `GET /api/member-report/date?reportType=1&memberId&date=YYYY-MM` | 当月哪几天有报告。reportType：1 睡眠，3 安全守护，5 健康画像（2026-11-01 实测：传 2 平台报 "Non-exhaustive switch expression"；平台前端的枚举里 2 是旧的 BedReport，安全守护实际用 3）。返回 `{日期: 值}`，值 1 有报告，2 没有数据（藕塘社区 6 位长者 24 份报告核对），只看有没有这一天会挑到空报告 |
 | `GET /api/sleep-analysis/report?memberId&queryAt` | 实测返回 404，不使用 |
 | `GET /api/alert/pages?filter[memberId]=` | **memberId 筛选不生效**，按长者筛选告警只能取最近的告警后在本地过滤 `members[]` |
 

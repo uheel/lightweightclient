@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, InputNumber, Popover, Radio, Segmented, Switch, TreeSelect } from "antd";
-import { ExclamationCircleOutlined, FullscreenOutlined, LeftOutlined, RightOutlined, SettingOutlined } from "@ant-design/icons";
+import { createPortal } from "react-dom";
+import { Button, Empty, InputNumber, Popover, Radio, Segmented, Switch, TreeSelect } from "antd";
+import { CaretRightOutlined, ControlOutlined, ExclamationCircleOutlined, FullscreenOutlined, LeftOutlined, PauseOutlined, RightOutlined, SettingOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { isTauri, session, type RealtimeState } from "@radar/core";
+import { isTauri, session, type RealtimeState, type Session } from "@radar/core";
 import type { OpsAlert } from "../api/device";
 import { bedName, CARE_GROUPS, durationText, useMonitorData } from "../monitor/useMonitorData";
 import { buildRooms, countCells, freshCareAlerts, getSlots, inScope, isUrgent, layoutHint, layoutWall, loadSavedSlots, loadSettings, saveSettings, saveSlots, scopeTree, suggestGrid, type Cell, type PlacedRoom, type Slot, type Tier, type WallRow, type WallSettings } from "../datawall/model";
 import { enterFullscreen, leaveFullscreen } from "../workspace/fullscreen";
 import { useRefreshOn, type Topic } from "../workspace/dataChange";
+import { useChildWebview, useOverlayOpen } from "../workspace/childWebview";
+import { platformScript, platformUrl, PRELOAD_START_MS, PRELOAD_STEP_MS, type WallPageDef } from "../datawall/pages";
+import type { PlatformTarget } from "../datawall/platformTargets";
+import { enabledPages, useWallConfig } from "../datawall/config";
 import "../datawall/wall.css";
 
 /** 舞台按 1920×1080 设计，整体等比缩放 */
 const W = 1920;
 const H = 1080;
-/** 放不下时每页停留 */
-const PAGE_MS = 20_000;
 /** 长期开着时重取房间、雷达、长者的间隔（状态靠推送） */
 const RELOAD_MS = 10 * 60_000;
 const NAMES_KEY = "ops.dataWall.names";
@@ -178,7 +181,29 @@ const alertPlace = (a: OpsAlert) => [a.floorName, a.roomName, a.deviceName && a.
  * 看板本身：标签开着就一直挂着、一直订阅推送，隐藏时（切标签、进实时监控）只是不刷界面，
  * 这样切回来马上是最新的，不用重新等设备推送。关掉标签才断开
  */
-function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; onOpenRoom: (id: string) => void }) {
+function Wall({
+  active,
+  rt,
+  playing,
+  screenSeconds,
+  barSlot,
+  onOpenRoom,
+  onScreensDone,
+  onUrgent,
+}: {
+  active: boolean;
+  rt: RealtimeState;
+  playing: boolean;
+  /** 放不下时每屏停留 */
+  screenSeconds: number;
+  /** 工具栏里给看板自己的按钮留的位置 */
+  barSlot: HTMLElement | null;
+  onOpenRoom: (id: string) => void;
+  /** 这轮的几屏都看完了，该轮到下一个魔墙页面 */
+  onScreensDone: () => void;
+  /** 新的紧急告警：魔墙要切回看板 */
+  onUrgent: () => void;
+}) {
   const s = session.get()!;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -246,57 +271,42 @@ function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; 
   const [pageState, setPage] = useState(0);
   const page = Math.min(pageState, pages.length - 1);
   const flip = useCallback((d: number) => setPage((p) => (Math.min(p, pages.length - 1) + d + pages.length) % pages.length), [pages.length]);
+  const onUrgentRef = useRef(onUrgent);
+  onUrgentRef.current = onUrgent;
   const urgent = useMemo(() => alerts.filter((a) => isUrgent(a, now)), [alerts, now]);
   const newest = urgent[0];
   useEffect(() => {
-    if (!active || pages.length < 2) return;
-    const t = setTimeout(() => flip(1), PAGE_MS);
+    if (!active || !playing) return;
+    const t = setTimeout(() => {
+      if (page < pages.length - 1) return setPage(page + 1);
+      setPage(0);
+      onScreensDone();
+    }, screenSeconds * 1000);
     return () => clearTimeout(t);
-  }, [active, page, pages.length, flip]);
+  }, [active, playing, screenSeconds, page, pages.length, onScreensDone]);
   // 新告警：翻到它的房间所在的页
   const newestRoom = rooms.find((r) => r.cells.some((c) => c.sn === newest?.sn))?.id;
+  /** 见过的最新紧急告警时间：第一次加载时已有的不算新的；最新那条过了紧急期、换成旧的一条时也不算 */
+  const urgentSeen = useRef<string>(undefined);
+  const alertsLoaded = !!data.alerts.loadedAt;
   useEffect(() => {
+    if (alertsLoaded) {
+      const at = newest?.createdAt ?? "";
+      if (urgentSeen.current !== undefined && at > urgentSeen.current) onUrgentRef.current();
+      if (urgentSeen.current === undefined || at > urgentSeen.current) urgentSeen.current = at;
+    }
     if (!newestRoom) return;
     const i = pages.findIndex((cols) => cols.flat().some((row) => row.rooms.some((x) => x.room.id === newestRoom)));
     if (i >= 0) setPage(i);
     // 只在最新的告警变了时翻
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newest?.id, newestRoom]);
-
-  const [show, setShow] = useState(false);
-  async function startShow() {
-    setShow(true);
-    await enterFullscreen().catch(() => {});
-  }
-  const endShow = useCallback(async () => {
-    setShow(false);
-    await leaveFullscreen().catch(() => {});
-  }, []);
-  useEffect(() => {
-    if (!show) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") endShow();
-      else if (e.key === "ArrowRight") flip(1);
-      else if (e.key === "ArrowLeft") flip(-1);
-    };
-    // 浏览器调试时 Esc 由浏览器先退出网页全屏
-    const onFs = () => !document.fullscreenElement && !isTauri && setShow(false);
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("fullscreenchange", onFs);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.removeEventListener("fullscreenchange", onFs);
-    };
-  }, [show, endShow, flip]);
-  // 关标签、切机构时恢复窗口
-  useEffect(() => () => void leaveFullscreen().catch(() => {}), []);
+  }, [newest?.id, newestRoom, alertsLoaded]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 设置面板关闭的时间：点墙面关面板时，同一次点击不要再打开房间 */
   const settingsClosedAt = useRef(0);
   const open = (id: string) => {
     if (settingsOpen || Date.now() - settingsClosedAt.current < 400) return;
-    endShow();
     onOpenRoom(id);
   };
   const older = data.alerts.pending.filter((a) => CARE_GROUPS.has(a.alertTypeGroup ?? 0)).length - allAlerts.length;
@@ -320,9 +330,10 @@ function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; 
     ));
 
   return (
-    <div className={show ? "wall-show" : "wall-page"}>
-      {!show && (
-        <div className="wall-bar">
+    <>
+      {barSlot &&
+        createPortal(
+          <>
           <Switch size="small" checked={showName} onChange={pickNames} />
           <span>显示长者姓氏</span>
           {pages.length > 1 && (
@@ -351,16 +362,14 @@ function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; 
               显示设置
             </Button>
           </Popover>
-          <Button size="small" type="primary" icon={<FullscreenOutlined />} onClick={startShow}>
-            全屏放映
-          </Button>
           {hint && (
             <span className="wall-bar-hint" title={hint}>
               <ExclamationCircleOutlined /> {hint}
             </span>
           )}
-        </div>
-      )}
+          </>,
+          barSlot,
+        )}
       <div className="wall">
         <Stage>
           <header className="wall-head">
@@ -433,18 +442,156 @@ function Wall({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; 
             </span>
           </footer>
         </Stage>
-        {show && (
-          <button className="wall-exit" onClick={endShow} title="退出放映（Esc）">
-            退出放映
-          </button>
-        )}
       </div>
+    </>
+  );
+}
+
+/** 平台原页面：打开魔墙后在屏幕外提前加载，之后切走只是藏起来，切回来不用重新加载。浏览器调试时没有子 webview，也写不进登录信息 */
+function PlatformView({ page, s, visible, onReady }: { page: Extract<WallPageDef, { kind: "platform" }>; s: Session; visible: boolean; onReady: (key: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  /** 要打开的地址：有些页面要先挑房间、长者、日期。undefined 还没挑好，null 这个机构没有可显示的 */
+  const [target, setTarget] = useState<PlatformTarget | null>();
+  useEffect(() => {
+    let dead = false;
+    const t = page.target;
+    if (typeof t !== "function") return setTarget(t);
+    t()
+      .then((x) => !dead && setTarget(x ?? null))
+      .catch((e) => {
+        console.error(`数据魔墙：${page.title}找不到要显示的内容`, e);
+        if (!dead) setTarget(null);
+      });
+    return () => {
+      dead = true;
+    };
+  }, [page]);
+  const url = useMemo(() => (target ? platformUrl(s, target.path) : undefined), [s, target]);
+  const script = useMemo(() => platformScript(s, { hideChrome: page.hideChrome, report: target?.report }), [s, page.hideChrome, target?.report]);
+  const overlay = useOverlayOpen(isTauri && visible);
+  const { error, ready } = useChildWebview(box, `wall-${page.key}`, isTauri ? url : undefined, 0, visible && !overlay, script, page.design);
+  useEffect(() => {
+    if (ready) onReady(page.key);
+  }, [ready, onReady, page.key]);
+  return (
+    <div ref={box} className="wall-platform">
+      {target === null ? (
+        <Empty style={{ marginTop: 80 }} description={`这个机构还没有可显示的${page.title}`} />
+      ) : !isTauri ? (
+        <Empty style={{ marginTop: 80 }} description={`平台页面"${page.title}"只在客户端里显示（浏览器调试时写不进平台的登录信息）`}>
+          {target && <code className="wall-platform-target">{target.path}{target.report ? ` · ${target.report.memberId.slice(0, 6)} ${target.report.analysisDay}` : ""}</code>}
+        </Empty>
+      ) : error ? (
+        <Empty style={{ marginTop: 80 }} description={`打开失败：${error}`} />
+      ) : (
+        !ready && <div className="wall-platform-wait">正在加载{page.title}…</div>
+      )}
     </div>
   );
 }
 
-/** 数据魔墙：全房间实时看板。房间位置固定，每台雷达一格：床位显示睡眠和心率呼吸，其他显示有人无人 */
-export default function DataWallPage({ active, rt, onOpenRoom }: { active: boolean; rt: RealtimeState; onOpenRoom: (id: string) => void }) {
+/** 数据魔墙：几个页面（datawall/pages.ts）轮播。全房间看板房间位置固定，每台雷达一格；其他页面临时显示平台原页面 */
+export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }: { active: boolean; rt: RealtimeState; onOpenRoom: (id: string) => void; onOpenSettings: () => void }) {
+  const s = session.get()!;
+  const config = useWallConfig();
+  const pages = useMemo(() => enabledPages(config), [config]);
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const [currentKey, setCurrentKey] = useState(pages[0].key);
+  // 当前页在设置里被隐藏了就显示第一页
+  const current = pages.find((p) => p.key === currentKey) ?? pages[0];
+  const [paused, setPaused] = useState(false);
+  /** 关了轮播就不在页面之间切；全房间看板放不下时自己的几屏照样翻 */
+  const playing = !paused || !config.carousel;
+  const [show, setShow] = useState(false);
+  const [barSlot, setBarSlot] = useState<HTMLElement | null>(null);
+  /** 开始后台加载的平台页面（一个一个开始）；手动点到的马上开始 */
+  const [opened, setOpened] = useState<string[]>([]);
+  const open = useCallback((key: string) => setOpened((x) => (x.includes(key) ? x : [...x, key])), []);
+  const platformKeys = pages.flatMap((p) => (p.kind === "platform" ? [p.key] : [])).join(",");
+  const everActive = useRef(false);
+  if (active) everActive.current = true;
+  useEffect(() => {
+    if (!everActive.current) return;
+    const timers = platformKeys
+      .split(",")
+      .filter(Boolean)
+      .map((key, i) => setTimeout(() => open(key), PRELOAD_START_MS + i * PRELOAD_STEP_MS));
+    return () => timers.forEach(clearTimeout);
+  }, [active, platformKeys, open]);
+  // 隐藏的页面关掉子 webview，不占内存；再打开时重新加载
+  useEffect(() => {
+    const keep = (x: string[]) => {
+      const left = x.filter((k) => platformKeys.split(",").includes(k));
+      return left.length === x.length ? x : left;
+    };
+    setOpened(keep);
+    setReady(keep);
+  }, [platformKeys]);
+  useEffect(() => {
+    if (active && current.kind === "platform") open(current.key);
+  }, [active, current, open]);
+  /** 加载好的平台页面。没加载好的轮播时跳过，不让大屏白屏 */
+  const [ready, setReady] = useState<string[]>([]);
+  const onReady = useCallback((key: string) => setReady((x) => (x.includes(key) ? x : [...x, key])), []);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+
+  /** 下一个能显示的页面（d = -1 是上一个） */
+  const step = useCallback(
+    (d: number) =>
+      setCurrentKey((key) => {
+        const list = pagesRef.current;
+        const i = Math.max(0, list.findIndex((p) => p.key === key));
+        for (let n = 1; n <= list.length; n++) {
+          const p = list[(i + d * n + list.length * n) % list.length];
+          if (p.kind === "rooms" || !isTauri || readyRef.current.includes(p.key)) return p.key;
+        }
+        return key;
+      }),
+    [],
+  );
+  const next = useCallback(() => step(1), [step]);
+  const carouselRef = useRef(config.carousel);
+  carouselRef.current = config.carousel;
+  const onScreensDone = useCallback(() => {
+    if (carouselRef.current) step(1);
+  }, [step]);
+  const toRooms = useCallback(() => setCurrentKey("rooms"), []);
+  // 平台页面的停留；全房间看板翻完自己的几屏再轮到下一个（onScreensDone）
+  useEffect(() => {
+    if (!active || !config.carousel || paused || current.kind === "rooms") return;
+    const t = setTimeout(next, current.seconds * 1000);
+    return () => clearTimeout(t);
+  }, [active, config.carousel, paused, current.kind, current.key, current.seconds, next]);
+
+  async function startShow() {
+    setShow(true);
+    await enterFullscreen().catch(() => {});
+  }
+  const endShow = useCallback(async () => {
+    setShow(false);
+    await leaveFullscreen().catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!show) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") endShow();
+      else if (e.key === "ArrowRight") next();
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    // 浏览器调试时 Esc 由浏览器先退出网页全屏
+    const onFs = () => !document.fullscreenElement && !isTauri && setShow(false);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFs);
+    };
+  }, [show, endShow, next, step]);
+  // 关标签、切机构时恢复窗口
+  useEffect(() => () => void leaveFullscreen().catch(() => {}), []);
+
   // 清掉上一版运营展示墙留在本机的缓存
   useEffect(() => {
     try {
@@ -453,5 +600,71 @@ export default function DataWallPage({ active, rt, onOpenRoom }: { active: boole
       /* 清不掉也不影响 */
     }
   }, []);
-  return <Wall active={active} rt={rt} onOpenRoom={onOpenRoom} />;
+  const rooms = pages.find((p) => p.kind === "rooms");
+  return (
+    <div className={show ? "wall-show" : "wall-page"}>
+      {!show && (
+        <div className="wall-bar">
+          {pages.length > 1 && <Segmented size="small" value={current.key} onChange={(k) => setCurrentKey(k as string)} options={pages.map((p) => ({ value: p.key, label: p.title }))} />}
+          {config.carousel && pages.length > 1 && (
+            <Button size="small" icon={paused ? <CaretRightOutlined /> : <PauseOutlined />} onClick={() => setPaused((x) => !x)}>
+              {paused ? "继续轮播" : "暂停轮播"}
+            </Button>
+          )}
+          <Button size="small" icon={<ControlOutlined />} onClick={onOpenSettings}>
+            魔墙设置
+          </Button>
+          <Button size="small" type="primary" icon={<FullscreenOutlined />} onClick={startShow}>
+            全屏放映
+          </Button>
+          <span className="wall-bar-sep" />
+          <span ref={setBarSlot} className="wall-bar-slot" hidden={current.kind !== "rooms"} />
+        </div>
+      )}
+      {/* 放映时也能切页面。子 webview 盖在网页上面，按钮不能放在它上面，所以留一条；焦点在平台页面里时键盘也收不到 */}
+      {show && (
+        <div className="wall-show-strip">
+          <span className="wall-show-tabs">
+            {pages.map((p) => (
+              <button key={p.key} className={p.key === current.key ? "on" : undefined} onClick={() => setCurrentKey(p.key)}>
+                {p.title}
+              </button>
+            ))}
+          </span>
+          <button onClick={endShow} title="退出放映（Esc）">
+            退出放映
+          </button>
+        </div>
+      )}
+      <div className="wall-views">
+        {/* 全房间看板隐藏后不挂载：不订阅推送、不取告警 */}
+        {rooms && (
+          <div className="wall-view" hidden={current.kind !== "rooms"}>
+            <Wall
+              active={active}
+              rt={rt}
+              playing={playing && current.kind === "rooms"}
+              screenSeconds={rooms.seconds}
+              barSlot={barSlot}
+              onOpenRoom={(id) => {
+                endShow();
+                onOpenRoom(id);
+              }}
+              onScreensDone={onScreensDone}
+              onUrgent={toRooms}
+            />
+          </div>
+        )}
+        {pages.flatMap((p) =>
+          p.kind === "platform" && opened.includes(p.key)
+            ? [
+                <div key={p.key} className={`wall-view-platform${current.key === p.key ? "" : " off"}`}>
+                  <PlatformView page={p} s={s} visible={active && current.key === p.key} onReady={onReady} />
+                </div>,
+              ]
+            : [],
+        )}
+      </div>
+    </div>
+  );
 }

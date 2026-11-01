@@ -10,6 +10,7 @@ import ProcessTypesPage from "./pages/ProcessTypesPage";
 import SettingsPage from "./pages/SettingsPage";
 import MenuSettingsPage from "./pages/MenuSettingsPage";
 import DataWallPage from "./pages/DataWallPage";
+import WallSettingsPage from "./pages/WallSettingsPage";
 import ScenesPage from "./pages/ScenesPage";
 import MembersPage from "./pages/MembersPage";
 import CaregiversPage from "./pages/CaregiversPage";
@@ -28,7 +29,7 @@ import LinkPage from "./pages/LinkPage";
 import { PaneActive } from "./workspace/dataChange";
 import "./workspace/workspace.css";
 
-const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall"];
+const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall", "wallSettings"];
 
 async function logout() {
   await stopRealtime();
@@ -164,9 +165,12 @@ export default function Shell({ s }: { s: Session }) {
                     <SettingsPage onOpen={go} />
                   ) : k === "menus" ? (
                     <MenuSettingsPage />
+                  ) : k === "wallSettings" ? (
+                    <WallSettingsPage onOpen={go} />
                   ) : k === "dataWall" ? (
                     <DataWallPage
                       active={active === "dataWall" && !monitor}
+                      onOpenSettings={() => go("wallSettings")}
                       rt={rt}
                       onOpenRoom={(id) => {
                         setMonitorRoom(id);

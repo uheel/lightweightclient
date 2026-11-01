@@ -19,13 +19,35 @@
 .wall-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--ant-color-border-secondary, #eee); }
 .wall-bar-hint { min-width: 0; flex: 1; color: #ad6800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wall-set-hint { grid-column: 1 / -1; max-width: 360px; padding: 6px 10px; border-radius: 6px; background: #fff7e6; color: #ad6800; line-height: 1.5; }
+.wall-cfg-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.wall-cfg-head { display: flex; align-items: center; justify-content: space-between; }
+.wall-cfg-list { display: flex; flex-direction: column; }
+.wall-cfg-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 13px; border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0); }
+.wall-cfg-item:first-child { border-top: 0; }
+.wall-cfg-item.off .wall-cfg-name { color: var(--ant-color-text-quaternary, #bbb); }
+.wall-cfg-move { flex: none; display: flex; }
+.wall-cfg-name { min-width: 120px; font-weight: 500; }
+.wall-cfg-time { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--ant-color-text-secondary, #666); }
+.wall-cfg-time .ant-input-number { width: 72px; }
+.wall-cfg-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
+.wall-cfg-warn { margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: #fff7e6; color: #ad6800; font-size: 12px; }
 .wall-bar-sep { width: 1px; height: 16px; background: var(--ant-color-border, #ddd); margin: 0 4px; }
-.wall-show { position: fixed; inset: 0; z-index: 950; display: flex; background: #0a0f1f; }
-.wall-exit {
-  position: absolute; right: 16px; top: 16px; z-index: 2; padding: 6px 14px; border-radius: 6px; border: 1px solid #2c3a66;
-  background: rgba(18, 27, 54, 0.85); color: #b4bdd6; cursor: pointer; opacity: 0; transition: opacity 0.2s;
-}
-.wall-show:hover .wall-exit { opacity: 1; }
+.wall-show { position: fixed; inset: 0; z-index: 950; display: flex; flex-direction: column; background: #0a0f1f; }
+.wall-views { position: relative; flex: 1; min-height: 0; display: flex; }
+.wall-view { flex: 1; min-width: 0; display: flex; }
+.wall-view[hidden], .wall-bar-slot[hidden] { display: none; }
+.wall-bar-slot { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+/* 平台页面切走时只是看不见，占位框还有大小，子 webview 才能按真实大小在屏幕外加载 */
+.wall-view-platform { position: absolute; inset: 0; display: flex; background: #0a0f1f; }
+.wall-view-platform.off { visibility: hidden; pointer-events: none; }
+.wall-platform { flex: 1; min-width: 0; }
+.wall-platform .ant-empty-description { color: #b4bdd6; }
+.wall-platform-target { font-size: 12px; color: #7883a3; }
+.wall-platform-wait { margin-top: 120px; text-align: center; font-size: 16px; color: #7883a3; }
+.wall-show-strip { flex: none; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 13px; color: #b4bdd6; }
+.wall-show-strip button { padding: 0 10px; border-radius: 4px; border: 1px solid #2c3a66; background: #121b36; color: #b4bdd6; cursor: pointer; }
+.wall-show-tabs { display: flex; gap: 6px; min-width: 0; }
+.wall-show-strip button.on { background: #3987e5; border-color: #3987e5; color: #fff; }
 
 .wall-stage-box { position: absolute; inset: 0; overflow: hidden; }
 .wall-stage {
