@@ -6,6 +6,7 @@ import { onApiWrite } from "@radar/core";
  * 这里在请求层看所有写操作，按地址换算成"哪类数据变了"，新增写接口时页面不用各自记得发通知。
  * 被隐藏的页面只记下"数据旧了"，切回来时才静默重取一次（平台请求要省着用）；
  * 正在看的页面是写操作的发起方，它已经更新了本地数据，不重取。
+ * 例外是刚切过来的页面：这时候完成的写操作多半是上一页没写完的（保存还在转圈就切了标签），也要重取。
  */
 export type Topic =
   /** 设备的增删改、绑定房间 / 床位 / 长者、管理主机 */
@@ -57,6 +58,9 @@ const IGNORE = [
 
 const ALL: Topic[] = ["device", "space", "design", "member", "config", "alert"];
 
+/** 切到页面后多久之内完成的写操作，算上一页发起的（一次保存连着写几个接口，通常两三秒） */
+const JUST_SWITCHED_MS = 5000;
+
 /** 没登记的写接口按"什么都可能变了"算：顶多多取一次，不会漏 */
 function topicsOf(path: string): Topic[] {
   if (IGNORE.some((p) => path.startsWith(p))) return [];
@@ -90,6 +94,7 @@ export function useRefreshOn(topics: readonly Topic[], refresh: () => unknown, o
   const latest = useRef({ refresh, topics, active, whileVisible: opts?.whileVisible });
   latest.current = { refresh, topics, active, whileVisible: opts?.whileVisible };
   const stale = useRef(false);
+  const activeSince = useRef(Date.now());
 
   useEffect(() => {
     let timer: number | undefined;
@@ -97,7 +102,7 @@ export function useRefreshOn(topics: readonly Topic[], refresh: () => unknown, o
       const cur = latest.current;
       if (!changed.some((t) => cur.topics.includes(t))) return;
       if (!cur.active) stale.current = true;
-      else if (cur.whileVisible) {
+      else if (cur.whileVisible || Date.now() - activeSince.current < JUST_SWITCHED_MS) {
         // 一次操作可能连着写好几个接口，等写完再取
         window.clearTimeout(timer);
         timer = window.setTimeout(() => latest.current.refresh(), 300);
@@ -110,6 +115,7 @@ export function useRefreshOn(topics: readonly Topic[], refresh: () => unknown, o
   }, []);
 
   useEffect(() => {
+    if (active) activeSince.current = Date.now();
     if (active && stale.current) {
       stale.current = false;
       latest.current.refresh();

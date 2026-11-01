@@ -71,14 +71,14 @@ export default function RoomPlan({
       <>
       <RoomBackdrop size={size} roomStyle={design?.roomStyle} elements={design?.elements} />
 
-      {radars.map((r) => {
+      {radars.map((r, n) => {
         const c = r.config;
         const dim = focusSn !== undefined && focusSn !== r.sn;
         if (!c) {
           const x = r.element?.x ?? 0;
           const y = r.element?.y ?? 0;
           return (
-            <g key={r.sn} opacity={dim ? 0.35 : 1}>
+            <g key={r.sn || n} opacity={dim ? 0.35 : 1}>
               <RadarMark x={x} y={y} fs={fs} missing />
               <text x={x} y={y - fs} textAnchor="middle" fontSize={fs} className="plan-label">
                 {r.label}（未配置）
@@ -93,7 +93,7 @@ export default function RoomPlan({
         const look = lookDir(c);
         const hasBed = zonesOf(c).some((z) => z.type === 5);
         return (
-          <g key={r.sn} opacity={dim ? 0.35 : 1}>
+          <g key={r.sn || n} opacity={dim ? 0.35 : 1}>
             {showZones && <rect x={cont.x} y={cont.y} width={cont.width} height={cont.height} className="plan-container" />}
             {showZones && <rect x={b.x} y={b.y} width={b.width} height={b.height} className="plan-bound" />}
             {showZones && hasBed && <rect x={sup.x} y={sup.y} width={sup.width} height={sup.height} className="plan-supervision" />}

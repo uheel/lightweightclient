@@ -145,9 +145,12 @@ export default function AlarmTab({
   /** 设备上的场景是否已读回并合并；extra = 只在设备上有、平台没记录的场景数 */
   const [deviceRead, setDeviceRead] = useState<{ state: "skip" | "reading" | "ok" | "fail"; text?: string; extra?: number }>({ state: "skip" });
 
-  async function load() {
-    setLoading(true);
-    setError(undefined);
+  /** quiet：别的页面改了配置后的重取，不转圈，没保存的时长和电话留着 */
+  async function load(quiet = false) {
+    if (!quiet) {
+      setLoading(true);
+      setError(undefined);
+    }
     try {
       const [all, current, layouts, props, mine] = await Promise.all([
         getSceneTemplates(),
@@ -175,7 +178,7 @@ export default function AlarmTab({
           if (s) sc.set(label, s);
         }),
       );
-      if (tts) setTtsPhone({ value: String(props[TTS_PHONE]?.value ?? "") });
+      if (tts) setTtsPhone((p) => ({ value: String(props[TTS_PHONE]?.value ?? ""), editing: quiet ? p.editing : undefined }));
       // 告警类型的机构配置：语音留言（13 型）和推送到护工手表都看它
       const ids = new Set([...sc.values(), ...current].map(alertTypeOf).filter((x): x is string => !!x));
       const [cfgs, orgSettings] = await Promise.all([
@@ -190,11 +193,11 @@ export default function AlarmTab({
       const lay = layouts?.get(d.sn);
       setLayout(lay);
       setPropZones(zonesFromProps(props, lay));
-      setDur({});
+      if (!quiet) setDur({});
       setLoading(false);
       readDevice(current);
     } catch (e) {
-      setError(errText(e));
+      if (!quiet) setError(errText(e));
       setLoading(false);
     }
   }
@@ -230,7 +233,7 @@ export default function AlarmTab({
   }, [d.id, callable]);
 
   // 批量场景、房间诊断改了这台的配置或布置：告警开关和区域要按新的显示
-  useRefreshOn(REFRESH_ON, load);
+  useRefreshOn(REFRESH_ON, () => load(true));
 
   /** 系统设置里改了推送到护工手表：重新读机构总开关和这几类告警的配置 */
   useEffect(() => {
@@ -437,7 +440,7 @@ export default function AlarmTab({
       <div className="ops-card" data-spot="alarm">
         <h2>
           常用告警
-          <Button size="small" type="text" icon={<ReloadOutlined />} disabled={!!busy} onClick={load} title="重新读取" style={{ marginLeft: "auto" }} />
+          <Button size="small" type="text" icon={<ReloadOutlined />} disabled={!!busy} onClick={() => load()} title="重新读取" style={{ marginLeft: "auto" }} />
         </h2>
         {error && <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`读取失败：${error}`} />}
         {blocked && deviceRead.state !== "reading" && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={`${blocked}，开关暂不可用`} />}

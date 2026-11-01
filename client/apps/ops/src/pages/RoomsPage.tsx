@@ -415,7 +415,8 @@ function Report({ reports, loading, progress, onPick }: { reports: RoomReport[];
             {r.issues.map((i, k) => (
               <IssueItem key={`r${k}`} i={i} />
             ))}
-            {r.radars.flatMap((x) => x.issues.map((i, k) => <IssueItem key={`${x.sn}${k}`} i={i} who={x.device?.deviceName || x.sn || "未绑设备"} />))}
+            {/* 没绑设备的雷达位置 sn 是空的，一个房间可以有好几个，用序号区分 */}
+            {r.radars.flatMap((x, n) => x.issues.map((i, k) => <IssueItem key={`${n}-${k}`} i={i} who={x.device?.deviceName || x.sn || "未绑设备"} />))}
           </ul>
         </div>
       ))}
