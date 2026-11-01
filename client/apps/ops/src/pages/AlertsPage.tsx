@@ -6,10 +6,13 @@ import type { Dayjs } from "dayjs";
 import { ALERT_GROUPS, getAlertPage, type OpsAlert } from "../api/device";
 import { ProcessDialog } from "../alerts/ProcessDialog";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const FMT = "YYYY-MM-DD HH:mm:ss";
 
 /** 告警记录：查询和处理（单条或勾选后批量）。运维默认看设备离线、安装姿态两类 */
+const REFRESH_ON: Topic[] = ["alert"];
+
 export default function AlertsPage() {
   const { message } = App.useApp();
   const [group, setGroup] = useState(3);
@@ -22,18 +25,21 @@ export default function AlertsPage() {
   const [selected, setSelected] = useState<OpsAlert[]>([]);
   const [processing, setProcessing] = useState<OpsAlert[] | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setSelected([]);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) {
+      setLoading(true);
+      setSelected([]);
+    }
     try {
-      setData(
-        await getAlertPage({
-          group,
-          status,
-          range: range ? [range[0].format(FMT), range[1].format(FMT)] : undefined,
-          ...page,
-        }),
-      );
+      const res = await getAlertPage({
+        group,
+        status,
+        range: range ? [range[0].format(FMT), range[1].format(FMT)] : undefined,
+        ...page,
+      });
+      setData(res);
+      // 静默刷新不清勾选，只去掉已经处理掉的
+      if (quiet) setSelected((cur) => cur.filter((a) => res.list.some((x) => x.id === a.id && x.alertStatus === 1)));
     } catch (e) {
       message.error(`查询告警失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -44,6 +50,9 @@ export default function AlertsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 不管在哪处理的（这一页、提醒弹窗、监控模式）都走这里，页面显示着也马上更新
+  useRefreshOn(REFRESH_ON, () => load(true), { whileVisible: true });
 
   const reset = () => setPage((p) => ({ ...p, current: 1 }));
 
@@ -110,7 +119,7 @@ export default function AlertsPage() {
               reset();
             }}
           />
-          <Button icon={<ReloadOutlined />} onClick={load} title="刷新" />
+          <Button icon={<ReloadOutlined />} onClick={() => load()} title="刷新" />
           {selected.length > 0 && (
             <Button type="primary" onClick={() => setProcessing(selected)}>
               批量处理 {selected.length} 条
@@ -138,7 +147,7 @@ export default function AlertsPage() {
           }}
         />
       </div>
-      <ProcessDialog alerts={processing} onClose={() => setProcessing(null)} onDone={load} />
+      <ProcessDialog alerts={processing} onClose={() => setProcessing(null)} onDone={() => {}} />
     </div>
   );
 }

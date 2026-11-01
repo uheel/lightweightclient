@@ -9,6 +9,7 @@ import { BedDialog, CheckOutDialog, MemberFormDialog, SwapDialog, type MemberDic
 import { useGuide } from "../guide/GuideContext";
 import { GuideEmpty } from "../guide/GuideEmpty";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
@@ -21,6 +22,9 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "registered", label: "未入住" },
   { key: "out", label: "已退住" },
 ];
+
+/** 床位和入住也能在楼宇页改 */
+const REFRESH_ON: Topic[] = ["member", "space"];
 
 /**
  * 长者：左边列表，右边资料、入住（办入住 / 调床 / 对调 / 退住）、关联设备、亲友；批量导入是这一页的一个视图。
@@ -72,6 +76,8 @@ export default function MembersPage() {
       () => {},
     );
   }, [load]);
+
+  useRefreshOn(REFRESH_ON, () => load(true));
 
   const bedOfMember = useMemo(() => new Map(beds.filter((b) => b.memberId).map((b) => [b.memberId!, b])), [beds]);
   const bedOf = useCallback((id: string) => bedOfMember.get(id), [bedOfMember]);

@@ -33,9 +33,12 @@ import { GuideEmpty } from "../guide/GuideEmpty";
 import { flashSpot } from "../guide/flash";
 import { syncAfter } from "../members/deviceSync";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMPTY: Spaces = { buildings: [], floors: [], rooms: [], beds: [], radars: [] };
+/** 雷达台数、床位上的长者和设备会被设备管理、长者页改 */
+const REFRESH_ON: Topic[] = ["device", "space", "member"];
 const occupied = (b: BedRow) => b.bedStatus === 2 || !!b.realName;
 
 type Sel = { kind: "building" | "floor"; id: string };
@@ -70,7 +73,7 @@ export default function SpacesPage() {
   guideRefresh.current = guide?.refresh;
 
   const load = useCallback(
-    async (quiet = false) => {
+    async (quiet = false, checkGuide = quiet) => {
       const my = ++seq.current;
       if (!quiet) setLoading(true);
       const pt = perfTimer("楼宇");
@@ -81,7 +84,7 @@ export default function SpacesPage() {
         setData({ ...s, radars });
         setImages(assets.buildings ?? {});
         // 新建之后的静默刷新：快速开始清单跟着重新检查
-        if (quiet) guideRefresh.current?.(true);
+        if (checkGuide) guideRefresh.current?.(true);
         pt.info("rooms", s.rooms.length);
         pt.info("beds", s.beds.length);
         pt.endAfterPaint();
@@ -137,6 +140,12 @@ export default function SpacesPage() {
   useEffect(() => {
     if (roomId) loadRoomDevices(roomId);
   }, [roomId, loadRoomDevices]);
+
+  // 别的页面改了数据：切回来时静默重取，选中的楼层、房间不变（快速开始清单自己会重查）
+  useRefreshOn(REFRESH_ON, () => {
+    load(true, false);
+    if (roomId) loadRoomDevices(roomId);
+  });
 
   function pick(s: Sel | undefined) {
     setSel(s);

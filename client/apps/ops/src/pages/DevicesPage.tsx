@@ -15,7 +15,7 @@ import { useLiveMap } from "../devices/useLiveMap";
 import { useGuide, useGuideFocus } from "../guide/GuideContext";
 import type { Spot } from "../rooms/qinglan";
 import { GuideEmpty } from "../guide/GuideEmpty";
-import { forgetLinkable } from "../devices/propertyEditors";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import { ModuleName } from "../workspace/ModuleName";
 
 type Filter = "all" | "online" | "offline" | "disabled";
@@ -93,6 +93,9 @@ async function loadAllDevices(): Promise<DevRow[]> {
   return rows;
 }
 
+/** 列表第二行的房间、长者会被楼宇、长者页改 */
+const REFRESH_ON: Topic[] = ["device", "space", "member"];
+
 /** 设备工作台：左侧设备列表（按类型、状态筛选，↑↓ 切换），右侧按类型显示对应的详情和配置 */
 export default function DevicesPage() {
   const { message } = App.useApp();
@@ -142,6 +145,8 @@ export default function DevicesPage() {
     load();
     getDeviceTypeMap().then(setTypes, () => {});
   }, [load]);
+
+  useRefreshOn(REFRESH_ON, load);
 
   // 实时推送只有雷达有
   const radars = useMemo(() => list.filter((d) => d.cat === "radar"), [list]);
@@ -216,8 +221,6 @@ export default function DevicesPage() {
     setAdding(false);
     const stay = addFrom?.stay;
     setAddFrom(undefined);
-    // 绑定外设的选择框缓存了机构设备列表，作废后下次点开重新取
-    forgetLinkable();
     const l = await load();
     const d = l?.find((x) => x.sn === sn);
     if (d && !stay) focusDevice(d.id);

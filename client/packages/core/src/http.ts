@@ -147,6 +147,14 @@ interface PagesOptions {
   max: number;
 }
 
+const writeListeners = new Set<(path: string) => void>();
+
+/** 监听成功的写请求（GET 以外的都算），客户端据此知道哪些数据变了 */
+export function onApiWrite(f: (path: string) => void) {
+  writeListeners.add(f);
+  return () => void writeListeners.delete(f);
+}
+
 export async function request<T>(method: string, path: string, o: RequestOptions = {}, pages?: PagesOptions): Promise<ApiResult<T>> {
   const s = session.get();
   const server = o.server ?? s?.server;
@@ -201,6 +209,7 @@ export async function request<T>(method: string, path: string, o: RequestOptions
     info: { size: formatBytes(bytes), rows: Array.isArray(json.data) ? json.data.length : -1, ...(pageCount && pageCount > 1 ? { pages: pageCount } : {}) },
   });
   if (!json.succeeded) throw new ApiError(json.message || "请求失败", res.status);
+  if (method !== "GET") writeListeners.forEach((f) => f(path));
   return json;
 }
 

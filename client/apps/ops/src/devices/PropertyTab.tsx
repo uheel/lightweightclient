@@ -18,6 +18,7 @@ import { structuredFor, PLAN_CTX, type PlanCtx, type ZoneMeta } from "./property
 import { syncLayoutFromDevice } from "../rooms/syncLayout";
 import { sameArray, toDeviceArrays, validate, type QlConfig } from "../rooms/qinglan";
 import { GROUP_TEXT, PROPERTY_TEXT } from "./propertyInfo";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 /**
  * 设备属性：读取设备上的当前值、修改后下发（与平台"设备配置 › 存储属性"同一套接口）。
@@ -131,6 +132,8 @@ function format(p: PropertyDef, v: unknown, typeCode?: number): string {
   if (typeof v === "object") return JSON.stringify(v);
   return String(v) + (p.unit ? ` ${p.unit}` : "");
 }
+
+const CONFIG: Topic[] = ["config"];
 
 export default function PropertyTab({
   sn,
@@ -438,6 +441,8 @@ export default function PropertyTab({
   function refreshStored() {
     getStoredProperties(sn).then(setStored, () => {});
   }
+  // 房间诊断、批量场景写了配置：只换平台记录，正在改的值不动
+  useRefreshOn(CONFIG, refreshStored);
 
   async function read(all: boolean) {
     const names = (schema?.properties ?? [])

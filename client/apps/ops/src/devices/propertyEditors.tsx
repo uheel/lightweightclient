@@ -7,6 +7,7 @@ import ZoneCanvas, { CUSTOM, limitOf, surroundsRadar, type CanvasRoom, type DmRe
 import { SPACE_TYPE } from "../api/scene";
 import { clampRadar, moveRadarTo, switchMount } from "./mountSwitch";
 import { useGuide } from "../guide/GuideContext";
+import { onDataChanged } from "../workspace/dataChange";
 
 /**
  * 数组 / JSON 类属性的结构化编辑器：把 [24,90,8,50] 这类数组拆成运维看得懂的一项项设置。
@@ -792,10 +793,10 @@ interface Linked {
 let typeNames: Promise<Map<number, string>> | undefined;
 let orgDevices: Promise<AnyDevice[]> | undefined;
 
-/** 设备管理里添加了设备后调用，下次点开选择框重新取机构设备列表 */
-export function forgetLinkable() {
-  orgDevices = undefined;
-}
+// 增删设备后，下次点开选择框重新取机构设备列表
+onDataChanged((topics) => {
+  if (topics.includes("device")) orgDevices = undefined;
+});
 
 function useTypeNames() {
   const [m, setM] = useState<Map<number, string>>(new Map());

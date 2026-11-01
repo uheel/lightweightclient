@@ -26,6 +26,7 @@ import {
 import { getDeviceScenes } from "../api/scene";
 import { callsMaster } from "../scenes/plan";
 import LanDiagnosis from "./LanDiagnosis";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import CallRecords from "./master/CallRecords";
 import { isMobileNumber, toDialNumber, toShownNumber } from "./dialNumber";
 
@@ -175,6 +176,8 @@ function TargetPicker({ value, onChange, masters, disabled }: { value: Target; o
   );
 }
 
+const DEVICE: Topic[] = ["device"];
+
 export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: boolean; onGoAlarm?: () => void }) {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
@@ -254,6 +257,9 @@ export default function CallTab({ d, online, onGoAlarm }: { d: Radar; online: bo
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.id]);
+
+  // 别处改了管理主机：只更新可选的主机，表单里没保存的修改不动
+  useRefreshOn(DEVICE, () => getMasterOptions(d).then(setMasters, () => {}));
 
   /**
    * 不打扰用户地把雷达 IP 补到平台：平台没存（或不是现在的 IP）时从设备读、只保存到平台，

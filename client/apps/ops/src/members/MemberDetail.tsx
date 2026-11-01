@@ -17,6 +17,7 @@ import {
   type Relative,
 } from "../api/member";
 import type { MemberDicts } from "./dialogs";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const GENDER: Record<number, string> = { 1: "男", 2: "女" };
@@ -39,6 +40,8 @@ export function memberState(m: MemberRow, bed?: Bed): MemberState {
 }
 
 /** 长者详情：资料、入住、关联设备、亲友。进来时取详情、设备、亲友三样，其余操作完只刷新对应那块 */
+const DEVICE: Topic[] = ["device"];
+
 export default function MemberDetail({
   member,
   bed,
@@ -91,6 +94,12 @@ export default function MemberDetail({
     setCands(undefined);
     loadDevices();
   }, [loadDevices, member.checkType, bed?.bedId]);
+
+  // 设备管理、楼宇里改了绑定：重取关联设备
+  useRefreshOn(DEVICE, () => {
+    setCands(undefined);
+    loadDevices();
+  });
 
   const codeLabel = (list: { value: string; label: string }[], v: unknown) => (v === undefined || v === null ? undefined : list.find((c) => Number(c.value) === Number(v))?.label);
 

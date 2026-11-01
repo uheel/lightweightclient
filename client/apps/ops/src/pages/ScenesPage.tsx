@@ -19,6 +19,7 @@ import {
 } from "../api/scene";
 import { AREA_NEED, DELAY_TEMPLATES, INSTALL_NEED, LEAVE_DELAY, pickTemplates, planDevice, pool, tplKey, type Choice, type DevicePlan, type OpKind } from "../scenes/plan";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -30,6 +31,8 @@ const OP_TAG: Record<OpKind, { color?: string; text: string }> = {
   absent: { text: "无需删除" },
   skip: { color: "orange", text: "跳过" },
 };
+
+const REFRESH_ON: Topic[] = ["device", "space", "member"];
 
 /** 批量场景：选设备 → 选场景（启用 / 禁用）→ 预览 → 下发 */
 export default function ScenesPage() {
@@ -59,8 +62,8 @@ export default function ScenesPage() {
   const [sending, setSending] = useState(false);
   const planSeq = useRef(0);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const [d, t] = await Promise.all([getRadars(), getSceneTemplates()]);
       setDevices(d);
@@ -76,6 +79,9 @@ export default function ScenesPage() {
     getDeviceTypeMap().then(setTypes, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 设备或它的房间、长者变了：换掉列表，勾选和做到第几步不变
+  useRefreshOn(REFRESH_ON, () => load(true));
 
   const typeName = (t?: number) => (t === undefined ? "未知型号" : types.get(t) ?? `型号 ${t}`);
   const picked = useMemo(() => pickTemplates(templates), [templates]);
@@ -421,7 +427,7 @@ export default function ScenesPage() {
             <Checkbox checked={onlineOnly} onChange={(e) => setOnlineOnly(e.target.checked)}>
               只看在线
             </Checkbox>
-            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="刷新" />
+            <Button type="text" icon={<ReloadOutlined />} onClick={() => load()} title="刷新" />
             <span className="grow" />
             <span className="muted">已选 {selected.length} 台</span>
             {selected.length > 0 && (

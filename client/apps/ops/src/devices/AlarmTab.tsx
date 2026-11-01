@@ -25,6 +25,7 @@ import {
 } from "../api/scene";
 import { callsMaster, durationOf, leaveDelayOk, maxMinutes, pickTemplates, playsAudio, templateAreaValues, toggleScene, tplKey } from "../scenes/plan";
 import { parseArray } from "../rooms/qinglan";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 /**
  * 告警配置：单台设备上常用告警的开关，不用走批量场景。
@@ -92,6 +93,8 @@ interface Row {
   /** 设备上已启用的同名场景 */
   current?: Scene;
 }
+
+const REFRESH_ON: Topic[] = ["config", "design"];
 
 export default function AlarmTab({
   d,
@@ -225,6 +228,9 @@ export default function AlarmTab({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.id, callable]);
+
+  // 批量场景、房间诊断改了这台的配置或布置：告警开关和区域要按新的显示
+  useRefreshOn(REFRESH_ON, load);
 
   /** 系统设置里改了推送到护工手表：重新读机构总开关和这几类告警的配置 */
   useEffect(() => {

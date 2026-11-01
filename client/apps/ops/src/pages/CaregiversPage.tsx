@@ -24,6 +24,7 @@ import { CaregiverDetail, GroupDetail } from "../caregivers/details";
 import { locateDevices } from "../caregivers/model";
 import "../caregivers/caregivers.css";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byName = (a: string, b: string) => a.localeCompare(b, "zh-CN", { numeric: true });
@@ -35,6 +36,8 @@ type Mode = "people" | "groups";
  * 护理员看所在的组、负责哪些房间的设备，可以直接勾选加入 / 退出组；护理组管理组里的护理员（拖动排顺序）和按房间选的设备。
  * 进页面一次取回护理员、护理组和每个组的成员，之后的筛选、统计、"负责哪些设备"都在本地算；改动只发对应的那一条写请求，不整页重取。
  */
+const REFRESH_ON: Topic[] = ["device", "space"];
+
 export default function CaregiversPage() {
   const { message, modal } = App.useApp();
   const guide = useGuide();
@@ -87,6 +90,9 @@ export default function CaregiversPage() {
     if (guide && !guide.data && !guide.loading) guide.refresh(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  // 候选设备、设备位置会被设备管理、楼宇改（位置用的快速开始数据由它自己重查）
+  useRefreshOn(REFRESH_ON, load);
 
   // 平台给的候选设备里混有管理主机（3 型，groupCode SLAVE），只留雷达
   const radars = useMemo(() => candidates.filter((d) => d.deviceType !== undefined && radarTypes.has(d.deviceType)), [candidates, radarTypes]);

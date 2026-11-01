@@ -12,6 +12,7 @@ import { placeInLayout, setSlotArea, slotSource } from "../rooms/radarSlot";
 import { areaText, type InstallArea } from "../rooms/installArea";
 import { useGuideFocus } from "../guide/GuideContext";
 import { ModuleName } from "../workspace/ModuleName";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 type Filter = "all" | "radar" | "problem";
 
@@ -32,6 +33,9 @@ const roomOrder = (a: Room, b: Room) =>
   byName(a.roomName, b.roomName);
 
 type DesignState = { design?: RoomDesign; error?: string };
+
+/** 诊断结果取决于房间、绑定、布置和写到设备上的配置 */
+const REFRESH_ON: Topic[] = ["device", "space", "design", "config"];
 
 /**
  * 房间布置：左侧房间列表（带诊断状态），右侧房间平面图和每台雷达的配置、问题、下发数据比对。
@@ -72,20 +76,25 @@ export default function RoomsPage() {
     setScenes((m) => new Map([...m, ...s]));
   }, []);
 
-  const load = useCallback(async () => {
+  /** quiet：别的页面改了数据后的重取，查完才一起换上，查的时候还显示原来的结果 */
+  const load = useCallback(async (quiet = false) => {
     const seq = ++loadSeq.current;
-    setLoading(true);
-    setReads({});
+    if (!quiet) {
+      setLoading(true);
+      setReads({});
+    }
     const pt = perfTimer("房间诊断");
     try {
       const [r, d] = await Promise.all([getRooms(), getRadars()]);
       if (seq !== loadSeq.current) return;
       pt.lap("rooms+devices");
-      setRooms(r);
-      setDevices(d);
-      setDesigns(new Map());
-      setValues(new Map());
-      setScenes(new Map());
+      if (!quiet) {
+        setRooms(r);
+        setDevices(d);
+        setDesigns(new Map());
+        setValues(new Map());
+        setScenes(new Map());
+      }
       // 全部房间的布置都取：没绑雷达的房间布置里也可能留着旧雷达（删掉的、换绑的），要查出来
       const roomIds = r.map((x) => x.id);
       const zoned = d.filter((x) => x.roomId && (x.deviceType === undefined || ZONE_TYPES.has(x.deviceType)));
@@ -106,6 +115,10 @@ export default function RoomsPage() {
         loadDeviceData(zoned, tick),
       ]);
       if (seq !== loadSeq.current) return;
+      if (quiet) {
+        setRooms(r);
+        setDevices(d);
+      }
       setDesigns(ds);
       pt.lap("details");
       // 布置里有、但没绑房间的雷达：补取记录和场景（不挡首屏）
@@ -130,6 +143,8 @@ export default function RoomsPage() {
     load();
     getDeviceTypeMap().then(setTypes, () => {});
   }, [load]);
+
+  useRefreshOn(REFRESH_ON, () => load(true));
 
   const typeName = useCallback((t?: number) => (t === undefined ? "未知型号" : types.get(t) ?? `型号 ${t}`), [types]);
 
@@ -272,7 +287,7 @@ export default function RoomsPage() {
             <span className="muted">
               {rooms.length} 间 · {counts.problem} 间有问题
             </span>
-            <Button type="text" icon={<ReloadOutlined />} onClick={load} title="重新诊断" style={{ marginLeft: "auto" }} />
+            <Button type="text" icon={<ReloadOutlined />} onClick={() => load()} title="重新诊断" style={{ marginLeft: "auto" }} />
           </div>
           <Input allowClear prefix={<SearchOutlined style={{ color: "#8A8FA8" }} />} placeholder="房间 / 楼栋 / 楼层 / 设备" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="seg">

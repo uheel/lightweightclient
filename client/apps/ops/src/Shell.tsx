@@ -25,6 +25,7 @@ import { WorkTabs, type OpenKey, type TabKey } from "./workspace/WorkTabs";
 import { Workbench } from "./workspace/Workbench";
 import { isLink, useNames, type ItemKey } from "./workspace/names";
 import LinkPage from "./pages/LinkPage";
+import { PaneActive } from "./workspace/dataChange";
 import "./workspace/workspace.css";
 
 const PANE_ORDER: NavKey[] = ["devices", "spaces", "rooms", "scenes", "members", "caregivers", "alerts", "processTypes", "realtime", "settings", "menus", "dataWall"];
@@ -140,6 +141,7 @@ export default function Shell({ s }: { s: Session }) {
               {/* 按固定顺序渲染，拖动标签排序时页面的 DOM 不移动（移动会丢滚动位置） */}
               {PANE_ORDER.filter((k) => tabs.includes(k)).map((k) => (
                 <div key={k} className="tab-pane" hidden={active !== k}>
+                  <PaneActive.Provider value={active === k && !monitor}>
                   {k === "devices" ? (
                     <DevicesPage />
                   ) : k === "spaces" ? (
@@ -165,6 +167,7 @@ export default function Shell({ s }: { s: Session }) {
                   ) : (
                     <RealtimePage state={rt} events={events} onClear={() => setEvents([])} />
                   )}
+                  </PaneActive.Provider>
                 </div>
               ))}
               {/* 菜单设置里新增的链接模块，按打开先后 */}

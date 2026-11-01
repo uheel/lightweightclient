@@ -21,8 +21,11 @@ import { flashSpot } from "../guide/flash";
 import AreaSelect from "../rooms/AreaSelect";
 import { areaText, type InstallArea } from "../rooms/installArea";
 import { setSlotArea } from "../rooms/radarSlot";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 /** 每个位置在哪个页签、闪哪个元素（按顺序取第一个找得到的）；prop 是属性页要切到的那个属性所在的分组 */
+const ROOM_TOPICS: Topic[] = ["space", "design"];
+
 const SPOTS: Record<Spot, { tab: string; sel: string[]; prop?: string }> = {
   room: { tab: "overview", sel: ['[data-spot="room"]'] },
   area: { tab: "overview", sel: ['[data-spot="area"]'] },
@@ -129,6 +132,9 @@ export default function DeviceDetail({
   /** 布置里的这台雷达，以及同一个房间里的其他雷达（卧室、卫生间各一台这种） */
   const slot = room?.radars.find((x) => x.sn === d.sn);
   const peers = room?.radars.filter((x) => x.sn !== d.sn) ?? [];
+
+  // 楼宇、房间诊断里改了房间或布置：重取房间信息（房间名、安装方式、区域）
+  useRefreshOn(ROOM_TOPICS, () => d.roomId && getRoomInfo(d.roomId).then(setRoom, () => {}));
 
   async function changeArea(a: InstallArea | null) {
     if (!d.roomId) return;

@@ -7,11 +7,14 @@ import type { BedRow } from "../api/space";
 import RoomPlan from "../rooms/RoomPlan";
 import DecorDialog from "../rooms/furniture/DecorDialog";
 import { isDecor } from "../rooms/furniture/catalog";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import EditableText from "./EditableText";
 
 const occupied = (b: BedRow) => b.bedStatus === 2 || !!b.realName;
 
 /** 楼宇页右侧的房间面板：改名、改尺寸、装修（摆家具）、管床位（空床直接办入住、给床位绑本房间的设备），看绑了哪些雷达 */
+const DESIGN: Topic[] = ["design"];
+
 export default function RoomPanel({
   room,
   place,
@@ -68,6 +71,8 @@ export default function RoomPanel({
       live = false;
     };
   }, [room.id, room.roomWidth, room.roomLong]);
+  // 房间诊断、设备管理里改了布置（放雷达、装修）：不清空预览，重取后换上
+  useRefreshOn(DESIGN, () => getRoomDesign(room.id).then((d) => setDesign(d ?? null), () => {}));
   const furnitureCount = design ? (design.elements ?? []).filter(isDecor).length : 0;
 
   const wrap = (key: string, fn: () => Promise<void>) => async () => {

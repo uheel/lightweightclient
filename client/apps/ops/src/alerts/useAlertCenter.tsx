@@ -16,6 +16,7 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getAlertPage, type OpsAlert } from "../api/device";
 import type { PopupSettings } from "./popupSettings";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 
 /** 未处理的新告警，每隔多久再提醒一次（"稍后提醒"也是隔这么久） */
 const REMIND_MS = 60_000;
@@ -38,6 +39,8 @@ const toPopup = (a: OpsAlert): PopupAlert => ({ id: a.id, type: a.alertTypeName,
  * 判断"新"要看发生时间，不能只看 id：列表只取最近 N 条，处理掉一条后更早的旧告警会补进来，
  * 所以只有发生时间不早于"已见过的最新告警"、且 id 没见过的，才算新告警。
  */
+const ALERT: Topic[] = ["alert"];
+
 export function useAlertCenter(orgId: string, settings: PopupSettings, quiet: boolean) {
   const { notification } = App.useApp();
   const { enabled } = settings;
@@ -127,6 +130,9 @@ export function useAlertCenter(orgId: string, settings: PopupSettings, quiet: bo
       console.error("加载待处理告警失败", e);
     }
   }, [groupKey, syncPopup]);
+
+  // 不管在哪处理了告警（这里的弹窗、告警中心、监控模式），提醒都马上跟着消失（平时靠推送和每分钟轮询）
+  useRefreshOn(ALERT, () => enabled && reload(), { whileVisible: true });
 
   // 切换机构、改了分组、开关弹窗：从头开始，当时已有的告警都不算新的
   useEffect(() => {
@@ -226,8 +232,7 @@ export function useAlertCenter(orgId: string, settings: PopupSettings, quiet: bo
       notification.destroy(processing.id);
     }
     setProcessing(null);
-    reload();
-  }, [processing, notification, reload]);
+  }, [processing, notification]);
 
   return { processing, closeProcessing: () => setProcessing(null), done };
 }

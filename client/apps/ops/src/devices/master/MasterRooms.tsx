@@ -4,6 +4,7 @@ import type { DataNode } from "antd/es/tree";
 import { supportsCall } from "../../api/device";
 import { getMasterContacts, getMasterRoomKeys, getMasterRoomTree, saveMasterRoomKeys, syncRadarIp, type MasterContact, type RoomTreeNode } from "../../api/master";
 import type { DevRow } from "../category";
+import { useRefreshOn, type Topic } from "../../workspace/dataChange";
 
 /** 树里所有房间（叶子）的 id */
 function leafKeys(nodes: RoomTreeNode[], out: string[] = []) {
@@ -20,6 +21,8 @@ const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((
  * 管理主机覆盖哪些房间。保存后平台按这些房间生成通讯录（房间里能通话的雷达和它们的 SIP 号），
  * "保存并下发"时同时推给主机（update.devices），主机上才能看到、拨到这些雷达。
  */
+const REFRESH_ON: Topic[] = ["device", "space"];
+
 export default function MasterRooms({ d, radars, onSaved }: { d: DevRow; radars: DevRow[]; onSaved?: () => void }) {
   const { message } = App.useApp();
   const [rooms, setRooms] = useState<RoomTreeNode[]>();
@@ -47,6 +50,17 @@ export default function MasterRooms({ d, radars, onSaved }: { d: DevRow; radars:
   useEffect(() => {
     load();
   }, [load]);
+
+  // 楼宇或雷达变了：更新房间树和通讯录，已勾选但没保存的房间不动
+  useRefreshOn(REFRESH_ON, () =>
+    Promise.all([getMasterRoomTree(d), getMasterContacts(d)]).then(
+      ([t, c]) => {
+        setRooms(t);
+        setContacts(c);
+      },
+      () => {},
+    ),
+  );
 
   const radarsByRoom = useMemo(() => {
     const m = new Map<string, DevRow[]>();

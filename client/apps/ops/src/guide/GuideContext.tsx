@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { onDataChanged } from "../workspace/dataChange";
 import { computeSteps, isSmallOrg, loadGuideData, type GuideData, type NavKey, type Step, type StepKey, type Target } from "./steps";
 
 /**
@@ -102,6 +103,15 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
   const lastAt = useRef(0);
   const openRef = useRef(false);
   const prevDone = useRef<Set<StepKey> | undefined>(undefined);
+  /** 上次检查之后有页面改过数据 */
+  const stale = useRef(false);
+  useEffect(
+    () =>
+      onDataChanged((topics) => {
+        if (topics.some((t) => t !== "alert")) stale.current = true;
+      }),
+    [],
+  );
 
   const save = useCallback(
     (patch: Saved) =>
@@ -120,6 +130,7 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
       if (running.current) return;
       if (!force && Date.now() - lastAt.current < AUTO_GAP_MS) return;
       running.current = true;
+      stale.current = false;
       lastAt.current = Date.now();
       setLoading(true);
       setError(undefined);
@@ -189,7 +200,8 @@ export function GuideProvider({ orgId, nav, onNav, children }: { orgId: string; 
     }
     // 提示条只针对刚才那一页的操作，换页面就收掉
     setBanner(undefined);
-    if (openRef.current || !saved.complete) run(false);
+    // 数据改过就不管间隔（护理班组的设备位置也用这份数据）；已全部完成、又还没取过的机构继续等打开清单
+    if (openRef.current || !saved.complete || data) run(stale.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 

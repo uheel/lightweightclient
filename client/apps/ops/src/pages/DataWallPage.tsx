@@ -7,6 +7,7 @@ import { useWallData } from "../datawall/data";
 import { computeStats, RANGES, SCORE_BANDS, TIMELY_MINUTES, type RangeKey, type WallStats } from "../datawall/stats";
 import { DayBars, DayLine, HBars, Heatmap, StackCols } from "../datawall/charts";
 import { enterFullscreen, leaveFullscreen } from "../workspace/fullscreen";
+import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import "../datawall/wall.css";
 
 /** 舞台按 1920×1080 设计，整体等比缩放 */
@@ -204,6 +205,8 @@ function Stage({ children }: { children: ReactNode }) {
   );
 }
 
+const REFRESH_ON: Topic[] = ["device", "space", "member", "alert"];
+
 /**
  * 数据魔墙 · 运营展示墙（大厅、来访参观、汇报用）：三页自动轮播，全是汇总数字，不出现长者姓名。
  * 数据口径见 docs/data-wall.md 第 3 节；取数见 datawall/data.ts，统计见 datawall/stats.ts。
@@ -211,6 +214,7 @@ function Stage({ children }: { children: ReactNode }) {
 export default function DataWallPage() {
   const s = session.get()!;
   const { data, error, loading, sleep, refresh } = useWallData(s.orgId);
+  useRefreshOn(REFRESH_ON, refresh);
   const [range, setRange] = useState<RangeKey>(() => {
     try {
       return (localStorage.getItem(RANGE_KEY) as RangeKey) || "30";
