@@ -44,6 +44,9 @@ export interface PlanElement {
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
+  cornerRadius?: number;
+  /** 文字大小（cm），type 5 */
+  fontSize?: number;
   sn?: string;
   deviceId?: string;
   deviceName?: string;

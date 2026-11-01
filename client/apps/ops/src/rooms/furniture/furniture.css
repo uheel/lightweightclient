@@ -9,3 +9,11 @@
 .fur-pos { display: flex; flex-direction: column; gap: 6px; }
 /* 窗口矮时属性栏内容（门的说明、复制删除）能滚动，不被底部按钮挡住 */
 .fur-props { overflow-y: auto; min-height: 0; }
+/* 家具面板：线稿 / 写实切换、写实缩略图、图形图标 */
+.fur-palette-mode { margin: 12px 0 2px; }
+.fur-tile img { width: 44px; height: 44px; object-fit: contain; }
+.fur-shape-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; font-size: 26px; font-weight: 600; color: #5B6078; font-family: Georgia, serif; }
+.fur-shape-icon.rect::before, .fur-shape-icon.circle::before { content: ""; width: 34px; height: 24px; background: #E9ECF5; border: 1.5px solid #9AA0B8; }
+.fur-shape-icon.circle::before { width: 30px; height: 30px; border-radius: 50%; }
+.fur-backdrop { display: inline-flex; align-items: center; gap: 2px; }
+.fur-item text { user-select: none; }

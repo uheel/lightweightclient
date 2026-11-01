@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { assetUrl } from "@radar/core";
 import type { PlanElement } from "../../api/room";
-import { furnitureOf, type FurnitureKind } from "./catalog";
+import { furnitureOf, realisticOf, shapeOf, textFontSize, type FurnitureKind } from "./catalog";
 
 /**
  * 家具俯视图标：都按元素自己的宽高（cm）现画，拉长拉宽后枕头、座位、椅子这些细节按真实尺寸重新排，不会变形。
@@ -331,7 +331,19 @@ export function FurnitureShape({ e }: { e: PlanElement }) {
         <FurnitureIcon kind={def.kind} w={w} h={h} />
       </g>
     );
-  if (e.type === 4 && e.src) return <image href={assetUrl(e.src)} x={0} y={0} width={w} height={h} transform={tf} preserveAspectRatio="none" opacity={0.7} />;
+  if (e.type === 5) {
+    if (!e.text) return null;
+    // 平台的文字以左上角定位；SVG 的 y 是基线，下移约一个字高
+    const fs = textFontSize(e);
+    return (
+      <text x={0} y={fs * 0.9} transform={tf} fontSize={fs} fill={e.fill ?? "#5B6078"}>
+        {e.text}
+      </text>
+    );
+  }
+  if (e.type === 4 && e.src) return <image href={assetUrl(e.src)} x={0} y={0} width={w} height={h} transform={tf} preserveAspectRatio="none" opacity={realisticOf(e) ? 1 : 0.7} />;
+  if (shapeOf(e))
+    return <rect x={0} y={0} width={w} height={h} rx={e.cornerRadius ?? 0} transform={tf} fill={e.fill ?? "none"} stroke={e.stroke ?? "none"} strokeWidth={e.strokeWidth ?? 1} />;
   if (e.type === 2) return <rect x={0} y={0} width={w} height={h} transform={tf} fill={e.fill && e.fill !== "#fff" ? e.fill : "none"} fillOpacity={0.3} stroke={e.stroke ?? "#B3B7C9"} strokeWidth={1} />;
   return null;
 }

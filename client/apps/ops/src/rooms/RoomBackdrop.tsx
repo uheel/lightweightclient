@@ -79,19 +79,12 @@ export default function RoomBackdrop({
 function PlanShape({ e }: { e: PlanElement }) {
   const x = e.x ?? 0;
   const y = e.y ?? 0;
-  const tf = e.rotation ? `rotate(${e.rotation} ${x} ${y})` : undefined;
   if (e.type === 1)
     return (
       <g transform={`translate(${x} ${y})${e.rotation ? ` rotate(${e.rotation})` : ""}`}>
         {(e.children ?? []).filter((c) => c.type !== 3).map((c, i) => <PlanShape key={c.id ?? i} e={c} />)}
       </g>
     );
-  if (e.type === 4 || e.type === 2) return <FurnitureShape e={e} />;
-  if (e.type === 5 && e.text)
-    return (
-      <text x={x} y={y + 14} transform={tf} fontSize={14} fill={e.fill ?? "#5B6078"}>
-        {e.text}
-      </text>
-    );
+  if (e.type === 4 || e.type === 2 || e.type === 5) return <FurnitureShape e={e} />;
   return null;
 }

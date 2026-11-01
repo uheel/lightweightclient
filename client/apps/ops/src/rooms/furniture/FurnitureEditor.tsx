@@ -1,10 +1,33 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
-import { Button, Checkbox, InputNumber, Tooltip } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined, VerticalAlignBottomOutlined, VerticalAlignTopOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
+import { App, Button, Checkbox, ColorPicker, Input, InputNumber, Segmented, Tooltip } from "antd";
+import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined, UploadOutlined, VerticalAlignBottomOutlined, VerticalAlignTopOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
 import type { PlanElement, RoomDesign } from "../../api/room";
+import { compressImage, fileUrl, IMAGE_ACCEPT, uploadFile } from "../../api/files";
 import { newId } from "../radarSlot";
 import { boundRect, radarInRoom, ZONE_COLOR, zoneRect, zonesOf, type QlConfig } from "../qinglan";
-import { FURNITURE, FURNITURE_GROUPS, furnitureDef, furnitureOf, isDecor, isDoor, newFurniture, type FurnitureKind } from "./catalog";
+import {
+  elementLabel,
+  FURNITURE,
+  FURNITURE_GROUPS,
+  furnitureDef,
+  furnitureOf,
+  isDecor,
+  isDoor,
+  newFurniture,
+  newRealistic,
+  newShape,
+  REALISTIC,
+  REALISTIC_GROUPS,
+  realisticDef,
+  realisticOf,
+  shapeOf,
+  SHAPES,
+  textBox,
+  textFontSize,
+  type FurnitureKind,
+  type ShapeKind,
+} from "./catalog";
+import type { BackdropChange } from "./DecorDialog";
 import { FurnitureIcon, FurnitureShape } from "./icons";
 import RoomBackdrop from "../RoomBackdrop";
 import "./furniture.css";
@@ -102,6 +125,9 @@ const LAYER_BUTTONS: { how: LayerMove; title: string; icon: ReactNode }[] = [
   { how: "bottom", title: "置于底层（Ctrl+[）", icon: <VerticalAlignBottomOutlined /> },
 ];
 
+const setFontSize = (e: PlanElement, fontSize: number): PlanElement => ({ ...e, fontSize, ...textBox(e.text, fontSize) });
+const setDiameter = (e: PlanElement, d: number): PlanElement => ({ ...e, width: d, height: d, cornerRadius: d / 2 });
+
 type Drag = { id: string; mode: "move" | "resize"; start: Pt; orig: PlanElement };
 type Box = { x: number; y: number; w: number; h: number };
 type Rect = { x0: number; y0: number; x1: number; y1: number };
@@ -145,11 +171,26 @@ export default function FurnitureEditor({
   size: { width: number; height: number };
   radars: QlConfig[];
   saving?: boolean;
-  /** 每次改动后的全部家具（顶层顺序），dirty 表示和打开时不一样 */
-  onChange: (items: PlanElement[], dirty: boolean) => void;
+  /** 每次改动后的全部家具（顶层顺序），dirty 表示和打开时不一样；backdrop 是改过的底图，没改时没有 */
+  onChange: (items: PlanElement[], dirty: boolean, backdrop?: BackdropChange) => void;
 }) {
   const room = size;
-  const initial = useMemo(() => (design?.elements ?? []).filter(isDecor).map((e) => ({ ...e, id: e.id || newId() })), [design]);
+  // 平台的文字没有宽高，算出来才能选中、拖动
+  const initial = useMemo(
+    () =>
+      (design?.elements ?? [])
+        .filter(isDecor)
+        .map((e) => ({ ...e, id: e.id || newId(), ...(e.type === 5 ? textBox(e.text, textFontSize(e)) : {}) })),
+    [design],
+  );
+  const { message } = App.useApp();
+  const initialBg = design?.roomStyle?.type === 4 ? design.roomStyle.src : undefined;
+  const [bg, setBg] = useState(initialBg);
+  const [uploading, setUploading] = useState(false);
+  const [paletteMode, setPaletteMode] = useState<"line" | "real">("line");
+  /** 写实图片的长宽比（面板缩略图加载后记下），摆放时按它算长度 */
+  const ratios = useRef(new Map<string, number>());
+  const bgInput = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PlanElement[]>(initial);
   const [sel, setSel] = useState<string>();
   const [showZones, setShowZones] = useState(true);
@@ -203,10 +244,34 @@ export default function FurnitureEditor({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  const notify = (next: PlanElement[], nextBg: string | undefined) =>
+    onChange(next, nextBg !== initialBg || JSON.stringify(next) !== JSON.stringify(initial), nextBg !== initialBg ? { src: nextBg } : undefined);
   const update = (next: PlanElement[]) => {
     setItems(next);
-    onChange(next, JSON.stringify(next) !== JSON.stringify(initial));
+    notify(next, bg);
   };
+  const changeBg = (src: string | undefined) => {
+    setBg(src);
+    notify(items, src);
+  };
+  /** 上传底图：压缩后传到机构的文件管理，点保存才写进布置。图片按房间尺寸拉伸显示，比例差得多时提醒 */
+  async function pickBackdrop(f: File | undefined) {
+    if (!f) return;
+    setUploading(true);
+    try {
+      const blob = await compressImage(f, 2400);
+      const bmp = await createImageBitmap(blob);
+      const ratio = bmp.width / bmp.height;
+      bmp.close();
+      changeBg(`/sapi/oss/${await uploadFile(blob, `${f.name.replace(/\.[^.]+$/, "")}.webp`)}`);
+      const roomRatio = room.width / room.height;
+      if (Math.abs(ratio / roomRatio - 1) > 0.05) message.warning(`底图比例（${ratio.toFixed(2)}）和房间（${roomRatio.toFixed(2)}）不一样，会被拉伸；可以到楼宇页把房间尺寸改成和图一致`, 6);
+    } catch (err) {
+      message.error(`上传底图失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setUploading(false);
+    }
+  }
   const patch = (id: string, f: (e: PlanElement) => PlanElement) => update(items.map((e) => (e.id === id ? f(e) : e)));
   const selected = items.find((e) => e.id === sel);
 
@@ -217,11 +282,16 @@ export default function FurnitureEditor({
     return { x: p.x, y: p.y };
   };
 
-  function add(kind: FurnitureKind, at?: Pt) {
-    const def = furnitureDef(kind);
+  /** token：线稿家具的 kind，或者 real:写实元素的 label、shape:图形种类 */
+  function add(token: string, at?: Pt) {
     const c = at ?? { x: room.width / 2, y: room.height / 2 };
-    const e = newFurniture(def, newId(), c.x - def.width / 2, c.y - def.height / 2);
-    const placed = placeAt(e, e.x ?? 0, e.y ?? 0, room);
+    let e: PlanElement;
+    if (token.startsWith("shape:")) e = newShape(token.slice(6) as ShapeKind, newId());
+    else if (token.startsWith("real:")) {
+      const def = realisticDef(token.slice(5))!;
+      e = newRealistic(def, newId(), ratios.current.get(def.image));
+    } else e = newFurniture(furnitureDef(token as FurnitureKind), newId(), 0, 0);
+    const placed = placeAt(e, c.x - (e.width ?? 0) / 2, c.y - (e.height ?? 0) / 2, room);
     update([...items, placed]);
     setSel(placed.id);
     editorRef.current?.focus();
@@ -273,7 +343,13 @@ export default function FurnitureEditor({
       patch(d.id, () => placeAt(d.orig, (d.orig.x ?? 0) + p.x - d.start.x, (d.orig.y ?? 0) + p.y - d.start.y, room));
     } else {
       const l = toLocal(d.orig, p);
-      patch(d.id, (e) => ({ ...e, width: Math.max(MIN, snap(l.x)), height: Math.max(MIN, snap(l.y)) }));
+      patch(d.id, (e) => {
+        const shape = shapeOf(e);
+        // 文字：拖角改字号；圆形：保持正圆
+        if (shape === "text") return setFontSize(e, Math.max(MIN, Math.round(l.y / 1.2)));
+        if (shape === "circle") return setDiameter(e, Math.max(MIN, snap(Math.max(l.x, l.y))));
+        return { ...e, width: Math.max(MIN, snap(l.x)), height: Math.max(MIN, snap(l.y)) };
+      });
     }
   };
   const onUp = () => {
@@ -284,7 +360,7 @@ export default function FurnitureEditor({
   };
 
   const onDrop = (ev: DragEvent) => {
-    const kind = ev.dataTransfer.getData("text/furniture") as FurnitureKind;
+    const kind = ev.dataTransfer.getData("text/furniture");
     if (!kind) return;
     ev.preventDefault();
     add(kind, pointOf(ev.clientX, ev.clientY));
@@ -311,6 +387,8 @@ export default function FurnitureEditor({
 
   const itemShape = (e: PlanElement) => (
     <g key={e.id} className={`fur-item${e.id === sel ? " on" : ""}`} onPointerDown={(ev) => onDown(ev, e, "move")}>
+      {/* 文字只有笔画接鼠标，垫一块透明的才好选中 */}
+      {e.type === 5 && <rect x={0} y={0} width={e.width ?? 0} height={e.height ?? 0} fill="transparent" transform={`translate(${e.x ?? 0} ${e.y ?? 0})${e.rotation ? ` rotate(${e.rotation})` : ""}`} />}
       <FurnitureShape e={e} />
     </g>
   );
@@ -321,6 +399,7 @@ export default function FurnitureEditor({
   /** 一个屏幕像素是多少房间单位（cm） */
   const upp = px.w && px.h ? 1 / Math.min(px.w / v.w, px.h / v.h) : fs / 12;
   const selDef = selected && furnitureOf(selected);
+  const selShape = selected && shapeOf(selected);
   const selBox = selected && aabb(selected);
   const dims = selBox ? dimensionsOf(selBox, items.filter((e) => e.id !== sel && !isDoor(e)).map(aabb), room) : [];
   /** 选中家具的外接框移到离左墙 / 上墙 to cm */
@@ -333,34 +412,100 @@ export default function FurnitureEditor({
   return (
     <div ref={editorRef} className="fur-editor" tabIndex={0} onKeyDown={onKey}>
       <aside className="fur-palette">
-        {FURNITURE_GROUPS.map((g) => (
-          <section key={g}>
-            <h4>{g}</h4>
-            <div className="fur-palette-grid">
-              {FURNITURE.filter((f) => f.group === g).map((f) => (
-                <button
-                  key={f.kind}
-                  type="button"
-                  className="fur-tile"
-                  title={`${f.label} ${f.width}×${f.height} cm，点一下放到房间中间，或拖到图上`}
-                  draggable
-                  onDragStart={(ev) => {
-                    ev.dataTransfer.setData("text/furniture", f.kind);
-                    ev.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onClick={() => add(f.kind)}
-                >
-                  <svg viewBox={`-6 -6 ${Math.max(f.width, f.height) + 12} ${Math.max(f.width, f.height) + 12}`} className="fur">
-                    <g transform={`translate(${(Math.max(f.width, f.height) - f.width) / 2} ${(Math.max(f.width, f.height) - f.height) / 2})`}>
-                      <FurnitureIcon kind={f.kind} w={f.width} h={f.height} />
-                    </g>
-                  </svg>
-                  <span>{f.label}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+        <section>
+          <h4>图形</h4>
+          <div className="fur-palette-grid">
+            {SHAPES.map((s) => (
+              <button
+                key={s.kind}
+                type="button"
+                className="fur-tile"
+                title={`${s.label}，点一下放到房间中间，或拖到图上`}
+                draggable
+                onDragStart={(ev) => {
+                  ev.dataTransfer.setData("text/furniture", `shape:${s.kind}`);
+                  ev.dataTransfer.effectAllowed = "copy";
+                }}
+                onClick={() => add(`shape:${s.kind}`)}
+              >
+                <span className={`fur-shape-icon ${s.kind}`}>{s.kind === "text" ? "T" : ""}</span>
+                <span>{s.label}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        <Segmented
+          size="small"
+          block
+          className="fur-palette-mode"
+          value={paletteMode}
+          onChange={(v) => setPaletteMode(v as "line" | "real")}
+          options={[
+            { value: "line", label: "线稿" },
+            { value: "real", label: "写实" },
+          ]}
+        />
+        {paletteMode === "real"
+          ? REALISTIC_GROUPS.map((g) => (
+              <section key={g}>
+                <h4>{g}</h4>
+                <div className="fur-palette-grid">
+                  {REALISTIC.filter((f) => f.group === g).map((f) => (
+                    <button
+                      key={f.label}
+                      type="button"
+                      className="fur-tile"
+                      title={`${f.short}，点一下放到房间中间，或拖到图上`}
+                      draggable
+                      onDragStart={(ev) => {
+                        ev.dataTransfer.setData("text/furniture", `real:${f.label}`);
+                        ev.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => add(`real:${f.label}`)}
+                    >
+                      <img
+                        src={fileUrl(f.image, 120)}
+                        alt=""
+                        draggable={false}
+                        onLoad={(ev) => {
+                          const im = ev.currentTarget;
+                          if (im.naturalWidth) ratios.current.set(f.image, im.naturalHeight / im.naturalWidth);
+                        }}
+                      />
+                      <span>{f.short}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))
+          : FURNITURE_GROUPS.map((g) => (
+              <section key={g}>
+                <h4>{g}</h4>
+                <div className="fur-palette-grid">
+                  {FURNITURE.filter((f) => f.group === g).map((f) => (
+                    <button
+                      key={f.kind}
+                      type="button"
+                      className="fur-tile"
+                      title={`${f.label} ${f.width}×${f.height} cm，点一下放到房间中间，或拖到图上`}
+                      draggable
+                      onDragStart={(ev) => {
+                        ev.dataTransfer.setData("text/furniture", f.kind);
+                        ev.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => add(f.kind)}
+                    >
+                      <svg viewBox={`-6 -6 ${Math.max(f.width, f.height) + 12} ${Math.max(f.width, f.height) + 12}`} className="fur">
+                        <g transform={`translate(${(Math.max(f.width, f.height) - f.width) / 2} ${(Math.max(f.width, f.height) - f.height) / 2})`}>
+                          <FurnitureIcon kind={f.kind} w={f.width} h={f.height} />
+                        </g>
+                      </svg>
+                      <span>{f.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
       </aside>
 
       <div className="fur-canvas" onDragOver={(ev) => ev.preventDefault()} onDrop={onDrop}>
@@ -376,7 +521,7 @@ export default function FurnitureEditor({
           onPointerCancel={onUp}
         >
           {/* 底图（网格、户型图、文字）和墙用公共组件；家具在这里自己画，才能拖 */}
-          <RoomBackdrop size={room} roomStyle={design?.roomStyle} elements={(design?.elements ?? []).filter((e) => !isDecor(e))}>
+          <RoomBackdrop size={room} roomStyle={bg ? { type: 4, src: bg } : undefined} elements={(design?.elements ?? []).filter((e) => !isDecor(e))}>
             {showZones &&
               radars.map((c, i) => {
                 const b = boundRect(c);
@@ -450,6 +595,26 @@ export default function FurnitureEditor({
               适应
             </Button>
           </span>
+          <span className="fur-backdrop">
+            <input
+              ref={bgInput}
+              type="file"
+              accept={IMAGE_ACCEPT}
+              hidden
+              onChange={(ev) => {
+                pickBackdrop(ev.target.files?.[0]);
+                ev.target.value = "";
+              }}
+            />
+            <Button size="small" icon={<UploadOutlined />} loading={uploading} title="上传户型图当底图，按房间尺寸铺满，点保存后生效" onClick={() => bgInput.current?.click()}>
+              {bg ? "换底图" : "上传底图"}
+            </Button>
+            {bg && (
+              <Button size="small" type="text" onClick={() => changeBg(undefined)}>
+                去掉
+              </Button>
+            )}
+          </span>
           <Checkbox checked={showZones} onChange={(e) => setShowZones(e.target.checked)}>
             显示雷达区域
           </Checkbox>
@@ -462,16 +627,53 @@ export default function FurnitureEditor({
       <aside className="fur-props">
         {selected ? (
           <>
-            <h4>{selDef?.label ?? (selected.type === 4 ? "平台图片" : "矩形")}</h4>
-            {!selDef && <p className="muted small">平台网页端摆的，客户端没有对应图标，照原样显示</p>}
-            <label>
-              宽（左右）
-              <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.width} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => ({ ...e, width: Math.round(v) }))} />
-            </label>
-            <label>
-              长（上下）
-              <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.height} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => ({ ...e, height: Math.round(v) }))} />
-            </label>
+            <h4>{elementLabel(selected)}</h4>
+            {!selDef && !selShape && !realisticOf(selected) && <p className="muted small">平台网页端摆的，客户端没有对应图标，照原样显示</p>}
+            {selShape === "text" && (
+              <>
+                <label>
+                  内容
+                  <Input size="small" value={selected.text} onChange={(ev) => patch(selected.id!, (e) => ({ ...e, text: ev.target.value, ...textBox(ev.target.value, textFontSize(e)) }))} />
+                </label>
+                <label>
+                  字号
+                  <InputNumber size="small" min={MIN} max={500} value={textFontSize(selected)} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => setFontSize(e, Math.round(v)))} />
+                </label>
+              </>
+            )}
+            {selShape && (
+              <label>
+                {selShape === "text" ? "颜色" : "填充"}
+                <ColorPicker size="small" value={selected.fill} showText onChange={(c) => patch(selected.id!, (e) => ({ ...e, fill: c.toCssString() }))} />
+              </label>
+            )}
+            {(selShape === "rect" || selShape === "circle") && (
+              <label>
+                边框
+                <span className="fur-rot">
+                  <ColorPicker size="small" value={selected.stroke} onChange={(c) => patch(selected.id!, (e) => ({ ...e, stroke: c.toCssString() }))} />
+                  <InputNumber size="small" min={0} max={50} value={selected.strokeWidth ?? 1} suffix="cm" onChange={(v) => v !== null && patch(selected.id!, (e) => ({ ...e, strokeWidth: v }))} />
+                </span>
+              </label>
+            )}
+            {selShape === "circle" && (
+              <label>
+                直径
+                <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.width} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => setDiameter(e, Math.round(v)))} />
+              </label>
+            )}
+            {selShape !== "text" && selShape !== "circle" && (
+              <>
+                <label>
+                  宽（左右）
+                  <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.width} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => ({ ...e, width: Math.round(v) }))} />
+                </label>
+                <label>
+                  长（上下）
+                  <InputNumber size="small" min={MIN} max={2000} step={GRID} value={selected.height} suffix="cm" onChange={(v) => v && patch(selected.id!, (e) => ({ ...e, height: Math.round(v) }))} />
+                </label>
+              </>
+            )}
             {selBox && (
               <div className="fur-pos">
                 <label>
@@ -538,6 +740,8 @@ export function mergeFurniture(fresh: RoomDesign | undefined, items: PlanElement
   const others = (fresh?.elements ?? []).filter((e) => !isDecor(e));
   const clean = items.map((e) => ({
     ...e,
+    // 平台网页端摆的家具没有 name，在这里保存过就算客户端装修过（见 decoratedInClient）
+    name: e.name || furnitureOf(e)?.label || realisticOf(e)?.label,
     x: Math.round(e.x ?? 0),
     y: Math.round(e.y ?? 0),
     width: Math.round(e.width ?? 0),
