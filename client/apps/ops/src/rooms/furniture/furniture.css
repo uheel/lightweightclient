@@ -7,3 +7,5 @@
 .fur-zoom { display: inline-flex; align-items: center; gap: 2px; }
 .fur-zoom-pct { min-width: 40px; text-align: center; color: #4A4F66; }
 .fur-pos { display: flex; flex-direction: column; gap: 6px; }
+/* 窗口矮时属性栏内容（门的说明、复制删除）能滚动，不被底部按钮挡住 */
+.fur-props { overflow-y: auto; min-height: 0; }

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Button, Checkbox, InputNumber, Tooltip } from "antd";
-import { CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
+import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DeleteOutlined, RotateLeftOutlined, RotateRightOutlined, VerticalAlignBottomOutlined, VerticalAlignTopOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
 import type { PlanElement, RoomDesign } from "../../api/room";
 import { newId } from "../radarSlot";
 import { boundRect, radarInRoom, ZONE_COLOR, zoneRect, zonesOf, type QlConfig } from "../qinglan";
@@ -66,6 +66,42 @@ function rotateTo(e: PlanElement, deg: number): PlanElement {
   const oy = (w / 2) * Math.sin(a) + (h / 2) * Math.cos(a);
   return { ...e, rotation: r, x: Math.round(c.x - ox), y: Math.round(c.y - oy) };
 }
+type LayerMove = "up" | "down" | "top" | "bottom";
+const boxesOverlap = (a: PlanElement, b: PlanElement) => {
+  const p = aabb(a);
+  const q = aabb(b);
+  return p.x0 < q.x1 && p.x1 > q.x0 && p.y0 < q.y1 && p.y1 > q.y0;
+};
+/**
+ * 调层级：items 的顺序就是画的顺序（后面的盖住前面的），也是保存到平台的顺序。
+ * 门固定画在墙和其他家具上面（门洞要挖开墙），所以门只和门比、其他家具只和其他家具比。
+ * 上移 / 下移一次越过一件有重叠的家具，没重叠的前后关系看不出来，不用一下下点过去。
+ * 这个方向上没有重叠的家具时返回 undefined（调了也看不出变化，按钮禁用）
+ */
+function moveLayer(items: PlanElement[], id: string, how: LayerMove): PlanElement[] | undefined {
+  const e = items.find((x) => x.id === id);
+  if (!e) return undefined;
+  const door = isDoor(e);
+  const peers = items.filter((x) => isDoor(x) === door);
+  const i = peers.indexOf(e);
+  const above = how === "up" || how === "top";
+  const hits = peers.map((x, j) => (above ? j > i : j < i) && boxesOverlap(e, x));
+  if (!hits.includes(true)) return undefined;
+  const rest = peers.filter((x) => x !== e);
+  const to = how === "top" ? rest.length : how === "bottom" ? 0 : how === "up" ? hits.indexOf(true) : hits.lastIndexOf(true);
+  rest.splice(to, 0, e);
+  // 门和其他家具各占原来的位置，互相不打乱
+  let k = 0;
+  return items.map((x) => (isDoor(x) === door ? rest[k++]! : x));
+}
+
+const LAYER_BUTTONS: { how: LayerMove; title: string; icon: ReactNode }[] = [
+  { how: "top", title: "置于顶层（Ctrl+]）", icon: <VerticalAlignTopOutlined /> },
+  { how: "up", title: "上移一层（]）", icon: <ArrowUpOutlined /> },
+  { how: "down", title: "下移一层（[）", icon: <ArrowDownOutlined /> },
+  { how: "bottom", title: "置于底层（Ctrl+[）", icon: <VerticalAlignBottomOutlined /> },
+];
+
 type Drag = { id: string; mode: "move" | "resize"; start: Pt; orig: PlanElement };
 type Box = { x: number; y: number; w: number; h: number };
 type Rect = { x0: number; y0: number; x1: number; y1: number };
@@ -118,6 +154,7 @@ export default function FurnitureEditor({
   const [sel, setSel] = useState<string>();
   const [showZones, setShowZones] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   // 缩放 / 平移：改 viewBox；null 时是整间房（适应）
   const base: Box = { x: -PAD, y: -PAD, w: room.width + PAD * 2, h: room.height + PAD * 2 };
@@ -187,7 +224,7 @@ export default function FurnitureEditor({
     const placed = placeAt(e, e.x ?? 0, e.y ?? 0, room);
     update([...items, placed]);
     setSel(placed.id);
-    svgRef.current?.parentElement?.focus();
+    editorRef.current?.focus();
   }
   function duplicate(e: PlanElement) {
     const copy = placeAt({ ...e, id: newId() }, (e.x ?? 0) + 20, (e.y ?? 0) + 20, room);
@@ -197,6 +234,12 @@ export default function FurnitureEditor({
   function remove(id: string) {
     update(items.filter((e) => e.id !== id));
     setSel(undefined);
+  }
+  function layer(id: string, how: LayerMove) {
+    const next = moveLayer(items, id, how);
+    if (next) update(next);
+    // 点完按钮它可能变成禁用，焦点会掉到 body 上，快捷键就失效了
+    editorRef.current?.focus();
   }
 
   const onDown = (ev: PointerEvent, e: PlanElement, mode: Drag["mode"]) => {
@@ -258,6 +301,8 @@ export default function FurnitureEditor({
     else if (k === "ArrowUp") nudge(0, -step);
     else if (k === "ArrowDown") nudge(0, step);
     else if ((ev.ctrlKey || ev.metaKey) && k.toLowerCase() === "d") duplicate(selected);
+    else if (k === "]" || k === "】") layer(selected.id!, ev.ctrlKey || ev.metaKey ? "top" : "up");
+    else if (k === "[" || k === "【") layer(selected.id!, ev.ctrlKey || ev.metaKey ? "bottom" : "down");
     else if (k.toLowerCase() === "r") patch(selected.id!, (e) => rotateTo(e, (e.rotation ?? 0) + (ev.shiftKey ? -90 : 90)));
     else if (k === "Escape") setSel(undefined);
     else return;
@@ -286,7 +331,7 @@ export default function FurnitureEditor({
   };
 
   return (
-    <div className="fur-editor" tabIndex={0} onKeyDown={onKey}>
+    <div ref={editorRef} className="fur-editor" tabIndex={0} onKeyDown={onKey}>
       <aside className="fur-palette">
         {FURNITURE_GROUPS.map((g) => (
           <section key={g}>
@@ -409,7 +454,7 @@ export default function FurnitureEditor({
             显示雷达区域
           </Checkbox>
           <span>
-            {room.width / 100} × {room.height / 100} m · {items.length} 件 · 滚轮缩放、拖空白处平移 · 选中后标出到墙 / 家具的距离（cm）· 拖动按 5 cm 对齐、靠墙自动贴上 · 方向键微调（Shift 10 cm）· R 旋转 · Ctrl+D 复制 · Delete 删除
+            {room.width / 100} × {room.height / 100} m · {items.length} 件 · 滚轮缩放、拖空白处平移 · 选中后标出到墙 / 家具的距离（cm）· 拖动按 5 cm 对齐、靠墙自动贴上 · 方向键微调（Shift 10 cm）· R 旋转 · ] [ 调层级 · Ctrl+D 复制 · Delete 删除
           </span>
         </div>
       </div>
@@ -454,6 +499,17 @@ export default function FurnitureEditor({
                 </Tooltip>
               </span>
             </label>
+            <label>
+              层级
+              <span className="fur-rot">
+                {LAYER_BUTTONS.map((b) => (
+                  <Tooltip key={b.how} title={moveLayer(items, selected.id!, b.how) ? b.title : `${b.title}：${b.how === "up" || b.how === "top" ? "上面" : "下面"}没有和它重叠的${isDoor(selected) ? "门" : "家具"}`}>
+                    <Button size="small" icon={b.icon} aria-label={b.title} disabled={!moveLayer(items, selected.id!, b.how)} onClick={() => layer(selected.id!, b.how)} />
+                  </Tooltip>
+                ))}
+              </span>
+            </label>
+            {isDoor(selected) && <span className="muted small">门固定在墙和其他家具上面，才能把墙挖开；这里只调门和门之间的前后</span>}
             <div className="fur-prop-actions">
               <Button size="small" icon={<CopyOutlined />} onClick={() => duplicate(selected)}>
                 复制
