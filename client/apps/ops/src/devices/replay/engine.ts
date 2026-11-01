@@ -1,4 +1,5 @@
 import { assetUrl } from "@radar/core";
+import { decoratedInClient } from "../../rooms/furniture/catalog";
 import { boundRect, containerRect, type QlConfig } from "../../rooms/qinglan";
 import { clamp, fmt, fmtTime, interpAt, linked, lowerBound, postureAt, POSTURES, trackStateAt, type ReplayData, type RoomDetail, type RoomEl } from "./data";
 
@@ -19,6 +20,10 @@ export interface ReplayOptions {
 
 export interface ReplayEls {
   stage: HTMLDivElement;
+  /** 地板（底色、底图、网格），在装修层下面 */
+  roomFloor: HTMLCanvasElement;
+  /** 客户端装修的家具和墙（SVG，React 画），引擎只管跟着缩放平移；在区域、雷达下面 */
+  decor: SVGGElement;
   roomBase: HTMLCanvasElement;
   roomDyn: HTMLCanvasElement;
   tlWrap: HTMLDivElement;
@@ -116,6 +121,8 @@ export class ReplayEngine {
   private off: (() => void)[] = [];
   private C: typeof LIGHT;
   private dark: boolean;
+  /** 房间在客户端装修过：家具和墙交给装修层画，画布不再画平台的图 */
+  private clientDecor = false;
 
   constructor(
     private els: ReplayEls,
@@ -168,6 +175,7 @@ export class ReplayEngine {
 
   setDetail(d: RoomDetail | null) {
     this.detail = d;
+    this.clientDecor = decoratedInClient(d?.designElements);
     this.resizeRoom();
   }
 
@@ -238,6 +246,7 @@ export class ReplayEngine {
   private resizeRoom() {
     const W = this.els.stage.clientWidth;
     const H = this.els.stage.clientHeight;
+    this.sizeCanvas(this.els.roomFloor, W, H);
     this.sizeCanvas(this.els.roomBase, W, H);
     this.sizeCanvas(this.els.roomDyn, W, H);
     if (this.detail) this.fitRoom();
@@ -327,18 +336,25 @@ export class ReplayEngine {
   }
 
   private drawRoomBase() {
-    const cv = this.els.roomBase;
-    const ctx = cv.getContext("2d")!;
+    const fl = this.els.roomFloor;
+    const ctx = fl.getContext("2d")!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.clearRect(0, 0, fl.width, fl.height);
+    const top = this.els.roomBase;
+    const tctx = top.getContext("2d")!;
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    tctx.clearRect(0, 0, top.width, top.height);
     if (!this.detail) return;
     const s = this.room.scale;
     const bg = this.detail.background ?? {};
     const b = this.roomBounds();
+    const v = this.room;
+    this.els.decor.setAttribute("transform", `translate(${v.ox} ${v.oy}) scale(${v.scale})`);
     this.worldTransform(ctx);
+    this.worldTransform(tctx);
     // 房间底色；背景为图片时是户型底图，否则画 1m 网格
-    // 深色时不用布置里的底色（多半是白色）
-    ctx.fillStyle = this.dark ? this.C.roomBg : bg.fill || this.C.roomBg;
+    // 深色时不用布置里的底色（多半是白色）；客户端装修的房间和其他平面图一样用自己的底色
+    ctx.fillStyle = this.dark || this.clientDecor ? this.C.roomBg : bg.fill || this.C.roomBg;
     ctx.beginPath();
     ctx.rect(b.x, b.y, b.w, b.h);
     ctx.fill();
@@ -364,7 +380,13 @@ export class ReplayEngine {
       }
       ctx.restore();
     }
-    const elements = this.detail.elements ?? [];
+    this.drawRoomTop(tctx, s, b);
+  }
+
+  /** 画在装修层上面的：雷达范围、区域、雷达；平台风格时还有家具和墙 */
+  private drawRoomTop(ctx: CanvasRenderingContext2D, s: number, b: { x: number; y: number; w: number; h: number }) {
+    const bg = this.detail?.background ?? {};
+    const elements = this.detail?.elements ?? [];
     // 雷达覆盖范围：最大探测范围（灰虚线）+ 监测边界（淡蓝底、蓝虚线），房间坐标
     for (const el of elements) {
       const qc = el.qingLanConfig as QlConfig | undefined;
@@ -407,7 +429,8 @@ export class ReplayEngine {
         }
       }
     }
-    for (const el of elements) this.drawElement(ctx, el, s);
+    for (const el of elements) if (!this.clientDecor || (el.type !== 2 && el.type !== 4)) this.drawElement(ctx, el, s);
+    if (this.clientDecor) return;
     ctx.lineWidth = bg.strokeWidth || 2;
     ctx.strokeStyle = bg.stroke || this.C.roomStroke;
     ctx.strokeRect(b.x, b.y, b.w, b.h);

@@ -1,6 +1,7 @@
 import { api, type PerfTimer } from "@radar/core";
 import { getAllDeviceLogs, isSlim, type DeviceLog } from "../../api/device";
 import { getRoomView } from "../../api/roomView";
+import type { PlanElement } from "../../api/room";
 
 /**
  * 姿态回放的数据层（移植自油猴脚本 room-posture-replay.user.js，算法保持一致）：
@@ -96,6 +97,8 @@ export interface RoomDetail {
   background?: { width?: number; height?: number; fill?: string; stroke?: string; strokeWidth?: number; src?: string };
   elements?: RoomEl[];
   devices?: { sn: string; deviceName?: string; deviceType?: number; isOnline?: boolean }[];
+  /** 房间布置里的元素（家具的 name 以这里为准），见 getRoomView */
+  designElements?: PlanElement[];
 }
 
 export async function getRoomDetail(roomId: string) {

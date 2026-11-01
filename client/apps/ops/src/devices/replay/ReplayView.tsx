@@ -12,6 +12,8 @@ import {
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { perfTimer } from "@radar/core";
+import RoomBackdrop from "../../rooms/RoomBackdrop";
+import { decoratedInClient, isDecor } from "../../rooms/furniture/catalog";
 import { fmt, fmtDate, fmtTime, getRoomDetail, lowerBound, MAX_RANGE_DAYS, POSTURES, trackStateAt, loadReplayData, type Mark, type ReplayData, type RoomDetail } from "./data";
 import { ReplayEngine, type ReplayOptions, type ReplayPalette } from "./engine";
 
@@ -65,6 +67,8 @@ export default memo(ReplayView);
  */
 function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 先看哪台设备；不传 = 房间里全部设备一起看（卧室、卫生间各一台时人在两台之间走动） */ sn?: string; /** 深色（监控模式） */ dark?: boolean; /** 深色时画布用的配色（监控模式的配色方案），不传用默认深色 */ palette?: ReplayPalette; /** 撑满父元素的高度（弹窗里用），画布区占满剩下的空间 */ fill?: boolean }) {
   const stage = useRef<HTMLDivElement>(null);
+  const roomFloor = useRef<HTMLCanvasElement>(null);
+  const decor = useRef<SVGGElement>(null);
   const roomBase = useRef<HTMLCanvasElement>(null);
   const roomDyn = useRef<HTMLCanvasElement>(null);
   const tlWrap = useRef<HTMLDivElement>(null);
@@ -102,7 +106,7 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
   useEffect(() => {
     if (!hasStage) return;
     const e = new ReplayEngine(
-      { stage: stage.current!, roomBase: roomBase.current!, roomDyn: roomDyn.current!, tlWrap: tlWrap.current!, tlBase: tlBase.current!, tlOver: tlOver.current!, tip: tip.current! },
+      { stage: stage.current!, roomFloor: roomFloor.current!, decor: decor.current!, roomBase: roomBase.current!, roomDyn: roomDyn.current!, tlWrap: tlWrap.current!, tlBase: tlBase.current!, tlOver: tlOver.current!, tip: tip.current! },
       () => optsRef.current,
       { onTime: clock.set, onPlaying: setPlaying, onView: setSpan },
       [dayjs().startOf("day").valueOf(), Date.now()],
@@ -276,6 +280,18 @@ function ReplayView({ roomId, sn, dark, palette, fill }: { roomId?: string; /** 
 
       <div className="rp-body">
         <div className="rp-stage" ref={stage}>
+          <canvas ref={roomFloor} />
+          <svg className={`rp-decor room-plan${dark ? " dark" : ""}`}>
+            <g ref={decor}>
+              {detail && decoratedInClient(detail.designElements) && (
+                <RoomBackdrop
+                  size={{ width: detail.background?.width || 400, height: detail.background?.height || 400 }}
+                  elements={detail.designElements?.filter(isDecor)}
+                  grid={false}
+                />
+              )}
+            </g>
+          </svg>
           <canvas ref={roomBase} />
           <canvas ref={roomDyn} />
           <div className="rp-stage-tools">
