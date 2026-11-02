@@ -12,16 +12,20 @@ export interface WallPageConfig {
 
 export interface WallConfig {
   carousel: boolean;
+  /** 鼠标移动、按键或手动切换后先不自动轮播，idleSeconds 秒没有动作再恢复 */
+  idleResume: boolean;
+  idleSeconds: number;
   pages: WallPageConfig[];
 }
 
 export const MIN_SECONDS = 5;
 export const MAX_SECONDS = 600;
+const DEFAULT_IDLE_SECONDS = 60;
 const defaultSeconds = (d: WallPageDef) => (d.kind === "rooms" ? 20 : 30);
 
 const KEY = "ops.dataWall.config";
 
-export const defaultConfig = (): WallConfig => ({ carousel: true, pages: WALL_PAGES.map((d) => ({ key: d.key, enabled: true, seconds: defaultSeconds(d) })) });
+export const defaultConfig = (): WallConfig => ({ carousel: true, idleResume: true, idleSeconds: DEFAULT_IDLE_SECONDS, pages: WALL_PAGES.map((d) => ({ key: d.key, enabled: true, seconds: defaultSeconds(d) })) });
 
 /** 存的配置和页面表对上：删掉的页面去掉，新加的页面排在最后；一页都不显示时恢复默认 */
 function normalize(saved: Partial<WallConfig>): WallConfig {
@@ -30,7 +34,7 @@ function normalize(saved: Partial<WallConfig>): WallConfig {
   const kept = (saved.pages ?? []).filter((p) => known.has(p.key)).map((p) => ({ ...known.get(p.key)!, ...p }));
   const keys = new Set(kept.map((p) => p.key));
   const pages = [...kept, ...base.pages.filter((p) => !keys.has(p.key))];
-  return { carousel: saved.carousel ?? base.carousel, pages: pages.some((p) => p.enabled) ? pages : base.pages };
+  return { carousel: saved.carousel ?? base.carousel, idleResume: saved.idleResume ?? base.idleResume, idleSeconds: saved.idleSeconds ?? base.idleSeconds, pages: pages.some((p) => p.enabled) ? pages : base.pages };
 }
 
 let current: WallConfig = (() => {

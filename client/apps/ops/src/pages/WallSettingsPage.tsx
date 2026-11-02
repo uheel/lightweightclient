@@ -40,12 +40,29 @@ export default function WallSettingsPage({ onOpen }: { onOpen: (k: "dataWall") =
           <Switch checked={c.carousel} onChange={(carousel) => setWallConfig({ ...c, carousel })} />
           <span>{c.carousel ? "自动轮播" : "不轮播，在魔墙工具栏手动切换"}</span>
         </div>
+        <div className="wall-cfg-row">
+          <Switch checked={c.idleResume} disabled={!c.carousel} onChange={(idleResume) => setWallConfig({ ...c, idleResume })} />
+          <span>有操作时暂停轮播（移动鼠标、按键、手动切换页面）</span>
+          <span className="wall-cfg-time">
+            没有动作
+            <InputNumber
+              size="small"
+              min={MIN_SECONDS}
+              max={MAX_SECONDS}
+              precision={0}
+              value={c.idleSeconds}
+              disabled={!c.carousel || !c.idleResume}
+              onChange={(idleSeconds) => idleSeconds && setWallConfig({ ...c, idleSeconds })}
+            />
+            秒后继续
+          </span>
+        </div>
       </div>
 
       <div className="ops-card">
         <h2 className="wall-cfg-head">
           页面
-          <Button size="small" type="link" onClick={() => setWallConfig({ ...defaultConfig(), carousel: c.carousel })}>
+          <Button size="small" type="link" onClick={() => setWallConfig({ ...defaultConfig(), carousel: c.carousel, idleResume: c.idleResume, idleSeconds: c.idleSeconds })}>
             恢复默认
           </Button>
         </h2>

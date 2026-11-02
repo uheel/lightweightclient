@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # unstable：多 webview（链接模块在主窗口里另开一个子 webview 显示第三方网址，不受 X-Frame-Options 限制）
-tauri = { version = "2", features = ["unstable"] }
+tauri = { version = "2", features = ["unstable", "tray-icon"] }
 tauri-plugin-http = "2"
 # 和 plugin-http 用的是同一个 reqwest，这里只为打开响应压缩（请求自动带 Accept-Encoding 并解压），大列表传输量能小很多
 reqwest = { version = "0.12", default-features = false, features = ["gzip", "brotli", "deflate"] }
@@ -28,6 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
 # 自动更新：从 R2 上的 latest.json 检查新版本，下载后校验签名再安装；process 用于装完后重启
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

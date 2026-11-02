@@ -31,6 +31,7 @@
 .wall-cfg-time .ant-input-number { width: 72px; }
 .wall-cfg-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
 .wall-cfg-warn { margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: #fff7e6; color: #ad6800; font-size: 12px; }
+.wall-hold { white-space: nowrap; color: var(--ant-color-text-secondary, #888); font-size: 12px; }
 .wall-bar-sep { width: 1px; height: 16px; background: var(--ant-color-border, #ddd); margin: 0 4px; }
 .wall-show { position: fixed; inset: 0; z-index: 950; display: flex; flex-direction: column; background: #0a0f1f; }
 .wall-views { position: relative; flex: 1; min-height: 0; display: flex; }

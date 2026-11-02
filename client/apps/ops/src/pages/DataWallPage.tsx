@@ -12,6 +12,7 @@ import { useRefreshOn, type Topic } from "../workspace/dataChange";
 import { useChildWebview, useOverlayOpen } from "../workspace/childWebview";
 import { platformScript, platformUrl, PRELOAD_START_MS, PRELOAD_STEP_MS, type WallPageDef } from "../datawall/pages";
 import type { PlatformTarget } from "../datawall/platformTargets";
+import { useIdleHold } from "../datawall/useIdleHold";
 import { enabledPages, useWallConfig } from "../datawall/config";
 import "../datawall/wall.css";
 
@@ -506,8 +507,14 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
   // 当前页在设置里被隐藏了就显示第一页
   const current = pages.find((p) => p.key === currentKey) ?? pages[0];
   const [paused, setPaused] = useState(false);
+  // 魔墙显示着才看有没有操作。关了轮播时不需要
+  const { hold, touch } = useIdleHold(active && config.carousel && config.idleResume, config.idleSeconds);
+  const pick = (key: string) => {
+    setCurrentKey(key);
+    touch();
+  };
   /** 关了轮播就不在页面之间切；全房间看板放不下时自己的几屏照样翻 */
-  const playing = !paused || !config.carousel;
+  const playing = (!paused || !config.carousel) && !hold;
   const [show, setShow] = useState(false);
   const [barSlot, setBarSlot] = useState<HTMLElement | null>(null);
   /** 开始加载的平台页面（一个一个开始）；手动点到的马上开始。加载后一直留着，切换、放多久都不重新加载 */
@@ -567,14 +574,14 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
   const [round, setRound] = useState(0);
   // 平台页面的停留；全房间看板翻完自己的几屏再轮到下一个（onScreensDone）
   useEffect(() => {
-    if (!active || !config.carousel || paused || current.kind === "rooms") return;
+    if (!active || !config.carousel || paused || hold || current.kind === "rooms") return;
     const t = setTimeout(() => {
       next();
       // 别的页面都没加载好时还留在这一页，要接着计时
       setRound((n) => n + 1);
     }, current.seconds * 1000);
     return () => clearTimeout(t);
-  }, [active, config.carousel, paused, current.kind, current.key, current.seconds, next, round]);
+  }, [active, config.carousel, paused, hold, current.kind, current.key, current.seconds, next, round]);
 
   async function startShow() {
     setShow(true);
@@ -616,7 +623,7 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
     <div className={show ? "wall-show" : "wall-page"}>
       {!show && (
         <div className="wall-bar">
-          {pages.length > 1 && <Segmented size="small" value={current.key} onChange={(k) => setCurrentKey(k as string)} options={pages.map((p) => ({ value: p.key, label: p.title }))} />}
+          {pages.length > 1 && <Segmented size="small" value={current.key} onChange={(k) => pick(k as string)} options={pages.map((p) => ({ value: p.key, label: p.title }))} />}
           {config.carousel && pages.length > 1 && (
             <Button size="small" icon={paused ? <CaretRightOutlined /> : <PauseOutlined />} onClick={() => setPaused((x) => !x)}>
               {paused ? "继续轮播" : "暂停轮播"}
@@ -628,6 +635,7 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
           <Button size="small" type="primary" icon={<FullscreenOutlined />} onClick={startShow}>
             全屏放映
           </Button>
+          {hold && !paused && <span className="wall-hold">有操作，{config.idleSeconds} 秒没动作后继续轮播</span>}
           <span className="wall-bar-sep" />
           <span ref={setBarSlot} className="wall-bar-slot" hidden={current.kind !== "rooms"} />
         </div>
@@ -637,7 +645,7 @@ export default function DataWallPage({ active, rt, onOpenRoom, onOpenSettings }:
         <div className="wall-show-strip">
           <span className="wall-show-tabs">
             {pages.map((p) => (
-              <button key={p.key} className={p.key === current.key ? "on" : undefined} onClick={() => setCurrentKey(p.key)}>
+              <button key={p.key} className={p.key === current.key ? "on" : undefined} onClick={() => pick(p.key)}>
                 {p.title}
               </button>
             ))}
