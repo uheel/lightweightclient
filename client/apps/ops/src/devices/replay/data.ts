@@ -61,6 +61,7 @@ export const TRACK_COLORS = ["#3B4FD8", "#1F9D55", "#D97706", "#7048E8", "#0C859
 export interface QingLan {
   container: { x: number; y: number; width?: number; height?: number };
   radar?: { x: number; y: number };
+  bound?: { x: number; y: number; width: number; height: number };
   installType?: number;
   installDirection?: number;
   ranges?: { type: number; text?: string; x: number; y: number; width: number; height: number; fill?: string }[];
@@ -216,7 +217,7 @@ export interface ReplayData {
 /**
  * 一体化终端（6 型）上报的原始轨迹帧（Device.postevent 的 event_QL_rawdata，0x81 帧，有人时每个目标约 1 秒一帧）：
  * 第 4 字节目标数、第 5 字节目标编号、第 6 字节 0x58 = 没人、第 7 / 8 字节 x / y（有符号，分米，相对雷达）、第 19 字节姿态、第 20 字节人员事件、第 21 字节事件区域 ID（255 = 不在区域）。
- * 目标编号不等于历史轨迹点的 userId（平台自己跟踪编号：16:03～16:07 帧里只有 1 号目标，轨迹点一直是 userId 2），按位置对：轨迹点 x = 帧 x × 10、y = −帧 y × 10（厘米）。
+ * 目标编号不等于历史轨迹点的 userId（平台自己跟踪编号：16:03～16:07 帧里只有 1 号目标，轨迹点一直是 userId 2），按位置对：帧 x × 10、−帧 y × 10（厘米）用 radarToRoom 换算后和轨迹点比。
  * 格式和实测见 docs/site-analysis.md"持续时间与久坐提醒"。
  */
 interface Frame {
@@ -496,6 +497,45 @@ function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<Ret
   const qcBySn: Record<string, QingLan> = {};
   for (const el of detail.elements ?? []) if (el.sn && el.qingLanConfig?.container) qcBySn[el.sn] = el.qingLanConfig;
 
+  // 坐标系：多数设备的历史点已是房间坐标；有的是相对雷达的坐标，需要按安装配置换算。
+  // 每台设备分别试两种解释，落在这台雷达探测范围（布置里的 container，房间坐标）内的点多的那种即为正确的坐标系。
+  // 不能按整个房间算：户型图是整套公寓时，换算后以雷达为轴翻过去的点也还在房间里，会选错
+  // （2026-10-27 SWASTIK ENTERPRISES 的 Bathroom：直接画 1335 个点里 1332 个在房间内、3 个略出左墙，换算后翻到雷达下方的卧室里却 1335 个都在，结果方向反了）。
+  // 布置里没有探测范围尺寸时退回按房间算。
+  // 顶装朝左 / 朝右时平台的点少交换了 x、y（见 swapAxes），错的点也都在探测范围内，所以这种设备改按监测边界比，分不出来时按交换算
+  const bg = detail.background ?? {};
+  const converted: string[] = [];
+  for (const sn of sns) {
+    const qc = qcBySn[sn];
+    const pts = [...trackMap.values()].filter((tr) => tr.sn === sn).flatMap((tr) => tr.points);
+    if (!qc || !pts.length) continue;
+    const c = qc.container;
+    const sideways = qc.installType === 0 && (qc.installDirection === 2 || qc.installDirection === 4);
+    const bd = sideways ? qc.bound : undefined;
+    const area = bd
+      ? { x0: bd.x, y0: bd.y, x1: bd.x + bd.width, y1: bd.y + bd.height }
+      : c.width && c.height
+        ? { x0: c.x, y0: c.y, x1: c.x + c.width, y1: c.y + c.height }
+        : { x0: 0, y0: 0, x1: bg.width ?? 0, y1: bg.height ?? 0 };
+    const inRoom = (x: number, y: number) => x >= area.x0 - 30 && y >= area.y0 - 30 && x <= area.x1 + 30 && y <= area.y1 + 30;
+    let rawIn = 0;
+    let xfIn = 0;
+    let swapIn = 0;
+    for (let i = 0; i < pts.length; i += Math.max(1, Math.floor(pts.length / 2000))) {
+      if (inRoom(pts[i].x, pts[i].y)) rawIn++;
+      const [X, Y] = radarToRoom(qc, pts[i].x, pts[i].y);
+      if (inRoom(X, Y)) xfIn++;
+      if (sideways && inRoom(...swapAxes(qc, pts[i].x, pts[i].y))) swapIn++;
+    }
+    if (sideways && swapIn >= rawIn && swapIn >= xfIn) {
+      for (const p of pts) [p.x, p.y] = swapAxes(qc, p.x, p.y);
+      converted.push(nameOf[sn] || sn);
+    } else if (xfIn > rawIn) {
+      for (const p of pts) [p.x, p.y] = radarToRoom(qc, p.x, p.y);
+      converted.push(nameOf[sn] || sn);
+    }
+  }
+
   {
     for (const r of logs) {
       if (r instanceof Error) {
@@ -507,6 +547,7 @@ function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<Ret
       const a = frames[0].t;
       const b = frames[frames.length - 1].t + 999;
       const ranges = qcBySn[r.sn]?.ranges;
+      // 轨迹点上面已换算成房间坐标，帧也换算后再比
       const tracksOfSn = [...trackMap.values()].filter((tr) => tr.sn === r.sn);
       // 这一段里平台的姿态、事件作废，换成帧里的（跨段边界的姿态段截掉段内部分）
       for (const tr of tracksOfSn)
@@ -516,11 +557,13 @@ function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<Ret
         });
       for (let i = events.length - 1; i >= 0; i--) if (events[i].sn === r.sn && events[i].t >= a && events[i].t <= b) events.splice(i, 1);
       const sorted = tracksOfSn.map((tr) => ({ tr, pts: [...tr.points].sort((p, q) => p.t - q.t) }));
+      const qc = qcBySn[r.sn];
       const owner = (f: Frame) => {
         let best: { tr: (typeof sorted)[number]["tr"]; d: number } | undefined;
+        const [fx, fy] = qc ? radarToRoom(qc, f.x, f.y) : [f.x, f.y];
         for (const { tr, pts } of sorted) {
           for (let i = lowerBound(pts, f.t - FRAME_MATCH_MS, (p) => p.t); i < pts.length && pts[i].t <= f.t + FRAME_MATCH_MS; i++) {
-            const d = Math.hypot(pts[i].x - f.x, pts[i].y - f.y);
+            const d = Math.hypot(pts[i].x - fx, pts[i].y - fy);
             if (!best || d < best.d) best = { tr, d };
           }
         }
@@ -543,33 +586,6 @@ function build({ detail, sns, results, warnings }: BuildInput, logs: Awaited<Ret
       }
       // 段尾和平台一样按"最后一个样本 + 1 秒"算
       for (const s of made) s.e += 999;
-    }
-  }
-
-  // 坐标系：AIO 等设备的历史点已是房间坐标；FallSense 等设备是相对雷达的坐标，需要按安装配置换算。
-  // 每台设备分别试两种解释，落在这台雷达探测范围（布置里的 container，房间坐标）内的点多的那种即为正确的坐标系。
-  // 不能按整个房间算：户型图是整套公寓时，换算后以雷达为轴翻过去的点也还在房间里，会选错
-  // （2026-10-27 SWASTIK ENTERPRISES 的 Bathroom：直接画 1335 个点里 1332 个在房间内、3 个略出左墙，换算后翻到雷达下方的卧室里却 1335 个都在，结果方向反了）。
-  // 布置里没有探测范围尺寸时退回按房间算
-  const bg = detail.background ?? {};
-  const converted: string[] = [];
-  for (const sn of sns) {
-    const qc = qcBySn[sn];
-    const pts = [...trackMap.values()].filter((tr) => tr.sn === sn).flatMap((tr) => tr.points);
-    if (!qc || !pts.length) continue;
-    const c = qc.container;
-    const area = c.width && c.height ? { x0: c.x, y0: c.y, x1: c.x + c.width, y1: c.y + c.height } : { x0: 0, y0: 0, x1: bg.width ?? 0, y1: bg.height ?? 0 };
-    const inRoom = (x: number, y: number) => x >= area.x0 - 30 && y >= area.y0 - 30 && x <= area.x1 + 30 && y <= area.y1 + 30;
-    let rawIn = 0;
-    let xfIn = 0;
-    for (let i = 0; i < pts.length; i += Math.max(1, Math.floor(pts.length / 2000))) {
-      if (inRoom(pts[i].x, pts[i].y)) rawIn++;
-      const [X, Y] = radarToRoom(qc, pts[i].x, pts[i].y);
-      if (inRoom(X, Y)) xfIn++;
-    }
-    if (xfIn > rawIn) {
-      for (const p of pts) [p.x, p.y] = radarToRoom(qc, p.x, p.y);
-      converted.push(nameOf[sn] || sn);
     }
   }
 
@@ -652,6 +668,16 @@ export function radarToRoom(qc: QingLan, x: number, y: number): [number, number]
     else if (dir === 4) [X, Y] = [cx + yr, cy + x];
   }
   return [X, Y];
+}
+
+/**
+ * 顶装朝左 / 朝右的历史点改正：平台算的是 雷达位置 + (x, y)（朝右）或 雷达位置 + (−x, −y)（朝左），少交换了 x、y，
+ * 实时页面的换算是 雷达位置 + (y, x)、雷达位置 + (−y, −x)。所以相对雷达的偏移交换一下就对了（2026-11-02 邻聚万家演示间实测，人被画到墙外、跌倒画到床上）。
+ */
+export function swapAxes(qc: QingLan, x: number, y: number): [number, number] {
+  const cx = (qc.radar?.x ?? 0) + qc.container.x;
+  const cy = (qc.radar?.y ?? 0) + qc.container.y;
+  return [cx + (y - cy), cy + (x - cx)];
 }
 
 export function postureAt(tr: Track, t: number) {
